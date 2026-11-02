@@ -1,0 +1,24 @@
+[package]
+name = "oxabl-cache-e2e"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Black-box test harness: child-process environments and S3 helpers."
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = "warn"
+
+[dependencies]
+anyhow.workspace = true
+nix = { workspace = true, features = ["process", "signal"] }
+reqwest = { workspace = true, features = ["rustls"] }
+rusty-s3.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+tokio-postgres.workspace = true
+url.workspace = true

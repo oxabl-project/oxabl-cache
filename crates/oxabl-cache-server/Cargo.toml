@@ -1,0 +1,20 @@
+[package]
+name = "oxabl-cache-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "The oxabl-cache-server binary: configuration, wiring, serve, migrate, backup, scrub."
+
+[lints]
+workspace = true
+
+[dependencies]
+oxabl-cache-http.workspace = true
+oxabl-cache-meta-sqlite.workspace = true
+oxabl-cache-meta-postgres.workspace = true
+oxabl-cache-store-fs.workspace = true
+oxabl-cache-store-s3.workspace = true
+oxabl-cache-oidc.workspace = true
