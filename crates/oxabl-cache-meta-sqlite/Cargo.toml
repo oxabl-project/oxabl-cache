@@ -13,3 +13,8 @@ workspace = true
 
 [dependencies]
 oxabl-cache-core.workspace = true
+rusqlite = { workspace = true, features = ["bundled"] }
+tokio = { workspace = true, features = ["rt"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

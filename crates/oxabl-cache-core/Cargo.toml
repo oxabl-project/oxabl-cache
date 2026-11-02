@@ -13,3 +13,13 @@ workspace = true
 
 [dependencies]
 oxabl-cache-format.workspace = true
+blake3.workspace = true
+ed25519-dalek.workspace = true
+getrandom.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+
+[dev-dependencies]
+oxabl-cache-meta-sqlite.workspace = true
+oxabl-cache-store-fs.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

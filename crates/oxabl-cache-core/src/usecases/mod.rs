@@ -1,0 +1,61 @@
+//! Use cases, one per file, as methods of [`Engine`](crate::Engine).
+
+mod access_flush;
+mod admission;
+mod audit;
+mod authenticate;
+mod cache_create;
+mod cache_info;
+mod commit_apply;
+mod commit_validate;
+mod credential_text;
+mod dictionary_get;
+mod dictionary_put;
+mod entry_removal;
+mod gc_compaction;
+mod gc_eviction;
+mod gc_mark;
+mod gc_orphans;
+mod gc_retention;
+mod gc_sweep;
+mod lookup;
+mod node_heartbeat;
+mod pack_commit;
+mod pack_verify;
+mod purge;
+mod report;
+mod roster_get;
+mod roster_put;
+mod scoped_cache;
+mod scrub;
+mod segment_death;
+mod session_open;
+mod session_revoke;
+mod signature_check;
+mod tenant_create;
+mod token_create;
+mod token_revoke;
+mod upload_reserve;
+mod urls_refresh;
+mod usage_export;
+mod usage_flush;
+mod usage_rollup;
+mod user_manage;
+
+pub use cache_create::CacheSpec;
+pub use cache_info::{CacheInfo, Limits};
+pub use entry_removal::Removal;
+pub use gc_compaction::CompactionReport;
+pub use gc_mark::MarkReport;
+pub use lookup::{
+    DictionaryLocation, LookupHit, LookupRequest, LookupResponse, NamespaceSet, PackLocator,
+    SegmentLocation,
+};
+pub use pack_commit::CommitRequest;
+pub use pack_verify::VerifyOutcome;
+pub use purge::PurgeScope;
+pub use report::ReportOutcome;
+pub use tenant_create::TenantSpec;
+pub use token_create::{NewCredential, TokenSpec};
+pub use upload_reserve::{PackRequest, UploadOutcome};
+pub use usage_flush::FlushReport;
