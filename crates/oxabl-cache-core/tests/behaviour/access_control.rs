@@ -210,7 +210,7 @@ async fn a_cache_of_another_tenant_is_not_found() {
 #[tokio::test]
 async fn administration_needs_its_own_scopes() {
     let env = Env::new().await;
-    let roster = env.keys.owner_signed_roster(1, 0);
+    let roster = env.keys.owner_signed_roster(1, 1);
     let denied = env
         .engine
         .put_roster(&env.dev, env.cache, 0, roster.clone())

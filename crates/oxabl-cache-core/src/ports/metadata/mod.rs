@@ -1,6 +1,7 @@
 //! The transactional metadata port.
 
 mod accounts;
+mod admin;
 mod entries;
 mod ledger;
 mod packs;
@@ -8,6 +9,7 @@ mod roster;
 mod segments;
 
 pub use accounts::{AccountsTx, User};
+pub use admin::AdminTx;
 pub use entries::{EntriesTx, EvictionScope};
 pub use ledger::LedgerTx;
 pub use packs::{PacksTx, RecordedCommit};
@@ -18,9 +20,15 @@ use crate::error::Result;
 use std::future::Future;
 
 /// Every operation available inside one metadata transaction.
-pub trait MetaTx: AccountsTx + RosterTx + PacksTx + SegmentsTx + EntriesTx + LedgerTx {}
+pub trait MetaTx:
+    AccountsTx + AdminTx + RosterTx + PacksTx + SegmentsTx + EntriesTx + LedgerTx
+{
+}
 
-impl<T> MetaTx for T where T: AccountsTx + RosterTx + PacksTx + SegmentsTx + EntriesTx + LedgerTx {}
+impl<T> MetaTx for T where
+    T: AccountsTx + AdminTx + RosterTx + PacksTx + SegmentsTx + EntriesTx + LedgerTx
+{
+}
 
 /// A metadata database that runs closures as serialisable transactions.
 pub trait MetadataStore: Send + Sync + 'static {

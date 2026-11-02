@@ -1,6 +1,7 @@
 //! The transaction handle and the port implementations on it.
 
 mod accounts;
+mod admin;
 mod entries;
 mod ledger;
 mod packs;

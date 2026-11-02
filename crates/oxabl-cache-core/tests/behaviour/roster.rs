@@ -12,7 +12,7 @@ async fn an_owner_signed_roster_is_accepted_and_readable_by_readers() {
         env.engine.get_roster(&env.reader, env.cache).await.err(),
         Some(Error::NotFound)
     );
-    let roster = env.keys.owner_signed_roster(1, 0);
+    let roster = env.keys.owner_signed_roster(1, 1);
     env.engine
         .put_roster(&env.cache_admin, env.cache, 0, roster.clone())
         .await
@@ -24,7 +24,7 @@ async fn an_owner_signed_roster_is_accepted_and_readable_by_readers() {
         .expect("get");
     assert_eq!(
         (stored.version, stored.epoch, stored.bytes),
-        (1, 0, roster.bytes)
+        (1, 1, roster.bytes)
     );
     assert_eq!(env.info().await.roster_version, 1);
 }
@@ -37,7 +37,7 @@ async fn a_stale_if_match_or_a_skipped_version_or_a_jumped_epoch_is_refused() {
             &env.cache_admin,
             env.cache,
             0,
-            env.keys.owner_signed_roster(1, 0),
+            env.keys.owner_signed_roster(1, 1),
         )
         .await
         .expect("v1");
@@ -48,7 +48,7 @@ async fn a_stale_if_match_or_a_skipped_version_or_a_jumped_epoch_is_refused() {
             &env.cache_admin,
             env.cache,
             0,
-            env.keys.owner_signed_roster(2, 0),
+            env.keys.owner_signed_roster(2, 1),
         )
         .await;
     assert_eq!(stale, Err(Error::PreconditionFailed));
@@ -58,7 +58,7 @@ async fn a_stale_if_match_or_a_skipped_version_or_a_jumped_epoch_is_refused() {
             &env.cache_admin,
             env.cache,
             1,
-            env.keys.owner_signed_roster(3, 0),
+            env.keys.owner_signed_roster(3, 1),
         )
         .await;
     assert!(matches!(skipped, Err(Error::BadRequest(_))));
@@ -68,7 +68,7 @@ async fn a_stale_if_match_or_a_skipped_version_or_a_jumped_epoch_is_refused() {
             &env.cache_admin,
             env.cache,
             1,
-            env.keys.owner_signed_roster(2, 2),
+            env.keys.owner_signed_roster(2, 3),
         )
         .await;
     assert!(
@@ -81,11 +81,11 @@ async fn a_stale_if_match_or_a_skipped_version_or_a_jumped_epoch_is_refused() {
 #[tokio::test]
 async fn a_roster_without_a_valid_owner_signature_is_refused() {
     let env = Env::new().await;
-    let by_ci = env.keys.roster(1, 0, &env.keys.ci);
-    let by_stranger = env.keys.roster(1, 0, &env.keys.stranger);
-    let mut tampered = env.keys.owner_signed_roster(1, 0);
+    let by_ci = env.keys.roster(1, 1, &env.keys.ci);
+    let by_stranger = env.keys.roster(1, 1, &env.keys.stranger);
+    let mut tampered = env.keys.owner_signed_roster(1, 1);
     tampered.signed_message.push(0);
-    let mut unsigned = env.keys.owner_signed_roster(1, 0);
+    let mut unsigned = env.keys.owner_signed_roster(1, 1);
     unsigned.signatures.clear();
     for roster in [by_ci, by_stranger, tampered, unsigned] {
         let refused = env
@@ -94,7 +94,7 @@ async fn a_roster_without_a_valid_owner_signature_is_refused() {
             .await;
         assert!(matches!(refused, Err(Error::BadRequest(_))), "{refused:?}");
     }
-    let mut huge = env.keys.owner_signed_roster(1, 0);
+    let mut huge = env.keys.owner_signed_roster(1, 1);
     huge.bytes = vec![0; 1024 * 1024 + 1];
     assert_eq!(
         env.engine
@@ -113,7 +113,7 @@ async fn a_new_epoch_makes_entries_of_the_old_epoch_invalid() {
             &env.cache_admin,
             env.cache,
             0,
-            env.keys.owner_signed_roster(1, 0),
+            env.keys.owner_signed_roster(1, 1),
         )
         .await
         .expect("v1");
@@ -122,17 +122,50 @@ async fn a_new_epoch_makes_entries_of_the_old_epoch_invalid() {
             &env.cache_admin,
             env.cache,
             1,
-            env.keys.owner_signed_roster(2, 1),
+            env.keys.owner_signed_roster(2, 2),
         )
         .await
         .expect("rotate");
-    assert_eq!(env.info().await.epoch, 1);
+    assert_eq!(env.info().await.epoch, 2);
 
     let built = env.artifacts(&[1, 2], 2048);
+    let mut old = entry(1, 0);
+    old.epoch = 1;
     let mut current = entry(2, 1);
-    current.epoch = 1;
+    current.epoch = 2;
     let (_, statuses) = env
-        .publish(&env.ci, Trusted, &built, vec![entry(1, 0), current])
+        .publish(&env.ci, Trusted, &built, vec![old, current])
         .await;
     assert_eq!(statuses, vec![Invalid, Committed]);
+}
+
+#[tokio::test]
+async fn the_first_roster_is_version_one_with_epoch_one() {
+    let env = Env::new().await;
+    for epoch in [0, 2] {
+        let refused = env
+            .engine
+            .put_roster(
+                &env.cache_admin,
+                env.cache,
+                0,
+                env.keys.owner_signed_roster(1, epoch),
+            )
+            .await;
+        assert!(
+            matches!(refused, Err(Error::BadRequest(_))),
+            "epoch {epoch}: {refused:?}"
+        );
+    }
+    assert_eq!(env.info().await.roster_version, 0, "nothing changed");
+    env.engine
+        .put_roster(
+            &env.cache_admin,
+            env.cache,
+            0,
+            env.keys.owner_signed_roster(1, 1),
+        )
+        .await
+        .expect("version 1 with epoch 1");
+    assert_eq!(env.info().await.epoch, 1);
 }

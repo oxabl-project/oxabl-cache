@@ -128,6 +128,21 @@ impl PacksTx for SqliteTx<'_> {
     }
 
     fn pack_totals(&self, cache: &CacheId) -> Result<PackTotals> {
+        let reclaimable: u64 = self
+            .conn
+            .prepare_cached(
+                "SELECT
+                   (SELECT COALESCE(SUM(size), 0) FROM packs
+                     WHERE cache_id = ?1 AND (state = 2 OR (state = 1 AND dead_since IS NOT NULL)))
+                 + (SELECT COALESCE(SUM(s.byte_length), 0)
+                      FROM segments s
+                      JOIN packs p ON p.cache_id = s.cache_id AND p.pack_id = s.pack_id
+                     WHERE p.cache_id = ?1 AND p.state = 1 AND p.dead_since IS NULL
+                       AND s.dead_since IS NOT NULL)",
+            )
+            .db()?
+            .query_row([cache.as_bytes().as_slice()], |row| row.unsigned(0))
+            .db()?;
         self.conn
             .prepare_cached(
                 "SELECT COALESCE(SUM(size), 0),
@@ -141,6 +156,7 @@ impl PacksTx for SqliteTx<'_> {
                     stored_bytes: row.unsigned(0)?,
                     pending_bytes: row.unsigned(1)?,
                     live_bytes: row.unsigned(2)?,
+                    reclaimable_bytes: reclaimable,
                 })
             })
             .db()

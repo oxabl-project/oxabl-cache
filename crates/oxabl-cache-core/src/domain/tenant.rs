@@ -31,3 +31,16 @@ pub struct Tenant {
     /// Creation time, unix seconds.
     pub created_at: i64,
 }
+
+/// The limits an operator can change on a live tenant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TenantLimits {
+    /// Hard limit on live plus pending bytes across the tenant's caches.
+    pub hard_bytes: Option<u64>,
+    /// Monthly egress limit.
+    pub egress_bytes: Option<u64>,
+    /// Requests per second on API routes.
+    pub rate: u32,
+    /// Burst size of the request rate.
+    pub burst: u32,
+}

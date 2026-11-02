@@ -28,7 +28,8 @@ where
     A: PackAssembler,
     C: Clock,
 {
-    /// Creates a cache in the caller's tenant. Needs `tenant:admin`.
+    /// Creates a cache in the caller's tenant. Needs `tenant:admin`. A display name
+    /// is unique within the tenant: a second cache of that name is `Conflict(Exists)`.
     pub async fn create_cache(&self, caller: &Caller, spec: CacheSpec) -> Result<CacheId> {
         caller.require_tenant_admin()?;
         if spec.owner_keys.is_empty() || spec.display_name.is_empty() {
@@ -52,6 +53,13 @@ where
         let keys = spec.owner_keys;
         self.meta
             .transact(move |tx| {
+                if tx
+                    .caches_of(&cache.tenant)?
+                    .iter()
+                    .any(|existing| existing.display_name == cache.display_name)
+                {
+                    return Err(Error::Conflict(Conflict::Exists));
+                }
                 if !tx.insert_cache(&cache)? {
                     return Err(Error::Conflict(Conflict::Exists));
                 }

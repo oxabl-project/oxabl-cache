@@ -25,8 +25,8 @@ async fn a_pack_whose_entries_all_lost_is_dead_at_birth_and_swept_after_the_grac
     );
     assert_eq!(
         env.info().await.quota.reclaimable_bytes,
-        loser_size + winner_size - 4096,
-        "everything stored beyond live bytes is reclaimable, framing included"
+        loser_size,
+        "a pack in grace is reclaimable whole; the live pack's framing is not"
     );
 
     assert_eq!(

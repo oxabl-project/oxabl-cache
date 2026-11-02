@@ -61,10 +61,6 @@ where
                 Ok((found, dictionary_version, totals))
             })
             .await?;
-        let reclaimable = totals
-            .stored_bytes
-            .saturating_sub(found.live_bytes)
-            .saturating_sub(found.pending_bytes);
         Ok(CacheInfo {
             id: found.id,
             display_name: found.display_name,
@@ -82,7 +78,7 @@ where
                 live_bytes: found.live_bytes,
                 pending_bytes: found.pending_bytes,
                 stored_bytes: totals.stored_bytes,
-                reclaimable_bytes: reclaimable,
+                reclaimable_bytes: totals.reclaimable_bytes,
             },
         })
     }

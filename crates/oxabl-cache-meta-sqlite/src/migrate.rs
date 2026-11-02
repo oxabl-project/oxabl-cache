@@ -5,7 +5,10 @@ use oxabl_cache_core::{Error, Result};
 use rusqlite::Connection;
 
 /// Migrations in order; a version is never edited once released.
-const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("../schema/0001_init.sql"))];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("../schema/0001_init.sql")),
+    (2, include_str!("../schema/0002_operator_tokens.sql")),
+];
 
 /// Applies every migration newer than the database. A database written by a
 /// newer release is refused rather than opened.

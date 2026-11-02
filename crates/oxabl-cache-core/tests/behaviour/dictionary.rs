@@ -17,7 +17,7 @@ async fn with_roster() -> Env {
             &env.cache_admin,
             env.cache,
             0,
-            env.keys.owner_signed_roster(1, 0),
+            env.keys.owner_signed_roster(1, 1),
         )
         .await
         .expect("roster");
@@ -36,7 +36,7 @@ async fn a_dictionary_stays_alive_while_the_pointer_names_it() {
     let env = with_roster().await;
     let (pack, id) = publish_dictionary(&env, 500).await;
     env.engine
-        .put_dictionary(&env.ci, env.cache, 0, env.keys.ci_pointer(1, 0, id))
+        .put_dictionary(&env.ci, env.cache, 0, env.keys.ci_pointer(1, 1, id))
         .await
         .expect("pointer");
     let stored = env
@@ -60,10 +60,11 @@ async fn a_dictionary_stays_alive_while_the_pointer_names_it() {
 
     let built = env.artifacts(&[1], 2048);
     let mut named = entry(1, 0);
+    named.epoch = 1;
     named.dict_id = Some(id);
     env.publish(&env.ci, Trusted, &built, vec![named]).await;
     env.engine
-        .purge(&env.cache_admin, env.cache, PurgeScope::BelowEpoch(1))
+        .purge(&env.cache_admin, env.cache, PurgeScope::BelowEpoch(2))
         .await
         .expect("purge");
     assert_eq!(
@@ -79,19 +80,20 @@ async fn a_dictionary_named_by_an_entry_survives_the_pointer_moving_and_dies_wit
     let env = with_roster().await;
     let (old_pack, old) = publish_dictionary(&env, 500).await;
     env.engine
-        .put_dictionary(&env.ci, env.cache, 0, env.keys.ci_pointer(1, 0, old))
+        .put_dictionary(&env.ci, env.cache, 0, env.keys.ci_pointer(1, 1, old))
         .await
         .expect("pointer");
 
     let built = env.artifacts(&[1], 2048);
     let mut named = entry(1, 0);
+    named.epoch = 1;
     named.dict_id = Some(old);
     let (_, statuses) = env.publish(&env.ci, Trusted, &built, vec![named]).await;
     assert_eq!(statuses, vec![Committed]);
 
     let (new_pack, new) = publish_dictionary(&env, 501).await;
     env.engine
-        .put_dictionary(&env.ci, env.cache, 1, env.keys.ci_pointer(2, 0, new))
+        .put_dictionary(&env.ci, env.cache, 1, env.keys.ci_pointer(2, 1, new))
         .await
         .expect("move");
     env.clock.advance(3 * DAY);
@@ -112,7 +114,7 @@ async fn a_dictionary_named_by_an_entry_survives_the_pointer_moving_and_dies_wit
     assert_eq!(dictionaries[0].id, old);
 
     env.engine
-        .purge(&env.cache_admin, env.cache, PurgeScope::BelowEpoch(1))
+        .purge(&env.cache_admin, env.cache, PurgeScope::BelowEpoch(2))
         .await
         .expect("purge");
     env.assert_consistent().await;
@@ -169,8 +171,9 @@ async fn the_pointer_needs_write_trusted_a_live_dictionary_a_ci_or_owner_signatu
     let env = with_roster().await;
     let (_, dictionary) = publish_dictionary(&env, 500).await;
     let artifact = env.artifacts(&[1], 2048);
-    env.publish(&env.ci, Trusted, &artifact, vec![entry(1, 0)])
-        .await;
+    let mut named = entry(1, 0);
+    named.epoch = 1;
+    env.publish(&env.ci, Trusted, &artifact, vec![named]).await;
 
     let denied = env
         .engine
@@ -178,7 +181,7 @@ async fn the_pointer_needs_write_trusted_a_live_dictionary_a_ci_or_owner_signatu
             &env.dev,
             env.cache,
             0,
-            env.keys.ci_pointer(1, 0, dictionary),
+            env.keys.ci_pointer(1, 1, dictionary),
         )
         .await;
     assert!(matches!(denied, Err(Error::Forbidden(_))));
@@ -198,7 +201,7 @@ async fn the_pointer_needs_write_trusted_a_live_dictionary_a_ci_or_owner_signatu
             &env.ci,
             env.cache,
             0,
-            env.keys.ci_pointer(1, 0, artifact.segments[0].id),
+            env.keys.ci_pointer(1, 1, artifact.segments[0].id),
         )
         .await;
     assert!(
@@ -211,7 +214,7 @@ async fn the_pointer_needs_write_trusted_a_live_dictionary_a_ci_or_owner_signatu
             &env.ci,
             env.cache,
             0,
-            env.keys.ci_pointer(1, 0, SegmentId::of_bytes(b"x")),
+            env.keys.ci_pointer(1, 1, SegmentId::of_bytes(b"x")),
         )
         .await;
     assert!(matches!(unknown, Err(Error::BadRequest(_))));
@@ -222,17 +225,17 @@ async fn the_pointer_needs_write_trusted_a_live_dictionary_a_ci_or_owner_signatu
     assert!(matches!(wrong_epoch, Err(Error::BadRequest(_))));
     let skipped = env
         .engine
-        .put_dictionary(&env.ci, env.cache, 0, env.keys.ci_pointer(2, 0, dictionary))
+        .put_dictionary(&env.ci, env.cache, 0, env.keys.ci_pointer(2, 1, dictionary))
         .await;
     assert!(matches!(skipped, Err(Error::BadRequest(_))));
 
     env.engine
-        .put_dictionary(&env.ci, env.cache, 0, env.keys.ci_pointer(1, 0, dictionary))
+        .put_dictionary(&env.ci, env.cache, 0, env.keys.ci_pointer(1, 1, dictionary))
         .await
         .expect("valid");
     let stale = env
         .engine
-        .put_dictionary(&env.ci, env.cache, 0, env.keys.ci_pointer(1, 0, dictionary))
+        .put_dictionary(&env.ci, env.cache, 0, env.keys.ci_pointer(1, 1, dictionary))
         .await;
     assert_eq!(stale, Err(Error::PreconditionFailed));
 }

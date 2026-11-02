@@ -6,6 +6,7 @@ use crate::ids::CredentialId;
 use sha2::{Digest, Sha256};
 
 const SECRET_BYTES: usize = 32;
+const OPERATOR_PREFIX: &str = "oxo_";
 
 /// A credential split into its parts.
 pub(crate) struct ParsedCredential {
@@ -39,6 +40,30 @@ pub(crate) fn parse(text: &str) -> Option<ParsedCredential> {
     let (id, secret) = rest.split_once('_')?;
     Some(ParsedCredential {
         kind,
+        id: id.parse().ok()?,
+        secret: base32_decode(secret)?,
+    })
+}
+
+/// An operator credential split into its parts.
+pub(crate) struct ParsedOperator {
+    pub id: CredentialId,
+    pub secret: [u8; SECRET_BYTES],
+}
+
+/// A fresh operator id and secret, and the text that is shown once.
+pub(crate) fn generate_operator() -> (CredentialId, [u8; SECRET_BYTES], String) {
+    let id = CredentialId::random();
+    let mut secret = [0u8; SECRET_BYTES];
+    getrandom::fill(&mut secret).expect("the operating system provides randomness");
+    let text = format!("{OPERATOR_PREFIX}{id}_{}", base32_encode(&secret));
+    (id, secret, text)
+}
+
+/// Splits operator credential text; anything not in canonical form is `None`.
+pub(crate) fn parse_operator(text: &str) -> Option<ParsedOperator> {
+    let (id, secret) = text.strip_prefix(OPERATOR_PREFIX)?.split_once('_')?;
+    Some(ParsedOperator {
         id: id.parse().ok()?,
         secret: base32_decode(secret)?,
     })

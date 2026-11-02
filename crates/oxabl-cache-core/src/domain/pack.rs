@@ -56,4 +56,6 @@ pub struct PackTotals {
     pub pending_bytes: u64,
     /// Live bytes of all packs.
     pub live_bytes: u64,
+    /// Dead segment bytes inside live packs plus every byte of packs in grace.
+    pub reclaimable_bytes: u64,
 }
