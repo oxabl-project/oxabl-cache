@@ -1,0 +1,265 @@
+# Security
+
+Customers treat their ABL source as their most valuable IP. r-code embeds source
+paths and string literals; XREF output describes program structure; a debug list
+holds the full source text. The cache stores all of these, so it is designed so that
+the operator, the server, the storage provider and anyone who steals their data
+learn nothing beyond sizes and timing. The client also does not trust the server for
+integrity. ADRs: [0004](adr/0004-crypto-scheme.md), [0005](adr/0005-trust-tiers.md).
+
+## Actors and trust
+
+| Actor | Trusted for |
+| --- | --- |
+| Cache owner (customer) | Everything: holds the owner signing key, manages the roster. |
+| CI producer (protected-branch jobs) | Writing the trusted namespace: holds a `ci` signing key. |
+| Developer | Reading trusted entries; writing their own personal namespace. |
+| Reader (PR jobs, read-only tools) | Reading only. |
+| Server, operator, storage provider | **Availability only.** Neither confidentiality nor integrity. |
+| Network attacker, other tenants, departed members | Nothing. |
+
+The root of trust is the customer's repository. `.oxabl/cache.toml` is committed
+there and pins the cache's owner public keys and minimum roster version. Whoever can
+change that file can already change what the build compiles, so no weaker root
+exists.
+
+## What the server and storage see
+
+| Item | Visible to server and storage | Form |
+| --- | --- | --- |
+| Source, paths, file names, compile inputs, branch names | **No** | never sent; paths exist only inside sealed records |
+| r-code, XREF, debug lists | **No** | AES-256-GCM ciphertext inside segments |
+| Compile key | **No** | only the keyed lookup id, a PRF output |
+| Lookup id | yes | 32 pseudorandom bytes, stable for the life of an epoch |
+| Entry record | size only | sealed, padded to a 256-byte multiple |
+| Segment | id, padded length, pack location | id = BLAKE3 of ciphertext; length Padmé-padded |
+| Pack grouping | yes | shows which entries one upload produced together |
+| Dictionary | that one exists, its id and size | sealed segment |
+| Roster | version, member labels, roles, public keys | signed; the keyring inside is age-encrypted |
+| Epoch number | yes | integer |
+| Tenant, cache display name, user emails, token names | yes | operator-visible account data; customers choose cache names |
+| OIDC claims (repository, ref) | transiently, in memory, during exchange | never persisted or logged; trust policies store keyed hashes of the expected values |
+| Times, counts, access pattern | yes | when entries are written and read, how many, by whom |
+
+**A full leak of buckets plus database** gives: ciphertext, entry counts per cache
+(about the number of compile units), Padmé size classes of each artifact set, which
+entries were uploaded together, access days, and account data. It gives no source,
+paths, names or r-code, and no way to test a guess about a file, because lookup ids
+need the customer's key.
+
+**Size padding.** Each segment's plaintext is padded to its Padmé length, which
+leaks O(log log L) bits of the size. On 100,000 synthetic sizes, log-uniform between
+4 KB and 1.4 MB, Padmé cost **1.2%** extra bytes and reduced 78,408 distinct sizes to
+204 classes. Rounding up to a power of two would cost 47% and is rejected, because
+bandwidth is the product's cost driver. Hiding the entry count with dummy entries is
+also rejected: it would cost real storage and bandwidth to hide a number (the count
+of compile units) that is no secret.
+
+## Key hierarchy
+
+```
+CRK_e  cache root key, 32 random bytes, one per epoch e (only members hold it)
+ ├─ lookup_key  = BLAKE3.derive_key("oxabl-cache v1 lookup",  CRK_e)
+ ├─ segment_key = BLAKE3.derive_key("oxabl-cache v1 segment", CRK_e)
+ └─ record_key  = BLAKE3.derive_key("oxabl-cache v1 record",  CRK_e)
+
+per object, with salt = 32 random bytes from the OS CSPRNG:
+   K_enc    = BLAKE3.derive_key("oxabl-cache v1 enc",    sub_key ‖ salt)
+   K_commit = BLAKE3.derive_key("oxabl-cache v1 commit", sub_key ‖ salt)
+```
+
+**Member identities.** Each member has one identity: an X25519 secret (an age
+identity) to receive the root key, and an Ed25519 secret to sign entries. The public
+halves are listed in the roster. An identity is a single Bech32 string
+(`OXABL-CACHE-IDENTITY-1…`).
+
+**Roster.** A versioned document listing members (`name`, `role` of `owner`, `ci`,
+`developer` or `reader`, signing keys, age recipients), the current epoch, the cache
+id, and the keyring: `CRK_e` encrypted with age to every member's recipient. One of
+the pinned owner keys signs it. The server stores the roster and accepts a new
+version only as `current + 1` from `cache:admin`. It cannot read the keyring or
+forge a roster.
+
+**Distribution.**
+
+- CI: the identity is a CI secret (`OXABL_CACHE_IDENTITY`). A `ci` identity is only
+  exposed to protected-branch jobs, through environment-scoped secrets. Pull-request
+  jobs get a `reader` identity or none. Fork pull requests receive no secrets on the
+  supported CI systems and run without the cache.
+- Developer: `oxabl-cache identity new` writes the identity to
+  `~/.config/oxabl-cache/identity`. It is protected by a passphrase (age's scrypt
+  recipient, work factor 2^18, about 1 s to unlock once per session) or held by an
+  age plugin (YubiKey, TPM, Secure Enclave). The developer sends the public part to
+  an owner, who runs `oxabl-cache member add`.
+- An OIDC-bound unwrap is rejected. It needs a service that holds key material and
+  releases it for an OIDC token; if the operator runs that service, the operator can
+  unwrap, which breaks zero-knowledge. Customers who want key release tied to their
+  own KMS get it through an age plugin recipient, with no protocol change.
+- Argon2id is not used: age has no Argon2id stanza, and a standard, audited format
+  is worth more than the choice of KDF. Argon2id at m = 256 MiB, t = 3, p = 4 took
+  1.08 s on this machine, about the same unlock cost as scrypt at 2^18.
+
+**Rotation and revocation.**
+
+| Event | Action | Cost |
+| --- | --- | --- |
+| Add a member | Same epoch; roster `v+1` with `CRK_e` re-wrapped to the new recipient set. | none |
+| Remove a member (departed developer) | Disable their server principal (tokens and sessions die at once). Start a new epoch: fresh `CRK_{e+1}`, wrapped to the remaining members. Bump `min_roster_version` in the repository. Optionally `purge` epochs below `e+1`. | Cold cache: the next CI full build uploads ~0.9 GB in ~10 s on top of its compile, and each developer does one cold fetch (~9 s). |
+| CI key compromise | As removal, plus a new `ci` signing key. Clients reject entries signed by a key that is not in the current roster, whatever their epoch. | as above |
+| Owner key compromise | Change `owner_keys` in `.oxabl/cache.toml` (a repository commit), then sign a new roster and rotate. | as above |
+
+A removed member who kept `CRK_e` can read epoch-`e` ciphertext only by also
+stealing the bucket. Purging old epochs closes that window. They never see a later
+epoch.
+
+## Lookup ids
+
+`lookup_id = BLAKE3.keyed_hash(lookup_key, compile_key)`, 32 bytes. Because
+`lookup_key` never leaves members, the server cannot compute the lookup id of a
+guessed source and test for its presence (a confirmation attack). The same id is used
+in every namespace. Rotation changes all ids, which is what makes a rotation cold.
+
+## Encryption
+
+- **AEAD: AES-256-GCM** (aws-lc-rs) with single-use keys. Every segment and record
+  has its own salt, so `K_enc` is used for one object only. Nonces can then be
+  deterministic counters with no reuse risk and no 2^32-message limit. On this machine
+  aws-lc-rs AES-256-GCM runs at 5.1 GB/s per core against 1.7 GB/s for
+  ChaCha20-Poly1305, and every supported build host (x86-64 with AES-NI, ARMv8 with
+  AES) accelerates AES. XChaCha20-Poly1305 with random nonces is rejected as a
+  third the speed with no added safety once keys are single-use.
+- **Key commitment.** The header carries `K_commit`, and the opener compares it in
+  constant time before decrypting. GCM alone is not key-committing; this stops a
+  ciphertext crafted to open under two keys (two epochs, two members) from yielding
+  two plaintexts.
+- **Segments** use a STREAM construction with 64 KiB chunks. The nonce is a 88-bit
+  big-endian chunk counter followed by a last-chunk flag byte, and the associated
+  data of each chunk is `BLAKE3(segment header)`. Truncation, reordering and header
+  swaps fail authentication.
+- **Records** are one AEAD message. Their associated data is
+  `"oxabl-cache v1 record" ‖ cache_id ‖ epoch ‖ ns_kind ‖ lookup_id`, so a record
+  moved to another key, cache, epoch or namespace kind fails to open.
+- **No convergent encryption.** r-code is not byte-deterministic, so equal artifacts
+  under different keys almost never happen, and the same key is already deduplicated
+  by first write wins. Convergent encryption would buy nothing and would reveal
+  equality to the server.
+
+## Compression before encryption
+
+The plaintext of a segment is `zstd(level 3 by default, optional per-cache
+dictionary)` over the concatenated files, then Padmé padding. Compression-oracle
+attacks (CRIME and BREACH) need an attacker who injects chosen plaintext into the
+victim's compression context and watches sizes over many trials. The server cannot
+inject anything. Members who can write already hold the key. The dictionary is
+trained only from the cache's own trusted artifacts and is itself sealed. What
+remains is the compressed size, which padding coarsens. Accepted.
+
+## Integrity without trusting the server
+
+The plaintext of each record holds: segment id, segment length, dictionary id,
+plaintext length, per-file root-relative path, size and `BLAKE3`, the producer's
+signing key, the roster version at signing time, and a creation time. All of it is
+signed with Ed25519 over a domain-separated transcript that also covers `cache_id`,
+`epoch`, `ns_kind` and `lookup_id`. The signature sits inside the ciphertext.
+
+**Trust tiers.**
+
+- `trusted` namespace: a client accepts a record only if its signer is a key of a
+  member whose role is `ci` in the current roster.
+- `personal` namespace: a client accepts a record only if its signer is a key of the
+  reading member themselves.
+- The server enforces the same split with scopes: a developer's token cannot write
+  `trusted`, and nobody can write another user's `personal`. To poison what CI or
+  another developer reads, an attacker must therefore defeat both the server's scope
+  check and a signature check, with a `ci` key that developer machines never hold.
+
+**Malicious pull requests** run code inside CI. They never hold a `ci` key or
+`write:trusted`, so they cannot write. A `reader` identity lets them decrypt cached
+artifacts, but the job has already checked out the source those artifacts came from,
+so nothing new leaks.
+
+**Replay and rollback.**
+
+- A record opens only for its own cache, epoch, namespace kind and lookup id.
+  Replaying an older valid record for the same key yields an older valid output of
+  the same inputs, which is correct by definition: a compile key maps to "any valid
+  output of these inputs".
+- A record signed by a key that the current roster no longer lists is rejected.
+- Roster rollback: the client requires `roster.version ≥ max(min_roster_version,
+  local high-water mark)`. CI runners without state rely on `min_roster_version`.
+- A server that withholds a newer roster can keep clients on an old epoch only until
+  the repository bumps `min_roster_version`. From then on the client refuses the old
+  roster and disables the cache (fail closed).
+
+**What a malicious server can still do:** refuse service, delay, drop entries
+(misses), serve older valid entries for the same key, withhold a roster (bounded as
+above), and observe the metadata listed earlier. It cannot read, forge, alter, mix
+tiers, or make a client install a wrong or partial file.
+
+**Out of scope:** compile-key correctness. oxabl must hash every input that affects
+the output. A wrong key yields a correctly signed but semantically wrong hit, and no
+cache design can detect that.
+
+## Transport and authentication
+
+- **TLS 1.3 only** (rustls), HSTS on the hosted service. Self-hosted clients may pin
+  a CA bundle in config.
+- **Tokens:** `oxc_<id>_<secret>` with a 256-bit secret, shown once and stored as
+  `SHA-256(secret)` (enough for a high-entropy secret; no password hash needed),
+  compared in constant time. Each token carries scopes, a cache list and an expiry
+  (default 90 days, maximum 1 year).
+- **OIDC workload identity** (GitHub Actions, GitLab CI, Gitea Actions): the job
+  exchanges its ID token at `POST /v1/auth/oidc` for an opaque session token valid
+  for 1 hour. The server checks:
+  - the issuer against the tenant's allowlist, and the signature with JWKS fetched
+    over TLS (cached at most 1 h, refetched once on an unknown `kid`);
+  - the algorithm: RS256, ES256 or EdDSA (never `none` or HMAC);
+  - `aud` equals the tenant's configured audience;
+  - `exp`, `nbf` and `iat` within 60 s of skew;
+  - the claim conditions of a trust policy, exact matches on claims such as
+    `repository`, `ref` or `environment`, stored as keyed hashes.
+
+  Policies grant scopes, for example `write:trusted` only to `environment =
+  cache-writer`.
+- **Humans:** `oxabl-cache login` runs the OAuth device authorization grant
+  (RFC 8628) against the tenant's IdP (or the hosted service's IdP) and exchanges the
+  ID token at the same endpoint for a 12-hour session.
+- **Sessions** are random, stored hashed, revocable at once, and listed per user.
+- **Presigned URLs** are bearer capabilities for one pack for 15 minutes; a leaked
+  URL yields ciphertext only.
+- **Why authentication is separate from encryption:** the server needs identities to
+  enforce scopes, quotas and usage, and it must never hold key material. Splitting
+  them means a stolen token yields only ciphertext and denial of service, and a
+  stolen identity without a token yields nothing unless the bucket also leaks. The
+  operator runs billing and abuse controls without keys.
+- **Logging:** tokens, JWTs, OIDC claims, signed URL query strings and lookup ids are
+  never logged. Logs carry request ids, tenant and cache ids, counts, sizes, statuses
+  and durations.
+
+## Performance cost
+
+Measured single-core on this machine (Intel Xeon Platinum 8462Y+, Rust 1.99, release
+build, `target-cpu=native`):
+
+| Operation | Rate |
+| --- | --- |
+| AES-256-GCM, aws-lc-rs | 5,144 MB/s |
+| ChaCha20-Poly1305, aws-lc-rs / RustCrypto | 1,689 / 1,109 MB/s |
+| AES-256-GCM, RustCrypto | 1,347 MB/s |
+| BLAKE3 | 3,842 MB/s |
+| SHA-256 (SHA-NI) | 1,325 MB/s |
+| Ed25519 sign / verify | 17.3 µs / 34.4 µs |
+| Lookup-id derivation (keyed BLAKE3 of 32 bytes) | 0.08 µs |
+| zstd-3 compress / decompress (synthetic data) | 196 / 989 MB/s |
+
+Per scenario (0.93 GB sealed, 4.3 GB plain, 10,000 sets):
+
+| Scenario | Security CPU | Wall-clock effect at 1 Gbit/s |
+| --- | --- | --- |
+| Cold fetch | Segment ids 0.24 s, AES 0.18 s, file hashes 1.12 s, signatures 0.34 s: ~1.9 core-s, ~0.25 s on 8 cores, overlapped with ~8 s of transfer | +1.2% bytes from padding (~0.1 s), ~2 to 3% in total |
+| CI upload | AES 0.18 s, ids 0.24 s, file hashes 1.12 s, signing 0.17 s: ~1.7 core-s, next to 11 to 22 core-s of zstd | < 2% |
+| Lookup of 20,000 keys | ids 1.6 ms; record verification (fetch mode only) 0.7 core-s, ~90 ms on 8 cores | ~0 in presence mode |
+
+The whole security stack costs under 5% of wall-clock time, because every flow is
+bound by bandwidth or round trips. No weaker design can reach the owner's 2x
+threshold.

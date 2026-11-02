@@ -1,0 +1,27 @@
+# 0006: Mark and sweep with leases, grace and compaction
+
+Status: accepted
+
+## Decision
+
+- Entries are deleted by retention (30 idle days by default), quota eviction or an
+  epoch purge. Bytes are never deleted in the same step.
+- Packs are `pending` (1-hour lease), `live` or `deleting`. A commit only names
+  the caller's own pack and flips it to `live` under a row lock.
+- A pack is deleted only after it has had no live segment for a 24-hour grace, which
+  exceeds the 15-minute URL lifetime by far, or when its lease expired while still
+  pending.
+- Packs under 50% live are compacted by copying verified segments to a new pack and
+  moving locations in one transaction. Records never change.
+- A weekly orphan scan removes objects without rows.
+- Quotas count pending, live and in-grace bytes.
+
+## Rejected
+
+- Reference counting on bytes: any lost decrement leaks and any extra one deletes live
+  data.
+- Synchronous deletion: an in-flight reader could lose its bytes mid-fetch.
+
+## Consequences
+
+Storage lags deletions by the grace period. GC runs on one elected node.

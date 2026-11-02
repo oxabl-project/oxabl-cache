@@ -1,0 +1,347 @@
+# Architecture
+
+oxabl-cache is a remote compile cache for oxabl. A client library inside oxabl turns
+compile keys into opaque lookup ids, seals artifact sets, and moves sealed bytes
+between the build machine and an object store. A server authenticates callers, keeps
+the index of sealed entries, enforces quotas and retention, and signs short-lived
+object URLs. The server never holds a key that opens anything it stores.
+
+Companion documents: [security.md](security.md) (threat model, cryptography),
+[protocol.md](protocol.md) (HTTP API and byte formats), [client.md](client.md)
+(client library), [operations.md](operations.md), [testing.md](testing.md), the
+decision records in [adr/](adr/), and the cost model in
+[hosting/provider-analysis.md](hosting/provider-analysis.md).
+
+## Requirements map
+
+| Requirement | Design element |
+| --- | --- |
+| Rust; small, single-purpose files; brief doc comments only | Crate layout below. Each crate has one responsibility, and modules are named for what they hold. |
+| Black-box tests only, fuzzing welcome | testing.md: a harness over binaries, HTTP and the public client API; adversarial suite; fuzz targets |
+| Zero-knowledge storage | security.md: client-side sealing, keyed lookup ids, Padmé padding, a field-by-field visibility table |
+| Zero-trust integrity | security.md: signed records, trust tiers, roster pinned in the customer's repository |
+| Corruption impossible | "Write and read paths", "Corruption-proofing summary" |
+| No vendor lock-in | Portable S3 subset and local disk behind one port; provider extras in separate crates |
+| Simple scaling | Stateless API nodes; SQLite to Postgres migration command |
+| Performance and value | Packs on R2 with presigned URLs (ADR 0002); "Performance budget" |
+| Tenants, caches, tokens, OIDC, quotas, usage | Domain model; protocol.md authentication and administration; operations.md usage ledger |
+| One cache per codebase, content-addressed, shared across branches | Entries keyed by lookup id, independent of branch; no manifests (ADR 0007) |
+| r-code is not deterministic | First write wins; trust comes from signatures, not reproducibility (ADR 0005) |
+| Embedded source paths | Compile keys and relative-path compiles are oxabl's responsibility; the cache stores any valid output and verifies who produced it |
+
+## Style: hexagonal core, small domain, one append-only ledger
+
+The server is a hexagonal (ports and adapters) service: one core crate holds the
+domain types, the use cases and the port traits; every piece of I/O (HTTP, SQL, disk,
+S3, OIDC) is an adapter crate that depends on the core, never the reverse.
+
+- **Why hexagonal.** The product runs on two metadata stores (SQLite, Postgres) and
+  two byte stores (local disk, S3-compatible) with identical behaviour. Ports make
+  that a property of the build: the core cannot name an adapter, and one black-box
+  suite runs against every adapter combination.
+- **Why a small domain, not full DDD.** The domain has few invariants (first write
+  wins, nothing live is deleted, quotas, scopes). Aggregates are plain structs with
+  the methods that guard those invariants; no domain events, factories or
+  specification objects.
+- **Why not event sourcing.** Entries are immutable inserts and the only mutable
+  state is retention bookkeeping. Event sourcing would add projections, replay and
+  snapshots for no invariant it protects. The one append-only piece is the usage
+  ledger, because billing needs idempotent, auditable sums.
+- **Why not a plain layered service.** Layers let SQL and S3 details leak upward;
+  with four adapters that is where divergence bugs would live.
+
+ADR: [0001](adr/0001-hexagonal-core.md).
+
+## Domain model
+
+| Concept | Meaning | Server can read |
+| --- | --- | --- |
+| Tenant | A customer account: status, quotas, users, OIDC trust policies. | yes |
+| Cache | One per codebase. Random id (`c_` + 26 base32 chars), display name, retention, quota, roster version, dictionary pointer. | yes |
+| Principal | Who calls: a **user** (human OIDC identity), a **workload** (CI OIDC trust policy) or the owner of a **token**. | yes |
+| Grant | Principal × cache × scopes (`read`, `write:personal`, `write:trusted`, `cache:admin`); tenant-wide `tenant:admin`. | yes |
+| Namespace | Where an entry lives: `trusted` (CI) or `personal(user)` (one per developer). | yes |
+| Entry | `(cache, namespace, lookup_id) → sealed record`, plus the ids of the segment and dictionary it names, its epoch and sizes. Immutable once committed. | ids and sizes |
+| Segment | One sealed, compressed artifact set (or a compression dictionary), named by the BLAKE3 hash of its sealed bytes. Lives at `(pack, offset, length)`. | id, size, location |
+| Pack | An immutable object of 5 to 32 MiB holding segments back to back, with a plaintext footer index of segment ids and offsets. State `pending`, `live` or `deleting`. | id, size, live bytes |
+| Roster | Signed, versioned list of the cache's members and their public keys, plus the cache root key wrapped to those members. Opaque to the server except its version. | version |
+| Epoch | Generation of the cache root key. Rotation starts a new epoch, and lookup ids change with it. | number |
+| Usage | Append-only ledger rows: tenant, cache, day, metric, value. | yes |
+| Quota | Per tenant and per cache: stored bytes (soft and hard), monthly egress bytes, request rate. | yes |
+
+Invariants the core enforces:
+
+1. An entry is inserted at most once per `(cache, namespace, lookup_id)`. The first
+   commit wins; later commits are told `exists`. The database arbitrates this; the
+   object store is never asked for conditional writes.
+2. Entries are committed only into a pack the same principal uploaded, still
+   `pending` or `live` and verified present at its declared size. The pack flips to
+   `live` in the same transaction.
+3. A pack is deleted only when no entry names any of its segments and it has been
+   dead for the grace period, or it is `pending` with an expired lease.
+4. Writes into `trusted` need `write:trusted`; writes into `personal(u)` need
+   `write:personal` and the caller to be `u`. A pack never mixes namespaces. Reads see
+   `trusted` and the caller's own `personal` namespace only.
+5. Every query carries a tenant scope; a cache id from another tenant is "not found".
+
+## Crate layout
+
+```
+crates/
+  oxcache-format        byte formats: magic, versions, encode/decode, size limits; no keys
+  oxcache-crypto        client-only: key hierarchy, lookup ids, seal/open, signatures, roster
+  oxcache-client        public client library used by oxabl
+  oxcache-cli           `oxabl-cache` binary: identities, roster, rotation, login, diagnostics
+  oxcache-core          domain, use cases, ports (MetadataStore, ObjectStore, IdentityVerifier, Clock)
+  oxcache-meta-sqlite   MetadataStore on SQLite (single node)
+  oxcache-meta-postgres MetadataStore on Postgres (multi node)
+  oxcache-store-fs      ObjectStore on a local directory; its URLs are served by oxcache-http
+  oxcache-store-s3      ObjectStore on the portable S3 subset (SigV4, presigned URLs, Range)
+  oxcache-oidc          IdentityVerifier: JWT and JWKS validation, trust policy matching
+  oxcache-http          axum routes, extractors, error envelope, rate limiting
+  oxcache-server        `oxcache-server` binary: config, wiring, serve, migrate, backup, scrub
+  oxcache-admin         `oxcache-admin` binary: operator CLI over the admin API
+tests/e2e               black-box harness (testing.md)
+fuzz/                   cargo-fuzz targets
+```
+
+Dependency direction (arrows mean "depends on"):
+
+```
+oxcache-cli ─► oxcache-client ─► oxcache-crypto ─► oxcache-format
+oxcache-server ─► oxcache-http ─► oxcache-core ─► oxcache-format
+oxcache-server ─► {meta-sqlite, meta-postgres, store-fs, store-s3, oidc} ─► oxcache-core
+oxcache-admin ─► (HTTP only; no server crate)
+```
+
+`oxcache-format` is the only crate both sides share. It parses outer headers and pack
+footers (magic, version, sizes, offsets) so the server can reject malformed input and
+compact packs, but it handles no keys. A build gate (testing.md) fails if
+`oxcache-server`'s dependency tree contains `oxcache-crypto`, `oxcache-client` or
+`age`.
+
+The S3 adapter uses only the portable subset: `PutObject`, `GetObject` with
+`Range`, `HeadObject`, `DeleteObjects`, `ListObjectsV2`, presigned PUT and GET.
+It is built on `rusty-s3` for signing plus `reqwest`. The AWS SDK is rejected: it is
+large and AWS-shaped, and its default checksum behaviour breaks other S3-compatible
+stores. A provider feature beyond the subset (Azure Blob's own API, R2 jurisdictions)
+goes into its own `oxcache-store-<provider>` crate, never into the core. The adapter
+probes the bucket at startup (presigned round trip, ranged read, batch delete, list)
+and refuses to start on a failure. Checksum headers (`x-amz-checksum-sha256`) are an
+optional capability the probe detects. When present, the server signs them into PUT
+URLs as a transport check; integrity never depends on them.
+
+## Storage
+
+### Bytes go directly between client and store
+
+In S3 mode the server hands out presigned PUT and GET URLs (15-minute lifetime) and
+bytes never pass through an API node. Proxying would make the API nodes
+bandwidth-bound and, on hyperscalers, pay egress twice
+(hosting/provider-analysis.md, table 3.2).
+
+In local-disk mode the server is the store. It issues URLs of the same shape,
+pointing at its own `/v1/caches/{cache}/objects/{pack_id}` route and signed with an
+HMAC key only the server holds. The client path is identical in both modes: it
+receives URLs and performs PUT and ranged GET on them.
+
+### Packs of independently sealed segments
+
+Each artifact set (the `.r` plus optional XREF and debug list) becomes one
+**segment**: compressed with zstd, padded, sealed, named by `BLAKE3(sealed bytes)`.
+A writer appends segments into **packs** with a target of 16 MiB and a hard cap of
+32 MiB; a segment larger than the target gets a pack of its own. The server assigns
+each pack a random 128-bit id, so object keys are unique and never rewritten, and no
+conditional PUT is needed. Readers fetch segments with ranged GETs on one presigned
+URL per pack (the range is a header, so one URL serves any range), coalescing
+neighbouring segments with gaps of 1 MiB or less.
+
+Per tenant-month in the hosting model (200 CI builds, 95 cold fetches,
+750 incremental fetches), from hosting/provider-analysis.md section 1:
+
+| | One object per artifact set | Packs (chosen) |
+| --- | --- | --- |
+| Class A requests (PUT) | 80,000 | ~490 |
+| Class B requests (GET) | 1,100,000 | ~21,800 |
+| R2 bucket bill at 100 tenants | $75 | $7 |
+| Cold fetch of 10,000 sets | 10,000 GETs; 157 rounds at concurrency 64 | ~72 to 120 ranged GETs, bandwidth-bound |
+| GC | delete an object when its entry dies | compaction (below) |
+
+One object per artifact set is rejected: on R2 it costs 10x the bucket bill, and the
+latency floor of 10,000 requests per cold fetch becomes visible on any link over
+50 ms RTT. Packs cost compaction, which the server can do **without keys**, because
+records name segments by hash and never by location.
+
+The cross-file compression gain (zstd at 5x per file against 10.5x over a long
+window) is taken by a **per-cache zstd dictionary**. CI trains a 112 KiB dictionary
+from sampled artifacts and stores it as a sealed segment, and each entry names the
+dictionary it was compressed with. Segments stay independently decodable, so ranged
+reads still work. On synthetic data a trained dictionary raised the ratio from 2.27x
+to 2.90x. The default is gated on a measured gain of at least 1.3x on a real codebase
+(operations.md, "Compression dictionary"). Compressing a whole pack as one stream is
+rejected: a 50-artifact incremental fetch would then download and decompress whole
+packs. ADR: [0002](adr/0002-packed-segments.md).
+
+### Object layout
+
+S3: `v1/<cache-id>/<pack-id-hex>`. Local disk:
+`<root>/v1/<cache-id>/<pack-id[0..2]>/<pack-id-hex>`, with a sibling `tmp/`
+directory. Packs are immutable: never modified, appended or overwritten.
+
+## Metadata: SQLite for one node, Postgres for many
+
+Both run behind the `MetadataStore` port with the same schema and a common SQL
+subset. The black-box suite runs in full against both.
+
+- SQLite (WAL, `synchronous=FULL`) keeps the single binary self-contained for a team
+  that runs one node on local disk.
+- Postgres is what stateless API nodes share. Its transactional inserts and
+  `= ANY($1)` index probes answer a 10,000-id lookup in tens of milliseconds.
+- redb is rejected: a key-value store needs a second, hand-written query layer with
+  no SQL parity to Postgres. Postgres-only is rejected because the single binary
+  would then need a database server. SQLite-only is rejected because nodes cannot
+  share it.
+
+Growth from one node to many is `oxcache-server migrate --from a.toml --to b.toml`.
+It runs offline and copies metadata (SQLite to Postgres) and packs (disk to S3),
+re-hashing every segment against its id from the pack footer and comparing row counts
+per table. It refuses to finish on any difference. The schema uses no SQLite-only
+types (ids are bytes or text, times are integer seconds), so nothing is converted.
+During the window, builds see misses, never errors. The path has its own black-box
+test. ADR: [0003](adr/0003-metadata-sqlite-and-postgres.md).
+
+Core tables: `tenants`, `caches`, `users`, `workload_policies`, `tokens`,
+`sessions`, `grants`, `entries`, `segments`, `packs`, `rosters`,
+`dictionary_pointers`, `usage_ledger`.
+
+- `entries`: key `(cache_id, ns, lookup_id)`, where `ns` is `0` for trusted and the
+  user id for personal. Columns `segment_id`, `dict_id`, `epoch`, `record` (sealed
+  bytes), `created_at`, `access_day`.
+- `segments`: key `(cache_id, segment_id)`; columns `pack_id`, `offset`, `length`,
+  `dead_since`.
+- `packs`: key `(cache_id, pack_id)`; columns `ns`, `uploader`, `size`,
+  `live_bytes`, `state`, `lease_until`, `dead_since`.
+
+## Write and read paths
+
+**Write.** The commit order is fixed: bytes are durable before the entry that names
+them.
+
+1. The client seals each artifact set into a segment and appends segments into packs
+   locally (client.md).
+2. `POST uploads` declares each pack's size. The server reserves quota, inserts a
+   `pending` pack row with a 1-hour lease, and returns a pack id and a presigned PUT.
+3. The client PUTs the pack. S3 acknowledges only durable objects. The local adapter
+   writes into `tmp/`, fsyncs, renames and fsyncs the directory before answering 200.
+4. `POST entries` for that pack: the segment table (id, offset, length) and up to
+   2,000 sealed records. The server checks the pack is `pending` or `live`, belongs to
+   the caller and namespace, and that `HEAD` (or `stat`) reports exactly the declared
+   size. It also checks that segments are in bounds and do not overlap. In one
+   transaction it inserts segments, inserts entries with `ON CONFLICT DO NOTHING`, sets
+   the pack `live` and credits `live_bytes` only for segments of entries that won. It
+   returns `committed` or `exists` per entry.
+
+A crash before step 4 leaves a `pending` pack that the lease expiry reclaims. A crash
+inside step 4 rolls the transaction back. Concurrent writers of the same key both
+upload; one insert wins, every later reader sees the winner, and the loser's segment
+is dead from birth and reclaimed by compaction or pack deletion. The server never
+reads pack contents on the write path. A pack whose bytes do not match its declared
+segment ids produces misses on read and is then removed by the report path below.
+
+**Read.** `POST lookup` returns, per id, presence or the sealed record with its
+segment location, plus one presigned GET per pack involved. The client opens and
+verifies the record, range-reads the segment, checks `BLAKE3` against the signed
+segment id, decrypts and decompresses into temporary files beside the targets, checks
+every file hash, and only then renames. Any failure is a miss (client.md, "Install").
+
+**Report.** A client that finds a segment whose bytes do not hash to its id posts a
+report. The server range-reads that segment itself, hashes it, and only on a mismatch
+deletes every entry naming a corrupt segment of that pack after verifying the whole
+pack. The next producer then rewrites the key. Reports that the server cannot
+confirm (a signature or key failure on the client) are counted and change nothing.
+Each principal may have at most 10 report verifications per minute.
+
+## Garbage collection, compaction and retention
+
+GC runs inside the server, on one node at a time, elected with a Postgres advisory
+lock (with SQLite, the single process runs it). ADR: [0006](adr/0006-gc-leases-grace.md).
+
+- **Retention.** An entry whose `access_day` is older than the cache's retention
+  (default 30 days) is deleted. Lookup hits set `access_day` at most once per entry
+  per day, batched per node every 10 s.
+- **Quota eviction.** Above the soft quota (90% of hard), the oldest entries by
+  `access_day` are deleted until usage is under 80%. Personal namespaces are evicted
+  before trusted.
+- **Epoch purge.** After a key rotation, `cache:admin` may delete every entry of
+  epochs below N; otherwise retention expires them.
+- **Mark.** Deleting an entry, in the same transaction, sets `dead_since` on its
+  segment when no other entry names it (dictionaries are named by many entries and
+  by the dictionary pointer) and subtracts its length from the pack's `live_bytes`.
+  A pack whose `live_bytes` reaches 0 gets `dead_since = now`.
+- **Compaction** (every 10 min). Candidates are `live` packs whose live fraction is
+  below 50%, that are older than the 24 h grace, and that hold at least 4 MiB in
+  total. The worker range-reads each live segment, verifies `BLAKE3` against its id
+  (corrupt ones follow the report path), and writes the survivors into a new pack
+  of the same namespace with a fresh id and footer. One transaction then moves each segment's location if
+  it is still in the source pack and still alive, credits the new pack, and sets the
+  source pack's `live_bytes = 0, dead_since = now`. Compaction never needs a key,
+  never changes a segment's bytes, and never changes a record.
+- **Sweep** (every 10 min). In one transaction, select packs with `dead_since` older
+  than the grace, or `pending` with an expired lease, and set them `deleting`. Then
+  delete the objects, then the rows.
+- **Safety.** Deleting an entry never touches bytes. Commits only name the caller's
+  own new pack plus a dictionary segment that must not be dead, and the transaction
+  holds both rows' locks, so a commit and a sweep can
+  never interleave on the same pack. The grace (24 h) is far longer than a URL's
+  lifetime (15 min), so a reader that resolved a location just before compaction or
+  eviction still finds the bytes where its URL points.
+- **Orphans.** Weekly, the sweeper lists the cache prefix and deletes objects that
+  have no pack row and are older than twice the lease. This covers a lost database
+  and a crash between deleting an object and deleting its row.
+- **Quotas.** Usage counts every pack byte that is `pending`, `live` or in grace,
+  since all of it occupies storage. `uploads` refuses a pack that would exceed the
+  hard quota; the client treats that as "not stored", and a build never fails because
+  the cache is full.
+
+## Corruption-proofing summary
+
+| Threat | Mechanism |
+| --- | --- |
+| Partial upload | Commit requires the stored size to equal the declared size. Where the store enforces checksums, the signed SHA-256 also rejects a wrong body. |
+| Bytes not durable when named | Commit verifies the pack is present before inserting entries; the local adapter fsyncs before answering. |
+| Crash between upload and commit | `pending` packs expire and are swept; no entry ever named them. |
+| Concurrent writers | Unique pack ids; `ON CONFLICT DO NOTHING` on entries; the first commit wins. |
+| Torn read | Packs are immutable. The client hashes each segment and authenticates every chunk before any rename. |
+| Bit rot at rest | The client detects it and reports it; the server confirms and removes the entries. Compaction re-verifies everything it copies. A local-disk scrub re-hashes every pack weekly. |
+| Wrong artifact | The signed record binds the compile key (through the lookup id), epoch, namespace kind, segment id, sizes and per-file hashes. Any mismatch is a miss. |
+| Lost or rolled-back database | The orphan sweep reclaims bytes. Entries naming missing packs produce misses and reports, which delete them. Never a wrong hit. |
+
+## Scaling
+
+API nodes are stateless and share only Postgres and the object store. JWKS, roster
+versions and rate-limit buckets are cached per node and rebuildable. In S3 mode an
+API node moves only metadata: a 10,000-id lookup is ~320 KB in and up to ~5.3 MB out.
+Compaction is the only byte traffic through a node: at most the live half of each
+compacted pack, about 2 GB per tenant-month in the hosting model.
+
+Throughput is bounded by Postgres. A 10,000-id probe costs ~20 to 40 ms of database
+CPU, so a 4-vCPU primary serves about 100 to 200 full lookups per second, enough for
+hundreds of tenants. Beyond that, read replicas serve `lookup`, and tenants are
+sharded by tenant id across Postgres clusters behind the same port; neither is built
+until load demands it. Local-disk mode is single-node by design; its growth path is
+the migration above.
+
+## Performance budget
+
+Assumptions: 1 Gbit/s link (~117 MB/s of goodput), 30 ms RTT, warm TLS
+connections (the first handshake adds ~60 ms once), object-store time to first
+byte of 50 ms (to be measured in the prototype), and an 8-core client. A full set
+is 10,000 artifact sets: 0.9 GB compressed, 0.92 GB sealed (padding plus tags),
+4.3 GB plain, in ~72 packs. CPU rates are from security.md, "Performance cost".
+
+| Scenario | Breakdown | Estimate |
+| --- | --- | --- |
+| Full cold fetch | Open (OIDC exchange, roster, cache info): ~0.1 s. Lookup of 10,000 with records: 320 KB up, ~40 ms of database, 5.3 MB down: ~0.12 s. ~120 ranged GETs of ≤ 8 MiB over 32 connections: latency floor ~4 waves × 80 ms = 0.3 s, transfer 0.92 GB / 117 MB/s = 7.9 s. Decompression (4.3 core-s) plus security (1.9 core-s) is ~0.8 s on 8 cores, pipelined. | **~8.5 s**, bandwidth-bound. With a 1.6x dictionary gain: ~5.5 s. |
+| Incremental fetch of 50 | Lookup of 50: ~40 ms. Segments from 1 to 3 CI packs, worst case 50 parallel ranges: 30 ms RTT + 50 ms first byte + 4.6 MB / 117 MB/s ≈ 0.12 s. Install of 22 MB: milliseconds. | **~0.2 s** (+0.1 s open) |
+| CI upload of 10,000 | zstd-3 of 4.3 GB at 200 to 350 MB/s per core: 12 to 22 core-s, 1.5 to 2.7 s on 8 cores, pipelined. 72 PUTs of ~12.5 MB, 8 in flight: 0.92 GB / 117 MB/s = 7.9 s. Each commit (HEAD + ~140-row insert) ~0.1 s, overlapped; the last one adds ~0.1 s. | **~8.5 to 10 s**, bandwidth-bound with ≥ 4 cores |
+| Lookup of 20,000 | ids 1.6 ms. Two parallel requests of 10,000: 640 KB up (5.5 ms), ~40 ms of database each, presence replies of 50 KB each: ~0.08 s. Fetch mode returns 2 × 5.3 MB of records (~0.1 s) and verifies 20,000 signatures (0.7 core-s, ~90 ms on 8 cores). | **~0.08 s** plan, **~0.2 s** fetch |
