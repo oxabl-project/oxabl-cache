@@ -16,8 +16,12 @@ cache never defines it.
 - `fetch` streams one outcome per key as it completes and installs into a stage
   directory that oxabl chooses. oxabl promotes from there.
 - `store` is an `Uploader` that oxabl feeds during the build, one artifact set at a
-  time, as soon as a unit's verification passes. Sets name files on disk; the client
-  reads them lazily.
+  time, as soon as a unit's verification passes. Each file is an `ArtifactFileRef`
+  (artifact path, size, BLAKE3) under the artifact root the uploader was opened with.
+  The client reads it lazily and checks size and hash on that read, so a file edited
+  between verification and upload is never stored.
+- Each `Installed` outcome carries its origin (`Provenance`: tier and the signer's
+  public key, plus epoch and roster version), so oxabl's local cache keeps the tier.
 - Every cache failure is a miss or "not stored". The cache never fails a build;
   oxabl compiles what it could not fetch.
 
@@ -66,8 +70,9 @@ impl Cache {
     /// Starts fetching; yields one outcome per request as each completes.
     pub fn fetch(&self, requests: Vec<FetchRequest>, options: FetchOptions) -> Fetch;
 
-    /// Starts a batched upload session. Fails if the mode does not write.
-    pub fn uploader(&self) -> Result<Uploader, CacheError>;
+    /// Starts a batched upload session reading files under `artifact_root`.
+    /// Fails if the mode does not write.
+    pub fn uploader(&self, artifact_root: std::path::PathBuf) -> Result<Uploader, CacheError>;
 
     pub fn mode(&self) -> Mode;
     pub fn stats(&self) -> Stats;
@@ -109,7 +114,7 @@ pub enum FetchOutcome {
 
 pub struct InstalledFile { pub path: ArtifactPath, pub size: u64 }
 
-/// Where a hit came from, for callers that keep a local copy.
+/// Origin of a hit, for callers that keep a local copy; `signer` is the Ed25519 public key.
 pub struct Provenance { pub tier: Tier, pub signer: [u8; 32], pub epoch: u32, pub roster_version: u64 }
 pub enum Tier { Trusted, Personal }
 
@@ -123,19 +128,26 @@ pub enum MissReason {
     Install(std::io::ErrorKind),
 }
 
-pub struct ArtifactFile { pub path: ArtifactPath, pub source: std::path::PathBuf }
+/// A verified output on disk at `artifact_root/path`, as the caller saw it.
+pub struct ArtifactFileRef { pub path: ArtifactPath, pub size: u64, pub blake3: [u8; 32] }
 
 pub struct Uploader { /* private */ }
 impl Uploader {
     /// Queues one set; returns once queued, waiting only for back-pressure.
-    pub async fn put(&self, key: CompileKey, files: Vec<ArtifactFile>);
+    pub async fn put(&self, key: CompileKey, files: Vec<ArtifactFileRef>);
     /// Seals and uploads the rest, commits every pack, and reports per key.
     pub async fn finish(self) -> StoreReport;
 }
 
 pub struct StoreReport { pub outcomes: Vec<(CompileKey, StoreOutcome)>, pub bytes_uploaded: u64 }
-pub enum StoreOutcome { Committed, Existed, Failed(StoreFailure) }
-pub enum StoreFailure { Rejected, TooLarge, SourceChanged, QuotaExceeded, Unavailable }
+pub enum StoreOutcome {
+    Committed,
+    Existed,
+    /// A file's size or BLAKE3 differed from its `ArtifactFileRef` when read; nothing was uploaded for the key.
+    Changed,
+    Failed(StoreFailure),
+}
+pub enum StoreFailure { Rejected, TooLarge, Unreadable, QuotaExceeded, Unavailable }
 ```
 
 `OpenError` covers:
@@ -206,12 +218,20 @@ A final path never holds a partial or unverified file.
 ## Store
 
 1. `put` validates the paths (rules above, no duplicates, at most 16 files, total
-   path bytes ≤ 3,072) and records each source file's size. It queues only the paths.
-   It waits when 10,000 sets are queued or 256 MiB of sealed bytes are in flight.
-2. Workers read each set's files once, when sealing it. A size that changed since
-   `put` gives `SourceChanged`. Each set is compressed (zstd level 3 by default, with
-   the cache dictionary if one is published, frame checksum on), padded, sealed, and
-   appended to the open pack. A pack is closed at 16 MiB or 2,000 segments, and a
+   path bytes ≤ 3,072, total size within the plaintext cap). It queues only the
+   references and waits when 10,000 sets are queued or 256 MiB of sealed bytes are in
+   flight.
+2. Workers take one set at a time. They open each file beneath `artifact_root`
+   (`openat`, `O_NOFOLLOW`), read it once into memory, and check its size and BLAKE3
+   against the `ArtifactFileRef`.
+   - Any mismatch makes the key `Changed`, and nothing of that set is sealed or
+     uploaded. Because the bytes compressed are exactly the bytes checked, a file
+     edited between oxabl's verification and the upload is never stored.
+   - A missing or unreadable file gives `Failed(Unreadable)`.
+
+   Each matching set is compressed (zstd level 3 by default, with the cache dictionary
+   if one is published, frame checksum on), padded, sealed, and appended to the open
+   pack. A pack is closed at 16 MiB or 2,000 segments, and a
    segment over 16 MiB gets its own pack.
 3. Each closed pack goes through `uploads` (with a `client_ref`), `PUT`, then
    `commit`, with up to 8 packs in flight. Records are signed with the member's key.

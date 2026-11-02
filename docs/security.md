@@ -294,7 +294,7 @@ Per scenario (0.93 GB sealed, 4.3 GB plain, 10,000 sets):
 | Scenario | Security CPU | Wall-clock effect at 1 Gbit/s, 30 ms RTT |
 | --- | --- | --- |
 | Cold fetch | Segment ids 0.24 s, AES 0.18 s, signatures 0.34 s: ~0.8 core-s, ~0.1 s on 8 cores, overlapped with ~8 s of transfer | +1.2% bytes from padding (~0.1 s), ~2% in total |
-| CI upload | AES 0.18 s, ids 0.24 s, signing 0.17 s: ~0.6 core-s, next to 11 to 22 core-s of zstd | < 1% |
+| CI upload | Input check (BLAKE3 of 4.3 GB against the caller's hashes) 1.12 s, AES 0.18 s, ids 0.24 s, signing 0.17 s: ~1.7 core-s, next to 11 to 22 core-s of zstd | < 2% |
 | Lookup of 20,000 keys | ids 1.6 ms; record verification (fetch mode only) 0.7 core-s, ~90 ms on 8 cores | ~0 in presence mode |
 
 At 1 Gbit/s the whole security stack costs under 5% of wall-clock time, because
