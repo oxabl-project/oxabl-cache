@@ -82,12 +82,17 @@ Invariants the core enforces:
 3. A segment id is unique within a cache. A commit may name a segment id only if it
    is new to the cache. Retries never reach insertion (invariant 2), and no path ever
    clears `dead_since`: a dead segment is never revived.
-4. A pack is deleted only when no entry names any of its segments and it has been
+4. One entry per artifact segment. An artifact segment is named by exactly one
+   entry for its whole life, so deleting that entry is what kills it. A commit in
+   which two or more entries name the same artifact segment makes all of them
+   `invalid`. An already-recorded segment is `invalid` by invariant 3. Cache and pack
+   `live_bytes` therefore always equal the sum of the lengths of their live segments.
+5. A pack is deleted only when no entry names any of its segments and it has been
    dead for the grace period, or it is `pending` with an expired lease.
-5. Writes into `trusted` need `write:trusted`; writes into `personal(u)` need
+6. Writes into `trusted` need `write:trusted`; writes into `personal(u)` need
    `write:personal` and the caller to be `u`. A pack never mixes namespaces. Reads see
    `trusted` and the caller's own `personal` namespace only.
-6. Every query carries a tenant scope; a cache id from another tenant is "not found".
+7. Every query carries a tenant scope; a cache id from another tenant is "not found".
 
 ## Crate layout
 
@@ -259,20 +264,26 @@ them.
    writes into `tmp/`, fsyncs, renames and fsyncs the directory before answering 200,
    and refuses any PUT once the pack is not `pending`.
 4. `POST commit` for that pack, once: the segment table (id, offset, length, kind)
-   and up to 2,000 sealed records. Under a row lock on the pack, the server first
-   handles a repeat. If the pack already has a `commit_digest`, it re-checks the
-   object's ETag; a different ETag gets 409 `pack_changed` and queues a scrub. It
+   and up to 2,000 sealed records. The server first checks authorization, before
+   touching the pack or the store: the caller needs `write:trusted` or
+   `write:personal` for the namespace in the frame, and must be the principal that
+   uploaded the pack. Otherwise it answers 403 and does nothing more, so a `read`
+   principal cannot cause store requests or scrubs. Then, under a row lock on the
+   pack, it handles a repeat. If the pack already has a `commit_digest`, it
+   re-checks the object's ETag; a different ETag gets 409 `pack_changed` and queues a scrub. It
    then returns `commit_statuses` if the digest matches, or 409 `pack_closed` if it
    does not. Otherwise it checks:
    - the pack is `pending` (otherwise 409 `pack_closed`);
-   - it belongs to the caller and to the namespace in the frame;
+   - the pack's namespace is the one in the frame;
    - `HEAD` (or `stat`) reports exactly the declared size. The ETag is recorded;
    - every segment is in bounds, and no two overlap;
    - every segment id is new to the cache (invariant 3). A segment id already
      recorded makes that segment, and every entry naming it, `invalid`. This stops a
      writer from claiming another namespace's segment;
    - a `dictionary` segment appears only in a `trusted` commit by a caller with
-     `write:trusted`, and no entry names it as its own segment.
+     `write:trusted`, and no entry names it as its own segment;
+   - no artifact segment is named by more than one entry in the request (invariant
+     4). Otherwise every entry naming it is `invalid`.
 
    In one transaction the server then:
    - inserts the segments. An `artifact` segment whose entries all lost or are
@@ -327,8 +338,11 @@ lock (with SQLite, the single process runs it). ADR: [0006](adr/0006-gc-leases-g
   the grace are reported separately as `reclaimable_bytes` and never drive eviction.
 - **Epoch purge.** After a key rotation, `cache:admin` may delete every entry of
   epochs below N; otherwise retention expires them.
-- **Mark.** Deleting an entry, in the same transaction, sets `dead_since` on its
-  artifact segment and subtracts the segment's length from its pack's `live_bytes`.
+- **Mark.** Every transition of a segment to `dead_since`, whatever its kind and
+  whatever caused it, subtracts the segment's length from its pack's and its cache's
+  `live_bytes` in the same transaction. No other path changes `live_bytes` downward.
+  Deleting an entry, in the same transaction, sets `dead_since` on its artifact
+  segment, which no other entry names (invariant 4).
   A dictionary segment is referenced by the dictionary pointer and by every entry
   whose `dict_id` names it. It gets `dead_since` only when neither references it:
   - when the last such entry is deleted while the pointer names another

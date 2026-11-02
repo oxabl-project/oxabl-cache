@@ -188,17 +188,25 @@ error, a transient one as a warning.
    - that `plain_len` is within the configured limit.
 
    A failure moves on to the personal hit, if any, or else gives a miss.
-3. Group segments by pack and coalesce ranges with gaps of 1 MiB or less, splitting
+3. Dictionaries first. For each distinct non-zero `dict_id` among the opened
+   records, take its location from the response's `dictionaries` list. Fetch the
+   segment once per `Cache` (it is kept in memory, keyed by id). Verify its BLAKE3
+   against the `dict_id` signed in the record, then decrypt it. A dictionary that is
+   missing from the list, or that fails verification, turns every entry needing it
+   into a miss (`Corrupt` on a failed check, `NotFound` when absent). It never
+   holds back other entries.
+4. Group segments by pack and coalesce ranges with gaps of 1 MiB or less, splitting
    reads above 8 MiB. Run them with 32 concurrent connections (configurable up to
    128) and at most 256 MiB in flight.
-4. Per segment, on a CPU worker pool:
+5. Per segment, on a CPU worker pool:
    - check `BLAKE3(bytes)` against the signed segment id. On a mismatch, send
      `reports` in the background and miss;
    - check the header, decrypt the chunks in order, and strip the padding;
-   - decompress with a window limit of 128 MiB and an output cap of `plain_len`,
-     with the zstd frame checksum verified;
+   - decompress (with the verified dictionary when `dict_id` is set) with a window
+     limit of 128 MiB and an output cap of `plain_len`, with the zstd frame checksum
+     verified;
    - split into files by the signed sizes.
-5. Install (below), then yield `Installed`. Expired URLs are refreshed once through
+6. Install (below), then yield `Installed`. Expired URLs are refreshed once through
    `urls`.
 
 Outcomes arrive in completion order, not request order. The idle timeout restarts on
@@ -252,9 +260,17 @@ A final path never holds a partial or unverified file.
    `commit`, with up to 8 packs in flight. Records are signed with the member's key.
    Uploads therefore overlap compiling.
 4. A failed PUT is retried 3 times with backoff, with the same `client_ref`. After
-   that, its keys report `Unavailable`. `quota_exceeded` stops further uploads for the
-   session. A `put` after the mode or the quota stopped writing is reported as a
-   failure, never an error.
+   that, its keys report `Unavailable`.
+5. Commit is exactly-once on the server. The client builds each pack's `OXCM` once
+   and keeps those exact bytes until a reply arrives. A commit whose reply is lost
+   (timeout, connection error, 5xx) is retried 3 times with backoff, sending the
+   byte-identical body; it is never re-sealed, re-signed or reordered. The recorded
+   `OXCA` that comes back is mapped per key as usual. On a retry, `409 pack_closed`
+   or `409 pack_changed` maps every key of the pack to `Failed(Unavailable)` and
+   is logged with the pack id. On a first attempt, either one is a client bug, and is
+   logged and reported the same way.
+6. `quota_exceeded` stops further uploads for the session. A `put` after the mode or
+   the quota stopped writing is reported as a failure, never an error.
 
 `finish` waits for every queued set and returns one outcome per key.
 

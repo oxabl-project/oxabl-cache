@@ -164,9 +164,12 @@ The body is the `OXPK` bytes, with exactly the signed headers. S3 stores answer
 
 ### `POST /v1/caches/{cache}/packs/{pack_id}/commit`
 
-Request `OXCM`, response `OXCA`. Each pack is committed exactly once. The pack must
-be uploaded by the caller, be in the namespace named by the frame, and be `pending`,
-with one exception: a repeat of its commit. That pack must be present at exactly the
+Request `OXCM`, response `OXCA`. Needs `write:trusted` or `write:personal` matching
+the frame's namespace, and the caller must be the principal that uploaded the pack.
+Both are checked first, before any pack lookup or store request, including for a
+repeat; a failure gets 403. Each pack is committed exactly once. The pack must be in
+the namespace named by the frame and be `pending`, with one exception: a repeat of
+its commit. That pack must be present at exactly the
 declared size, or the server answers 409 `conflict` with `pack_incomplete`.
 
 A repeat of the commit of an already-committed pack (keyed by pack id) is handled
@@ -261,9 +264,21 @@ All magics are 4 ASCII bytes followed by `u8 version = 1` and `u8 flags = 0`.
 | packs | `pack_count × (bytes16 pack_id, str16 url, u64 expires_at)`; url empty without bit1 |
 | hit_count | `u32` |
 | hits | `hit_count × (u32 index, u8 ns)`, plus, with bit0, `(u32 pack_idx, u64 offset, u32 length, u16 record_len, record)` |
+| dict_count | `u32`; 0 without bit0 |
+| dictionaries | `dict_count × (bytes32 dict_id, u32 pack_idx, u64 offset, u32 length)` |
 
 `index` refers to the request order. One id may hit in both namespaces. The client
 tries `trusted` first, then `personal`.
+
+In fetch mode (bit0), `dictionaries` lists every distinct live dictionary segment
+named by a returned entry's `dict_id`, once each. Each dictionary's pack is in
+`packs`, with its URL under bit1, exactly like an entry's pack. The server reads
+`dict_id` from the `entries` row, which is plaintext metadata. The client trusts
+nothing about the location: it verifies the dictionary segment's BLAKE3 against the
+signed `dict_id` in the record it opened. A dictionary segment is readable by every
+principal with `read` on the cache, whatever the namespace of the entry that names
+it. Mark keeps a dictionary live while any entry names it. If one is ever absent
+all the same, the entries that need it are misses.
 
 ### `OXCM` commit request
 

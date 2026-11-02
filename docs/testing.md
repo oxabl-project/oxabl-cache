@@ -76,7 +76,8 @@ Each test names the behaviour it protects.
 | Tiers | A developer's personal writes are invisible to CI and to other developers. A developer token gets 403 writing `trusted` over raw HTTP. A developer-signed record copied into `trusted` in the database is a miss (`Untrusted`) for CI. |
 | Personal crowding | Hard quota of 4 full sets, GC interval longer than the test. 8 developer identities each try to store a full set. Each one's personal live bytes stop at or below 10% of hard (0.4 full sets), and the rest of each set reports `QuotaExceeded`; personal live bytes total about 3.2 full sets. CI's full upload (1 full set, so 4.2 > 4) then commits completely: its admission evicts personal entries synchronously, oldest first, and every CI entry installs. In a second case, a developer holds a large personal upload `pending` (not yet committed) while CI's upload arrives. CI is admitted over the hard quota by at most those pending bytes, every CI entry installs, and stored bytes stay under the 3x ceiling. |
 | Quotas | Writes over the hard quota report `QuotaExceeded` and the build continues. With the grace set longer than the test, a full-rebuild workload pushes live bytes past 90%. Eviction stops at or just under 80% live, trusted entries written last still install, personal namespaces go first, and `reclaimable_bytes` reports the lag. |
-| Dictionary lifecycle | CI publishes a dictionary (a pack with one `dictionary` segment and no entries), then moves the pointer. After waiting past the grace, the pack and segment are still live. CI stores 200 sets with the dictionary, and a developer fetches them. CI publishes a second dictionary. The first stays live while any entry names it. After those entries are evicted and the grace passes, its pack is swept. A dictionary committed without a pointer update is marked dead after the grace, and its pack is swept. |
+| Dictionary lifecycle | CI publishes a dictionary (a pack with one `dictionary` segment and no entries), then moves the pointer. After waiting past the grace, the pack and segment are still live. CI stores 200 sets with the dictionary, and a developer fetches them. CI publishes a second dictionary. The first stays live while any entry names it. With the pointer already on the second dictionary, a developer (`read` only, a different namespace from CI) fetches the 200 entries compressed with the first: each lookup response lists the first dictionary's location, and every set installs byte-identical. After those entries are evicted and the grace passes, the first dictionary's pack is swept, and `quota.live_bytes` dropped by its length when it died. A dictionary committed without a pointer update is marked dead after the grace, and its pack is swept. |
+| Live-byte accounting | A personal commit with two entries naming one artifact segment (the same `segment_idx`) gets `invalid` for both, and nothing is credited. Throughout every quota, GC, compaction and dictionary scenario, the harness reads `quota.live_bytes` after each step and compares it with the sum of the lengths of live segments, computed from the database by the attacker-side SQL reader. They are always equal, and never negative. |
 | Losing packs | Two CI writers store different bytes for the same 500 keys, one after the other. Every entry of the second pack is `exists`. After the grace, the second pack's object is gone from the store and `stored_bytes` is back to one pack's worth. |
 | Retention and GC | An entry idle past retention disappears and its pack is deleted after the grace. An entry that is never read retires on time too (it has an access row from commit). A reader holding a URL issued before eviction still downloads within the grace. |
 | Compaction | A churn-heavy workload leaves packs under 50% live. After compaction every live entry still installs correctly and stored bytes drop. |
@@ -143,6 +144,15 @@ producer stored, the outcome is a miss, and no temp file remains.
 
   No retry credits `live_bytes` or revives a segment, and the client reports
   `Committed` or `Existed` exactly as the first answer said.
+- **Client retry discipline.** The fault proxy records every commit body. For each
+  dropped reply, the retried body is byte-identical to the first. When the proxy
+  instead forges `409 pack_closed` on the retry, every key of that pack reports
+  `Failed(Unavailable)`, never `Committed`, and the log names the pack id.
+- **Commit by a reader.** A principal with only `read` posts commits (random bodies
+  and a copy of a real `OXCM`) to pack ids taken from its lookups. Each gets 403. The
+  fault proxy in front of the store sees no `HEAD` or `GET` caused by them, and no
+  scrub is queued. A `write:personal` principal committing to a trusted pack, or to another
+  user's pack, also gets 403.
 - **Second commit to a pack.** A commit to an already-committed pack with a
   different body gets 409 `pack_closed`, and so does a client commit to a pack
   written by compaction. After the sweep, every live entry still installs.
