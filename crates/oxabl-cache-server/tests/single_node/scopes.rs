@@ -124,6 +124,25 @@ fn missing_wrong_revoked_and_suspended_credentials_are_refused() {
         operator_on_public.status, 401,
         "an operator token is not a tenant credential"
     );
+    let operator_id = world
+        .server
+        .operator
+        .split('_')
+        .nth(1)
+        .expect("operator id")
+        .to_owned();
+    let forged = format!("oxo_{operator_id}_{}", "0".repeat(52));
+    let wrong_secret = crate::support::server::call(
+        &world.server.admin,
+        &forged,
+        "GET",
+        "/admin/v1/tenants",
+        None,
+    );
+    assert_eq!(
+        wrong_secret.status, 401,
+        "the id alone is not an operator credential"
+    );
     let on_admin = crate::support::server::call(
         &world.server.admin,
         &world.reader.token,

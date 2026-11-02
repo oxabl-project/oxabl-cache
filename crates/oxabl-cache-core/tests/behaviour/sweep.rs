@@ -73,3 +73,29 @@ async fn a_live_pack_is_never_swept() {
     assert!(env.object_exists(pack).await);
     assert_eq!(env.hits(&env.reader, &[1, 2], true).await, vec![0, 1]);
 }
+
+#[tokio::test]
+async fn reclaimable_bytes_are_the_dead_segments_of_live_packs_and_never_their_framing() {
+    let env = Env::new().await;
+    let first = env.artifacts(&[1], 4096);
+    env.publish(&env.ci, Trusted, &first, vec![entry(1, 0)])
+        .await;
+    let mixed = env.artifacts(&[2, 3], 4096);
+    let (_, statuses) = env
+        .publish(&env.ci, Trusted, &mixed, vec![entry(1, 0), entry(2, 1)])
+        .await;
+    assert_eq!(statuses, vec![Exists, Committed]);
+
+    let quota = env.info().await.quota;
+    assert_eq!(quota.live_bytes, 2 * 4096);
+    assert_eq!(
+        quota.reclaimable_bytes, 4096,
+        "the dead segment of a live pack, not the framing"
+    );
+    let framing = (first.bytes.len() + mixed.bytes.len()) as u64 - 3 * 4096;
+    assert_eq!(
+        quota.stored_bytes,
+        quota.live_bytes + quota.pending_bytes + quota.reclaimable_bytes + framing,
+        "stored = live + pending + reclaimable + framing"
+    );
+}

@@ -270,7 +270,15 @@ fn operators_manage_tenants_quotas_health_and_export_usage() {
         &pack,
         &[Entry::new(key, 0)],
     );
-    world.fetch(&world.reader, &[key, frames::lookup_id()]);
+    let (bytes, shape) = world.fetch(&world.reader, &[key, frames::lookup_id()]);
+    let fetched = format::LookupResponse::decode(&bytes, &shape).expect("OXLR");
+    assert_eq!(
+        world
+            .get_object(fetched.packs[0].url, Some("bytes=0-99"))
+            .status,
+        206
+    );
+    std::thread::sleep(std::time::Duration::from_millis(300));
     let month = current_month();
     let csv = server.admin_call(
         "GET",
@@ -289,7 +297,7 @@ fn operators_manage_tenants_quotas_health_and_export_usage() {
         ("lookup_ids", 2),
         ("hits", 1),
         ("entries_committed", 1),
-        ("egress_bytes", 4_000),
+        ("egress_bytes", 4_100),
     ] {
         assert!(
             text.contains(&format!("{}{value}\n", row(metric))),

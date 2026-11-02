@@ -150,8 +150,26 @@ fn every_error_is_the_json_envelope_and_every_response_has_a_request_id() {
         .binary("POST", &world.path("/lookup"), b"not a frame");
     assert_eq!(bad_frame.status, 400);
     assert_eq!(bad_frame.error_code(), "bad_request");
-    let not_binary = world
-        .reader
-        .json("POST", &world.path("/lookup"), Some(&json!({})));
-    assert_eq!(not_binary.status, 400);
+    let (frame, _) = frames::lookup(&[frames::lookup_id()], false, false, true, false);
+    let wrong_type = crate::support::http::request(
+        &world.server.public,
+        "POST",
+        &world.path("/lookup"),
+        &[
+            ("Authorization", format!("Bearer {}", world.reader.token)),
+            ("Content-Type", "application/json".to_owned()),
+        ],
+        &frame,
+    );
+    assert_eq!(
+        wrong_type.status, 400,
+        "a frame needs the binary content type"
+    );
+    assert_eq!(
+        world
+            .reader
+            .binary("POST", &world.path("/lookup"), &frame)
+            .status,
+        200
+    );
 }
