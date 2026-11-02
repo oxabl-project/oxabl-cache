@@ -9,7 +9,7 @@ with identical behaviour, and is maintained by a small team.
 
 ## Decision
 
-One core crate (`oxcache-core`) holds the domain types, the use cases and the port
+One core crate (`oxabl-cache-core`) holds the domain types, the use cases and the port
 traits (`MetadataStore`, `ObjectStore`, `IdentityVerifier`, `Clock`). Every I/O
 concern is an adapter crate that depends on the core. The only event-like piece is
 an append-only usage ledger. The client-side crypto lives in crates the server never

@@ -12,7 +12,7 @@ behind a shared store.
 Two `MetadataStore` adapters share one schema in a common SQL subset: SQLite (WAL,
 `synchronous=FULL`) and Postgres. The database arbitrates first-write-wins with
 `INSERT … ON CONFLICT DO NOTHING`; the object store needs no conditional writes.
-`oxcache-server migrate` moves a single node to Postgres and S3, verifying every row
+`oxabl-cache-server migrate` moves a single node to Postgres and S3, verifying every row
 count and segment hash.
 
 ## Rejected

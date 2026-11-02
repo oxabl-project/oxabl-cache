@@ -54,12 +54,12 @@ path as a miss.
 | Lookup ids per request | 10,000 |
 | Entries per commit, segments per pack | 2,000 |
 | Pack size | 32 MiB (single PUT) |
-| Sealed record | 4,096 bytes |
-| Files per artifact set; path length | 16; 1,024 bytes |
+| Files per artifact set; path length; total path bytes per set | 16; 1,024 bytes; 3,072 bytes |
+| Sealed record | 4,096 bytes. Derived: 284 fixed bytes (72-byte header, 16-byte tag, 132-byte `OXEP` fields, 64-byte signature), plus 10 bytes per file, plus the paths. 284 + 16 × 10 + 3,072 = 3,516, which rounds up to 3,584. |
 | Plaintext per artifact set (client-enforced on decode) | 64 MiB default, configurable up to 1 GiB |
 | JSON body; roster | 1 MiB; 1 MiB and 1,000 members |
 | Presigned URL lifetime; pending pack lease | 15 min; 1 h |
-| Rate per tenant (default) | 50 requests/s sustained, burst 200 |
+| Rate per tenant (default) | 50 requests/s sustained, burst 200, on `/v1` API routes. Object routes are excluded; their signed URLs are the limit. |
 
 ## Authentication
 
@@ -82,18 +82,24 @@ All routes are under `/v1/caches/{cache}`. Scope `read` is needed unless noted.
 ```json
 {"id": "c_…", "display_name": "…", "epoch": 3, "roster_version": 12,
  "dictionary_version": 2,
- "store": {"kind": "s3", "checksum_sha256": true},
+ "store": {"kind": "s3", "if_none_match": true, "checksum_sha256": false},
  "limits": {"lookup_ids": 10000, "commit_entries": 2000, "pack_bytes": 33554432},
- "quota": {"hard_bytes": 21474836480, "used_bytes": 5368709120}}
+ "quota": {"hard_bytes": 21474836480, "live_bytes": 5368709120, "pending_bytes": 0,
+           "stored_bytes": 7516192768, "reclaimable_bytes": 2147483648}}
 ```
+
+`live_bytes` drives eviction and admission. `stored_bytes` is what occupies storage
+and is billed. `reclaimable_bytes` is the part of it that compaction and the sweep
+will free.
 
 ### `GET|PUT /v1/caches/{cache}/roster`
 
 GET returns the `OXRS` bytes with `ETag: "v<version>"`. PUT needs `cache:admin` and
-`If-Match: "v<current>"`, and the body's version must be `current + 1` with an epoch
-no lower than the current one. It answers 204 on success, 412 on a stale `If-Match`
-and 400 on a malformed body. The server checks structure and version only; clients
-verify the signature.
+`If-Match: "v<current>"`. The body's version must be `current + 1`, its epoch
+`current` or `current + 1`, and at least one of its signatures must verify under an
+owner key registered for the cache. It answers 204 on success, 412 on a stale
+`If-Match`, and 400 on a malformed, unsigned or out-of-range body. Clients still
+verify the signature against their own pinned keys.
 
 ### `GET|PUT /v1/caches/{cache}/dictionary`
 
@@ -104,7 +110,8 @@ the named segment must be `live` in this cache.
 
 Request `OXLQ`, response `OXLR`. Flag bit 0 asks for records (fetch mode); bit 1
 asks for presigned GET URLs, one per pack involved. Without bit 0 the response
-carries presence only (plan mode). Every hit updates the entry's `access_day`. The
+carries presence only (plan mode). Every hit updates the entry's `access_day` (in
+`entry_access`, at most once a day). The
 call is safe to retry.
 
 ### `POST /v1/caches/{cache}/uploads`
@@ -122,14 +129,19 @@ request order:
 ```json
 {"packs": [
   {"status": "ok", "pack_id": "a1b2…", "url": "https://…", "method": "PUT",
-   "headers": {"content-length": "13107200", "x-amz-checksum-sha256": "…"},
+   "headers": {"content-length": "13107200", "if-none-match": "*", "x-amz-checksum-sha256": "…"},
    "expires_at": 1793000900},
+  {"status": "committed", "pack_id": "c3d4…"},
   {"status": "quota_exceeded"}
 ]}
 ```
 
-`client_ref` is 16 random bytes per pack. Repeating it within the lease returns the
-same `pack_id` with a fresh URL, so retries never strand quota.
+`client_ref` is 16 random bytes per pack. Repeating it while the pack is `pending`
+and has never been committed returns the same `pack_id` with a fresh URL, so retries
+never strand quota. Repeating it after the first commit returns `committed` and no
+URL. No PUT URL is ever issued for a committed pack. The `if-none-match` and checksum
+headers appear only when the store supports them (`store.if_none_match`,
+`store.checksum_sha256`).
 
 ### `PUT <url>` (object store, or the server's object route in local-disk mode)
 
@@ -139,16 +151,18 @@ The body is the `OXPK` bytes, with exactly the signed headers. S3 stores answer
 
 ### `POST /v1/caches/{cache}/packs/{pack_id}/commit`
 
-Request `OXCM`, response `OXCA`. The pack must be `pending` or `live`, uploaded by the
-caller, in the namespace named by the frame, and present at exactly the declared size
-(otherwise 409 `conflict`, with the code `pack_incomplete` in `message`). Per-entry
-statuses:
+Request `OXCM`, response `OXCA`. The pack must be uploaded by the caller and in the
+namespace named by the frame. It must be `pending`, or `live` and still
+`committable`; otherwise the server answers 409 `conflict` with `pack_closed`. It must
+also be present at exactly the declared size, or 409 with `pack_incomplete`. A retry
+that sees a different object ETag than the first commit recorded gets 409 with
+`pack_changed`, and the server queues a scrub of the pack. Per-entry statuses:
 
 | Status | Meaning |
 | --- | --- |
 | 0 `committed` | Inserted, or already present naming the same segment (a retry). |
 | 1 `exists` | Another write won; this segment is dead. |
-| 2 `invalid` | Malformed record header, wrong epoch, or segment index out of range. |
+| 2 `invalid` | Malformed record header, wrong epoch, segment index out of range, or the segment id already recorded elsewhere in the cache (a different pack, offset or length). |
 | 3 `missing_dictionary` | The dictionary segment is not `live`. |
 
 Retrying a commit is safe and returns the same statuses.
@@ -178,11 +192,12 @@ honours a single `Range: bytes=a-b` (206) and answers 416 outside the object.
 
 | Route | Purpose |
 | --- | --- |
-| `GET, POST /v1/tenant/caches`; `DELETE /v1/tenant/caches/{cache}` | Create (display name, retention days, quota) or delete a cache. Deletion is asynchronous: entries go at once, bytes after the grace. |
+| `GET, POST /v1/tenant/caches`; `DELETE /v1/tenant/caches/{cache}` | Create (display name, retention days, quota, at least one owner public key) or delete a cache. Deletion is asynchronous: entries go at once, bytes after the grace. |
+| `GET, PUT /v1/tenant/caches/{cache}/owner-keys` | The owner public keys the server uses to check roster signatures. |
 | `GET, POST /v1/tenant/tokens`; `DELETE /v1/tenant/tokens/{id}` | The secret is returned once on creation. |
 | `GET, POST /v1/tenant/users`; `DELETE /v1/tenant/users/{id}` | Human principals, keyed by issuer and subject. Deleting a user revokes their sessions. |
 | `GET, PUT /v1/tenant/grants` | Principal × cache × scopes. |
-| `GET, POST, DELETE /v1/tenant/oidc/issuers`, `…/oidc/policies` | Issuer allowlist; workload trust policies (exact claim conditions, scopes). |
+| `GET, POST, DELETE /v1/tenant/oidc/issuers`, `…/oidc/policies` | Issuer allowlist and workload trust policies (exact claim conditions, scopes). A new issuer must pass the SSRF guard and, on the hosted service, the operator allowlist (security.md). For a shared issuer, a policy without an immutable id claim is refused with 400. A workload policy may grant only `read`, `write:personal` and `write:trusted`. |
 | `GET /v1/tenant/usage?month=2026-10` | The tenant's own usage. |
 
 Creates use natural keys (name, issuer URL): re-posting identical content returns
@@ -195,7 +210,7 @@ A separate listener (default `127.0.0.1:9091`) with operator tokens:
 | Route | Purpose |
 | --- | --- |
 | `GET, POST /admin/v1/tenants`; `PATCH, DELETE /admin/v1/tenants/{t}` | Create, suspend or resume, delete. |
-| `PUT /admin/v1/tenants/{t}/quota` | Stored-byte quotas (soft and hard), monthly egress, rate. |
+| `PUT /admin/v1/tenants/{t}/quota` | Live-byte quotas (soft and hard), monthly egress, rate. |
 | `GET /admin/v1/usage?month=2026-10&format=csv` | One row per tenant, cache and metric: `month,tenant,cache,metric,value`. |
 | `POST /admin/v1/caches/{c}/scrub` | Re-verify every pack of a cache now. |
 | `GET /admin/v1/health` | Store, metadata and GC leader status. |
@@ -271,6 +286,8 @@ body     chunk_0 ‖ … ‖ chunk_last          chunk = AES-256-GCM(K_enc, nonc
 "OXSP" | u8 1 | u8 codec (0 none, 1 zstd, 2 zstd with dictionary) | u64 compressed_len | compressed | zero padding to Padmé(length)
 ```
 
+zstd frames are written with the content checksum flag set, and readers require it.
+
 The decompressed stream is the concatenation of the files, in record order. Segment
 id = `BLAKE3(header ‖ body)`.
 
@@ -292,7 +309,7 @@ Plaintext `OXEP`:
 | created_at, roster_version | `i64` unix seconds, `u64` |
 | signer | `bytes32` Ed25519 public key |
 | file_count | `u16` ≤ 16 |
-| files | `file_count × (str16 path, u64 size, bytes32 BLAKE3)` |
+| files | `file_count × (str16 path, u64 size)`; paths are unique within the set |
 | signature | `bytes64`, Ed25519 over `"oxabl-cache v1 entry" ‖ cache_id ‖ u32 epoch ‖ u8 ns_kind ‖ lookup_id ‖ every preceding OXEP byte` |
 | padding | zero bytes so the sealed record length is a multiple of 256; every byte must be zero |
 
@@ -305,7 +322,8 @@ Plaintext `OXEP`:
 | member_count | `u16` ≤ 1,000 |
 | members | `(str16 label, u8 role [0 owner, 1 ci, 2 developer, 3 reader], u8 n, n × bytes32 sign_key, u8 m, m × str16 age_recipient)` |
 | keyring | `u32 len` and an age file (binary format) encrypting `CRK ‖ cache_id ‖ u32 epoch` to every recipient |
-| signer, signature | `bytes32` owner key; `bytes64` Ed25519 over `"oxabl-cache v1 roster" ‖ every preceding byte` |
+| sig_count | `u8`, 1 to 4 |
+| signatures | `sig_count × (bytes32 owner key, bytes64 Ed25519)`, each over `"oxabl-cache v1 roster" ‖ every byte before sig_count` |
 
 The server sees member labels and public keys. Labels are customer-chosen and need
 not be names.

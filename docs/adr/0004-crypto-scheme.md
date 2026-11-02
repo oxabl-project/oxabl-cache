@@ -5,7 +5,9 @@ Status: accepted
 ## Decision
 
 - A per-epoch cache root key, held only by members, is distributed as an age file to
-  each member's X25519 recipient inside a roster signed by a pinned owner key.
+  each member's X25519 recipient inside a roster signed by one or more owner keys.
+  Clients accept a roster if a signer is pinned in the repository. The server accepts
+  it only if a signer is registered for the cache.
 - Lookup ids are `BLAKE3.keyed_hash(lookup_key, compile_key)`, so the server cannot
   confirm guesses.
 - Segments and records are sealed with AES-256-GCM (aws-lc-rs) under single-use keys
@@ -28,4 +30,6 @@ Status: accepted
 
 ## Consequences
 
-The whole security stack costs under 5% of wall-clock time on a 1 Gbit/s link.
+The whole security stack costs under 5% of wall-clock time on a 1 Gbit/s link, and
+about 15% of client CPU on a same-region 10 Gbit/s link. Records carry no per-file
+hashes; the zstd frame checksum guards against decompressor faults.

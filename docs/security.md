@@ -75,10 +75,16 @@ halves are listed in the roster. An identity is a single Bech32 string
 
 **Roster.** A versioned document listing members (`name`, `role` of `owner`, `ci`,
 `developer` or `reader`, signing keys, age recipients), the current epoch, the cache
-id, and the keyring: `CRK_e` encrypted with age to every member's recipient. One of
-the pinned owner keys signs it. The server stores the roster and accepts a new
-version only as `current + 1` from `cache:admin`. It cannot read the keyring or
-forge a roster.
+id, and the keyring: `CRK_e` encrypted with age to every member's recipient. It
+carries one or more owner signatures, and a client accepts it if any signer is one of
+its pinned owner keys.
+
+The server stores the roster and accepts a new version only as `current + 1`, from
+`cache:admin`, with an epoch of at most `current + 1`. It also requires a valid
+signature by one of the cache's owner public keys, which the tenant admin registers
+when creating the cache. These checks need public keys only, so a stolen
+`cache:admin` token cannot brick the cache with an unsigned roster or a huge epoch.
+The server can neither read the keyring nor forge a roster.
 
 **Distribution.**
 
@@ -106,7 +112,8 @@ forge a roster.
 | Add a member | Same epoch; roster `v+1` with `CRK_e` re-wrapped to the new recipient set. | none |
 | Remove a member (departed developer) | Disable their server principal (tokens and sessions die at once). Start a new epoch: fresh `CRK_{e+1}`, wrapped to the remaining members. Bump `min_roster_version` in the repository. Optionally `purge` epochs below `e+1`. | Cold cache: the next CI full build uploads ~0.9 GB in ~10 s on top of its compile, and each developer does one cold fetch (~9 s). |
 | CI key compromise | As removal, plus a new `ci` signing key. Clients reject entries signed by a key that is not in the current roster, whatever their epoch. | as above |
-| Owner key compromise | Change `owner_keys` in `.oxabl/cache.toml` (a repository commit), then sign a new roster and rotate. | as above |
+| Planned owner-key change | Add the new key to `owner_keys` on every live branch, and sign rosters with both the old and the new key. Drop the old key once no branch still pins it alone. | none |
+| Owner key compromise | Remove the key from `owner_keys` in `.oxabl/cache.toml` (a repository commit) and from the server's owner keys, then sign a new roster without it and rotate. Branches whose committed file pins only the removed key reject every new roster and run without the cache until that file is updated there. This fails closed, and `oxabl-cache status` says why. | as above |
 
 A removed member who kept `CRK_e` can read epoch-`e` ciphertext only by also
 stealing the bucket. Purging old epochs closes that window. They never see a later
@@ -157,10 +164,12 @@ remains is the compressed size, which padding coarsens. Accepted.
 ## Integrity without trusting the server
 
 The plaintext of each record holds: segment id, segment length, dictionary id,
-plaintext length, per-file root-relative path, size and `BLAKE3`, the producer's
-signing key, the roster version at signing time, and a creation time. All of it is
+plaintext length, each file's relative path and size, the producer's signing key, the roster version at signing time, and a creation time. All of it is
 signed with Ed25519 over a domain-separated transcript that also covers `cache_id`,
 `epoch`, `ns_kind` and `lookup_id`. The signature sits inside the ciphertext.
+Records carry no per-file hashes. The signed segment id, the AEAD and the signature
+already bind every byte, and the zstd frame checksum (XXH64, nearly free) guards
+against decompressor faults.
 
 **Trust tiers.**
 
@@ -172,6 +181,14 @@ signed with Ed25519 over a domain-separated transcript that also covers `cache_i
   `trusted`, and nobody can write another user's `personal`. To poison what CI or
   another developer reads, an attacker must therefore defeat both the server's scope
   check and a signature check, with a `ci` key that developer machines never hold.
+
+**Local copies.** The tiers protect what the client fetches. A copy that a caller
+keeps on disk afterwards (oxabl's local artifact cache) is only as trusted as
+every process that can write it. For that reason, each `Installed` outcome carries
+its `Provenance` (tier, signer, epoch, roster version), and oxabl records it with the
+local entry. In `ci` mode, or when `CI` is set, oxabl turns its local cache off unless
+the config names a per-job directory that oxabl empties first. In developer mode the
+local cache trusts every process of the OS user.
 
 **Malicious pull requests** run code inside CI. They never hold a `ci` key or
 `write:trusted`, so they cannot write. A `reader` identity lets them decrypt cached
@@ -208,19 +225,39 @@ cache design can detect that.
   `SHA-256(secret)` (enough for a high-entropy secret; no password hash needed),
   compared in constant time. Each token carries scopes, a cache list and an expiry
   (default 90 days, maximum 1 year).
-- **OIDC workload identity** (GitHub Actions, GitLab CI, Gitea Actions): the job
-  exchanges its ID token at `POST /v1/auth/oidc` for an opaque session token valid
-  for 1 hour. The server checks:
+- **OIDC workload identity** (GitHub Actions and GitLab CI): the job exchanges its
+  ID token at `POST /v1/auth/oidc` for an opaque session token valid for 1 hour. The
+  server checks:
   - the issuer against the tenant's allowlist, and the signature with JWKS fetched
     over TLS (cached at most 1 h, refetched once on an unknown `kid`);
   - the algorithm: RS256, ES256 or EdDSA (never `none` or HMAC);
   - `aud` equals the tenant's configured audience;
   - `exp`, `nbf` and `iat` within 60 s of skew;
   - the claim conditions of a trust policy, exact matches on claims such as
-    `repository`, `ref` or `environment`, stored as keyed hashes.
+    `repository_id`, `ref` or `environment`, stored as keyed hashes.
+- **Shared issuers need an immutable subject.** Issuers that serve many unrelated
+  customers (built in: `https://token.actions.githubusercontent.com` and
+  `https://gitlab.com`; operators can add more) accept a policy only if it pins an
+  immutable numeric id:
+  - GitHub: `repository_id`, or `repository_owner_id` plus `repository`;
+  - GitLab: `project_id`, or `namespace_id` plus `project_path`.
 
-  Policies grant scopes, for example `write:trusted` only to `environment =
-  cache-writer`.
+  Names can be re-registered after a rename and are never enough on their own. A
+  typical writer policy is `repository_id = 123456789` with `ref =
+  refs/heads/main` and `environment = cache-writer`.
+- **Workloads never get administration scopes.** A policy may grant `read`,
+  `write:personal` or `write:trusted` only. `cache:admin` and `tenant:admin` belong to
+  humans and to tokens a human creates.
+- **Issuer fetches are SSRF-guarded.** Discovery and JWKS URLs must be `https` on
+  port 443. Every resolved address, again after each redirect (at most 3), must be
+  public: loopback, private, link-local, CGNAT, unique-local and metadata ranges are
+  refused. Responses are capped at 256 KiB and 5 s, and errors returned to the tenant
+  are generic. On the hosted service an operator allowlist of issuers is also
+  enforced: the two shared issuers plus self-hosted ones the operator approves.
+- **Gitea Actions** gains OIDC ID tokens in Gitea 29 (merged upstream 2026-10-18,
+  not yet released as of 2026-11-02). Until then Gitea CI uses a scoped API token
+  held as a CI secret. When a release ships it, Gitea is added as a non-shared
+  issuer (each instance is its own issuer) with its own test.
 - **Humans:** `oxabl-cache login` runs the OAuth device authorization grant
   (RFC 8628) against the tenant's IdP (or the hosted service's IdP) and exchanges the
   ID token at the same endpoint for a 12-hour session.
@@ -254,12 +291,13 @@ build, `target-cpu=native`):
 
 Per scenario (0.93 GB sealed, 4.3 GB plain, 10,000 sets):
 
-| Scenario | Security CPU | Wall-clock effect at 1 Gbit/s |
+| Scenario | Security CPU | Wall-clock effect at 1 Gbit/s, 30 ms RTT |
 | --- | --- | --- |
-| Cold fetch | Segment ids 0.24 s, AES 0.18 s, file hashes 1.12 s, signatures 0.34 s: ~1.9 core-s, ~0.25 s on 8 cores, overlapped with ~8 s of transfer | +1.2% bytes from padding (~0.1 s), ~2 to 3% in total |
-| CI upload | AES 0.18 s, ids 0.24 s, file hashes 1.12 s, signing 0.17 s: ~1.7 core-s, next to 11 to 22 core-s of zstd | < 2% |
+| Cold fetch | Segment ids 0.24 s, AES 0.18 s, signatures 0.34 s: ~0.8 core-s, ~0.1 s on 8 cores, overlapped with ~8 s of transfer | +1.2% bytes from padding (~0.1 s), ~2% in total |
+| CI upload | AES 0.18 s, ids 0.24 s, signing 0.17 s: ~0.6 core-s, next to 11 to 22 core-s of zstd | < 1% |
 | Lookup of 20,000 keys | ids 1.6 ms; record verification (fetch mode only) 0.7 core-s, ~90 ms on 8 cores | ~0 in presence mode |
 
-The whole security stack costs under 5% of wall-clock time, because every flow is
-bound by bandwidth or round trips. No weaker design can reach the owner's 2x
-threshold.
+At 1 Gbit/s the whole security stack costs under 5% of wall-clock time, because
+every flow is bound by bandwidth or round trips. On a same-region 10 Gbit/s link the
+cold fetch becomes CPU-bound. Security is then ~15% of client CPU (0.8 of ~5.1
+core-s; decompression is the rest), about 0.1 s of wall-clock time on 8 cores.

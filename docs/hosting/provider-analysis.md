@@ -218,7 +218,7 @@ Latency and throughput reasoning (arithmetic, not provider data):
 
 ## 5. S3 compatibility, lock-in and portability
 
-What the core needs from a store (the portable set): `PutObject` (optionally `If-None-Match: *`), `GetObject` with `Range`, `HeadObject`, `DeleteObject` and `DeleteObjects`, `ListObjectsV2`, multipart upload, presigned PUT and GET. Client-side integrity (AEAD tags and content hashes verified by the client) means checksum headers such as `x-amz-checksum-sha256` are a transport optimisation, never the trust anchor, so a backend without them is acceptable.
+What the core needs from a store (the portable set): `PutObject` (single part; packs are at most 32 MiB), `GetObject` with `Range`, `HeadObject` with an ETag, `DeleteObjects`, `ListObjectsV2`, presigned PUT and GET. `If-None-Match: *` and checksum headers are optional capabilities (architecture.md, "Crate layout"). Multipart upload is not used. Client-side integrity (AEAD tags and content hashes verified by the client) means checksum headers such as `x-amz-checksum-sha256` are a transport optimisation, never the trust anchor, so a backend without them is acceptable.
 
 | Provider | Presigned URLs | Range GET | Multipart | `If-None-Match` on PUT | `x-amz-checksum-sha256` | Status |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -232,8 +232,8 @@ What the core needs from a store (the portable set): `PutObject` (optionally `If
 Portability rules for the design:
 
 1. The core talks only to the portable set above, behind one `ObjectStore` trait with a local-disk implementation and an S3 implementation. Anything beyond it (Azure Blob, CDN signing, R2 jurisdictions, Workers) lives in a separate adapter crate.
-2. At startup the S3 backend runs a conformance probe against the configured bucket (write-once on a second PUT with `If-None-Match: *`, ranged read, multipart, presigned round trip, batch delete) and refuses to start on a failed required check. An optional check (checksum headers) downgrades to a logged capability flag. Fail closed.
-3. Where `If-None-Match` is absent, first-write-wins is arbitrated by the metadata database and objects get unique keys; the bucket then never needs conditional writes. This keeps Ceph RGW, MinIO, Garage and any older store usable.
+2. At startup the S3 backend runs a conformance probe against the configured bucket. Required checks: a presigned PUT and GET round trip, a ranged read, an ETag on `HEAD`, batch delete, and list. A failed required check stops startup (fail closed). Optional checks (`If-None-Match: *` on a second PUT, checksum headers) only set capability flags, which the server then signs into PUT URLs as extra guards.
+3. First-write-wins is always arbitrated by the metadata database, and packs get unique random keys, so the bucket never needs conditional writes. This keeps Ceph RGW, MinIO, Garage and any older store usable.
 4. Cloudflare-specific features (R2 jurisdictions and locations, Workers, Cache API) and B2's free egress through CDN partners are optional deployment topology, never core dependencies. Moving between R2, Hetzner Object Storage, B2 and Tigris is a bucket sync plus a config change.
 
 ## 6. Recommendation
@@ -259,8 +259,8 @@ One vendor, one invoice, EU data residency, 97 to 132 a month at 500 tenants, an
 
 **Self-hosted default for a customer's own cluster**
 
-- **Default: local disk.** One binary, a directory for blobs and a SQLite metadata file, no dependencies. Content-addressed files are written to a temporary name and renamed into place with exclusive-create semantics.
-- **Cluster mode: any S3-compatible store**, the owner's Ceph RGW first, then MinIO or Garage. They must pass the startup conformance probe of section 5; where `If-None-Match` is missing, the metadata database arbitrates first-write-wins. Metadata moves from SQLite to Postgres once two API nodes run.
+- **Default: local disk.** One binary, a directory for blobs and a SQLite metadata file, no dependencies. Packs (random ids) are written to a temporary name, fsynced and renamed into place; the server refuses any write to a pack once it is no longer pending.
+- **Cluster mode: any S3-compatible store**, the owner's Ceph RGW first, then MinIO or Garage. They must pass the required checks of the startup conformance probe in section 5; the metadata database arbitrates first-write-wins on every store. Metadata moves from SQLite to Postgres once two API nodes run.
 - No cloud SDK is linked into the default build.
 
 ## 7. Open items
@@ -307,7 +307,7 @@ The unpacked test uploads 10,000 objects, which equals the Tigris class A free t
 
 ### Test script (run from both VMs)
 
-1. **Conformance probe** with the AWS CLI against each endpoint: second `put-object --if-none-match "*"` must return 412; `put-object --checksum-algorithm SHA256` with a wrong digest must fail and with a right digest must succeed; `get-object --range bytes=100-199` returns 206 with the exact bytes; a three-part multipart upload (5 MiB parts) completes; a presigned PUT and GET work through `curl`, including with `If-None-Match` signed; `delete-objects` of 1,000 keys; `list-objects-v2` over 10,000 keys paginates.
+1. **Conformance probe** with the AWS CLI against each endpoint: second `put-object --if-none-match "*"` must return 412; `put-object --checksum-algorithm SHA256` with a wrong digest must fail and with a right digest must succeed; `get-object --range bytes=100-199` returns 206 with the exact bytes; a three-part multipart upload (5 MiB parts) completes (informational; the design does not use multipart); a presigned PUT and GET work through `curl`, including with `If-None-Match` signed; `delete-objects` of 1,000 keys; `list-objects-v2` over 10,000 keys paginates.
 2. **Latency and throughput.** Upload 10,000 × 90 KB objects, and 72 × 12.5 MB packs of the same bytes. From each VM: full cold fetch at concurrency 16 and 64 (unpacked GETs against packed range GETs), 750 incremental fetches of 200 artifacts, and record time to first byte (p50, p99), total time and effective Mbit/s per provider.
 3. **Billing check.** Compare each dashboard's request and egress counters with the bytes and requests the script sent; confirm class A and B classification and the free-tier arithmetic.
 4. **Churn.** Write 4 GB, delete it after one day, and verify the invoice line (matters for Wasabi-style minimum durations; here it confirms R2 and Hetzner bill nothing extra).

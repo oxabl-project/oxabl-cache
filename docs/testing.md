@@ -1,19 +1,19 @@
 # Testing
 
 There are no unit tests. Every test drives the product as a consumer would: the
-`oxcache-server` and `oxabl-cache` binaries, raw HTTP, and the public API of
-`oxcache-client`. Tests assert outcomes (bytes on disk, HTTP statuses, usage
+`oxabl-cache-server` and `oxabl-cache` binaries, raw HTTP, and the public API of
+`oxabl-cache-client`. Tests assert outcomes (bytes on disk, HTTP statuses, usage
 figures), never internal state. Fuzzing covers the parsers and the install path.
 
 ## Harness
 
-`tests/e2e` is a separate package (`oxcache-e2e`). Its only workspace dependency is
-`oxcache-client`, used through its public API. Its frame parser for `OXLR`, `OXCM`
+`tests/e2e` is a separate package (`oxabl-cache-e2e`). Its only workspace dependency is
+`oxabl-cache-client`, used through its public API. Its frame parser for `OXLR`, `OXCM`
 and the other frames is written independently from protocol.md. The hostile proxy
 and the storage attacks below use it, so it also checks the spec.
 
-- **Server under test.** The harness builds `oxcache-server` once
-  (`cargo build -p oxcache-server --locked`) and starts it per test with a generated
+- **Server under test.** The harness builds `oxabl-cache-server` once
+  (`cargo build -p oxabl-cache-server --locked`) and starts it per test with a generated
   config: `listen = 127.0.0.1:0`, short timers (grace 2 s, lease 2 s, GC interval
   200 ms, URL lifetime 5 s), and a fresh data directory under
   `target/e2e-tmp/<test>-<pid>/`. It reads the bound address from the server's
@@ -25,7 +25,7 @@ and the storage attacks below use it, so it also checks the spec.
   devshell (`nix develop`), one per test binary, each test on its own bucket and
   random port. It supports every operation in the portable subset. A nightly job
   repeats the S3 suite against Garage (a second, independent implementation) and
-  runs `oxcache-server check-store` against a dedicated R2 test bucket.
+  runs `oxabl-cache-server check-store` against a dedicated R2 test bucket.
 - **Postgres:** `initdb` and `postgres -k <dir> -p <port>` from the same devshell,
   one cluster per test binary, one database per test.
 - **No Docker.** Every dependency is a child process in its own process group, with
@@ -34,11 +34,16 @@ and the storage attacks below use it, so it also checks the spec.
 - **Fixtures.** A generator makes synthetic artifact sets that look like r-code (a
   binary header, a string table, sizes log-uniform from 4 KB to 7 MB). Every file and
   path embeds a unique random canary. No Progress runtime is needed.
-- **Driver.** `oxcache-e2e-driver` is a small binary over the public client API. It
+- **Driver.** `oxabl-cache-e2e-driver` is a small binary over the public client API. It
   prints one progress line per phase, so the harness can `SIGKILL` it at an exact
   point.
 - **Fake IdP.** A test tool that serves JWKS and mints ID tokens shaped like those of
-  GitHub, GitLab and Gitea Actions.
+  GitHub Actions and GitLab CI. The harness registers it as a shared issuer when a
+  test needs that. Gitea Actions is added once a Gitea release issues ID tokens.
+- **Break it once.** Every scenario and adversarial test below is first run against a
+  deliberately broken server or client build (the protecting check removed) and must
+  fail, naming its assertion. The break is recorded in the pull request that adds the
+  test.
 
 ## Scenarios
 
@@ -46,14 +51,19 @@ Each test names the behaviour it protects.
 
 | Area | Scenario and assertion |
 | --- | --- |
-| Round trip | CI stores 500 sets; a developer fetches them. Installed files are byte-identical, `InstalledFile.blake3` matches, and no temp files remain. |
+| Round trip | CI stores 500 sets; a developer fetches them. Installed files are byte-identical, `Provenance` names the `ci` signer and `Tier::Trusted`, and no temp files remain. Repeated with `Durability::PerFile` and `Durability::Caller`. |
+| Streaming fetch | Outcomes arrive per key before the whole fetch completes. A store throttled to 1 MB/s keeps the fetch alive past 30 s, because bytes flow. A store that stalls makes every pending key `Timeout` after the idle timeout, and sets already installed stay installed. |
+| Lazy store | 2,000 sets of 5 MB each are fed through `put` while the driver runs under a 512 MiB `RLIMIT_AS`, with no failure. A source file changed after `put` reports `SourceChanged`. Duplicate or invalid paths report `Rejected`. |
+| Config trust | `from_repo` fails with `TrustOverride` when `OXABL_CACHE_OWNER_KEYS`, `OXABL_CACHE_MIN_ROSTER_VERSION` or `OXABL_CACHE_CACHE` is set, and when `cache.toml` has an unknown key. `OXABL_CACHE_SERVER` is honoured. |
 | First write wins | Two CI writers store different bytes for the same 1,000 keys. Per key, one gets `committed` and the other `exists`. Every reader installs exactly one writer's complete set. |
 | Tiers | A developer's personal writes are invisible to CI and to other developers. A developer token gets 403 writing `trusted` over raw HTTP. A developer-signed record copied into `trusted` in the database is a miss (`Untrusted`) for CI. |
-| Quotas | Writes over the hard quota report `QuotaExceeded` and the build continues. Above the soft quota, eviction brings usage under 80%, personal namespaces first. |
+| Quotas | Writes over the hard quota report `QuotaExceeded` and the build continues. With the grace set longer than the test, a full-rebuild workload pushes live bytes past 90%. Eviction stops at or just under 80% live, trusted entries written last still install, personal namespaces go first, and `reclaimable_bytes` reports the lag. |
 | Retention and GC | An entry idle past retention disappears and its pack is deleted after the grace. A reader holding a URL issued before eviction still downloads within the grace. |
 | Compaction | A churn-heavy workload leaves packs under 50% live. After compaction every live entry still installs correctly and stored bytes drop. |
 | Rotation | After `member remove`, the removed identity cannot open new-epoch records. Clients pinned to the new `min_roster_version` refuse the old roster. |
-| OIDC | A matching policy yields a session with the policy's scopes. A wrong `aud`, an expired token, `alg: none`, an HMAC algorithm, an unknown `kid` or an unmatched claim gets 401. |
+| OIDC | A matching policy yields a session with the policy's scopes. A wrong `aud`, an expired token, `alg: none`, an HMAC algorithm, an unknown `kid` or an unmatched claim gets 401. On a shared issuer, a policy with only `environment` (no `repository_id` or `project_id`) is refused with 400, and a token from another repository with the same environment name gets 401. A workload policy granting `cache:admin` or `tenant:admin` is refused. |
+| Issuer SSRF | Registering issuers at `https://127.0.0.1`, at a private address, at a name that resolves to a private address, and at a public URL that redirects to a private one: every case is refused, and the harness's listener on the private address sees no request. With an issuer allowlist configured, an unlisted public issuer is refused. |
+| Roster checks | A `cache:admin` token's PUT of an unsigned roster, a roster signed by an unregistered key, or one with epoch `current + 2` gets 400, and clients keep working. A roster signed by both the old and the new owner key opens for clients pinned to either. |
 | Tokens | A revoked or expired token gets 401 on the next call, mid-session included. |
 | Tenancy | Tenant B's token on tenant A's cache gets 404. |
 | Usage | `usage export` equals the counts the test drove (bytes, ids, hits, commits). |
@@ -89,9 +99,22 @@ producer stored, the outcome is a miss, and no temp file remains.
   never a wrong install. A roster rollback below the high-water mark or
   `min_roster_version` gives `OpenError`.
 - **Malicious producer paths.** A `ci` identity stores records with `..`, absolute
-  paths, backslashes, NUL bytes and over-long paths, and `out_root` contains a
-  symlink pointing outside it. The filesystem outside `out_root` is byte-identical
-  before and after, and every case misses.
+  paths, backslashes, NUL bytes, duplicate paths and over-long paths, and the stage
+  contains a symlink pointing outside it. The filesystem outside the stage is
+  byte-identical before and after, and every case misses.
+- **Claimed segment ids.** A developer opens a trusted record (they hold the root
+  key), uploads a personal pack of garbage, and commits an `OXCM` naming the trusted
+  segment id at an offset in their own pack. The entry gets `invalid`, the trusted
+  segment's location is unchanged, and every trusted entry still installs for CI and
+  for other developers.
+- **PUT after commit.** After a pack's first commit, a `client_ref` retry returns
+  `committed` with no URL. A replay of the original PUT URL is refused where the store
+  supports `If-None-Match`, and refused by the local route. Where the store lacks it,
+  the overwrite is caught: the next commit retry gets `pack_changed`, and scrub and
+  compaction report the ETag change.
+- **Commit into closed packs.** A commit into a pack whose entries were all evicted
+  (`dead_since` set), and into a pack chosen as a compaction source, gets 409
+  `pack_closed`. After the sweep, every live entry still installs.
 - **Decompression bombs.** A signed record with `plain_len` above the limit, and a
   stream that expands past its declared `plain_len`. Both miss with bounded memory
   (the driver runs under a 512 MiB `RLIMIT_AS`).
@@ -116,14 +139,16 @@ corpora live in `fuzz/corpus/`, seeded from frames the e2e suite records.
 
 ## Load tests
 
-`tests/load` holds `oxcache-load`, built on the public client API, against
+`tests/load` holds `oxabl-cache-load`, built on the public client API, against
 `s3 + postgres` on dedicated hardware, weekly and before each release. The 30 ms RTT
 comes from `tc netem` inside a network namespace on that runner only.
 
 | Scenario | Pass |
 | --- | --- |
 | 50 concurrent CI full uploads of 10,000 synthetic sets | zero errors; each ≤ 12.5 s at 1 Gbit/s |
-| 500 developers, plan-mode lookups of 20,000 ids, 1 per second each | p99 ≤ 300 ms; database CPU < 70% |
+| Peak hosted load: 500 tenants' worth, 40 full-graph plan lookups (20,000 ids) per second for 10 min, which is 10x the hosting model's peak of about 4 per second | p99 ≤ 300 ms; database CPU < 50% on a 4-vCPU primary |
+| Capacity: ramp 10,000-id probes until p99 exceeds 1 s | reports the measured probe cost; must sustain ≥ 100 probes/s on a 4-vCPU primary, or architecture.md "Scaling" is corrected in the same change |
+| Cold-fetch install: one client, 10,000 sets with XREF and debug lists (~30,000 files) | reports install time for `PerFile` and for `Caller` plus one `syncfs`; within 25% of the budget |
 | 200 concurrent cold fetches | per-client time within 25% of the budget (architecture.md); zero wrong installs |
 
 ## Build gates
@@ -133,8 +158,8 @@ Every pull request runs:
 - `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo deny check`
   (advisories, licences, bans), and `#![forbid(unsafe_code)]` in every crate.
 - **Server crypto ban:** `scripts/check-server-deps` fails if
-  `cargo tree -p oxcache-server -e normal` contains `oxcache-crypto`,
-  `oxcache-client` or `age`. A fixture crate that depends on `oxcache-crypto` must
+  `cargo tree -p oxabl-cache-server -e normal` contains `oxabl-cache-crypto`,
+  `oxabl-cache-client` or `age`. A fixture crate that depends on `oxabl-cache-crypto` must
   make the script fail; that case runs in the same job, so the gate cannot silently
   pass.
 - **Public-repo hygiene:** a grep for internal identifiers over the tree, with a

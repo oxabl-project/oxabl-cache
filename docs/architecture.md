@@ -63,61 +63,69 @@ ADR: [0001](adr/0001-hexagonal-core.md).
 | Namespace | Where an entry lives: `trusted` (CI) or `personal(user)` (one per developer). | yes |
 | Entry | `(cache, namespace, lookup_id) → sealed record`, plus the ids of the segment and dictionary it names, its epoch and sizes. Immutable once committed. | ids and sizes |
 | Segment | One sealed, compressed artifact set (or a compression dictionary), named by the BLAKE3 hash of its sealed bytes. Lives at `(pack, offset, length)`. | id, size, location |
-| Pack | An immutable object of 5 to 32 MiB holding segments back to back, with a plaintext footer index of segment ids and offsets. State `pending`, `live` or `deleting`. | id, size, live bytes |
+| Pack | An immutable object of 5 to 32 MiB holding segments back to back, with a plaintext footer index of segment ids and offsets. State `pending`, `live` or `deleting`, plus a `committable` flag that only ever goes from true to false. | id, size, live bytes, ETag |
 | Roster | Signed, versioned list of the cache's members and their public keys, plus the cache root key wrapped to those members. Opaque to the server except its version. | version |
 | Epoch | Generation of the cache root key. Rotation starts a new epoch, and lookup ids change with it. | number |
 | Usage | Append-only ledger rows: tenant, cache, day, metric, value. | yes |
-| Quota | Per tenant and per cache: stored bytes (soft and hard), monthly egress bytes, request rate. | yes |
+| Quota | Per tenant and per cache: live bytes (soft and hard), a stored-bytes ceiling, monthly egress bytes, request rate. | yes |
 
 Invariants the core enforces:
 
 1. An entry is inserted at most once per `(cache, namespace, lookup_id)`. The first
    commit wins; later commits are told `exists`. The database arbitrates this; the
    object store is never asked for conditional writes.
-2. Entries are committed only into a pack the same principal uploaded, still
-   `pending` or `live` and verified present at its declared size. The pack flips to
-   `live` in the same transaction.
-3. A pack is deleted only when no entry names any of its segments and it has been
+2. Entries are committed only into a pack the same principal uploaded, that is
+   `pending`, or `live` and still `committable`, and that is verified present at its
+   declared size. The pack flips to `live` in the same transaction. A pack stops being
+   committable, for good, when it first gets `dead_since` or is chosen as a compaction
+   source.
+3. A segment id is unique within a cache. A commit may name a segment id only if it
+   is new to the cache, or is already recorded in the same pack at the same offset and
+   length (a retry).
+4. A pack is deleted only when no entry names any of its segments and it has been
    dead for the grace period, or it is `pending` with an expired lease.
-4. Writes into `trusted` need `write:trusted`; writes into `personal(u)` need
+5. Writes into `trusted` need `write:trusted`; writes into `personal(u)` need
    `write:personal` and the caller to be `u`. A pack never mixes namespaces. Reads see
    `trusted` and the caller's own `personal` namespace only.
-5. Every query carries a tenant scope; a cache id from another tenant is "not found".
+6. Every query carries a tenant scope; a cache id from another tenant is "not found".
 
 ## Crate layout
 
+Every crate is named `oxabl-cache-<part>`. oxabl depends only on the published
+`oxabl-cache-client` (`oxabl_cache_client`).
+
 ```
 crates/
-  oxcache-format        byte formats: magic, versions, encode/decode, size limits; no keys
-  oxcache-crypto        client-only: key hierarchy, lookup ids, seal/open, signatures, roster
-  oxcache-client        public client library used by oxabl
-  oxcache-cli           `oxabl-cache` binary: identities, roster, rotation, login, diagnostics
-  oxcache-core          domain, use cases, ports (MetadataStore, ObjectStore, IdentityVerifier, Clock)
-  oxcache-meta-sqlite   MetadataStore on SQLite (single node)
-  oxcache-meta-postgres MetadataStore on Postgres (multi node)
-  oxcache-store-fs      ObjectStore on a local directory; its URLs are served by oxcache-http
-  oxcache-store-s3      ObjectStore on the portable S3 subset (SigV4, presigned URLs, Range)
-  oxcache-oidc          IdentityVerifier: JWT and JWKS validation, trust policy matching
-  oxcache-http          axum routes, extractors, error envelope, rate limiting
-  oxcache-server        `oxcache-server` binary: config, wiring, serve, migrate, backup, scrub
-  oxcache-admin         `oxcache-admin` binary: operator CLI over the admin API
-tests/e2e               black-box harness (testing.md)
-fuzz/                   cargo-fuzz targets
+  oxabl-cache-format         byte formats: magic, versions, encode/decode, size limits; no keys
+  oxabl-cache-crypto         client-only: key hierarchy, lookup ids, seal/open, signatures, roster
+  oxabl-cache-client         public client library used by oxabl
+  oxabl-cache-cli            `oxabl-cache` binary (member CLI): identities, roster, rotation, login
+  oxabl-cache-core           domain, use cases, ports (MetadataStore, ObjectStore, IdentityVerifier, Clock)
+  oxabl-cache-meta-sqlite    MetadataStore on SQLite (single node)
+  oxabl-cache-meta-postgres  MetadataStore on Postgres (multi node)
+  oxabl-cache-store-fs       ObjectStore on a local directory; its URLs are served by oxabl-cache-http
+  oxabl-cache-store-s3       ObjectStore on the portable S3 subset (SigV4, presigned URLs, Range)
+  oxabl-cache-oidc           IdentityVerifier: JWT and JWKS validation, issuer guard, trust policies
+  oxabl-cache-http           axum routes, extractors, error envelope, rate limiting
+  oxabl-cache-server         `oxabl-cache-server` binary: config, wiring, serve, migrate, backup, scrub
+  oxabl-cache-admin          `oxabl-cache-admin` binary: operator CLI over the admin API
+tests/e2e                    black-box harness (testing.md)
+fuzz/                        cargo-fuzz targets
 ```
 
 Dependency direction (arrows mean "depends on"):
 
 ```
-oxcache-cli ─► oxcache-client ─► oxcache-crypto ─► oxcache-format
-oxcache-server ─► oxcache-http ─► oxcache-core ─► oxcache-format
-oxcache-server ─► {meta-sqlite, meta-postgres, store-fs, store-s3, oidc} ─► oxcache-core
-oxcache-admin ─► (HTTP only; no server crate)
+oxabl-cache-cli ─► oxabl-cache-client ─► oxabl-cache-crypto ─► oxabl-cache-format
+oxabl-cache-server ─► oxabl-cache-http ─► oxabl-cache-core ─► oxabl-cache-format
+oxabl-cache-server ─► {meta-sqlite, meta-postgres, store-fs, store-s3, oidc} ─► oxabl-cache-core
+oxabl-cache-admin ─► (HTTP only; no server crate)
 ```
 
-`oxcache-format` is the only crate both sides share. It parses outer headers and pack
+`oxabl-cache-format` is the only crate both sides share. It parses outer headers and pack
 footers (magic, version, sizes, offsets) so the server can reject malformed input and
 compact packs, but it handles no keys. A build gate (testing.md) fails if
-`oxcache-server`'s dependency tree contains `oxcache-crypto`, `oxcache-client` or
+`oxabl-cache-server`'s dependency tree contains `oxabl-cache-crypto`, `oxabl-cache-client` or
 `age`.
 
 The S3 adapter uses only the portable subset: `PutObject`, `GetObject` with
@@ -125,11 +133,12 @@ The S3 adapter uses only the portable subset: `PutObject`, `GetObject` with
 It is built on `rusty-s3` for signing plus `reqwest`. The AWS SDK is rejected: it is
 large and AWS-shaped, and its default checksum behaviour breaks other S3-compatible
 stores. A provider feature beyond the subset (Azure Blob's own API, R2 jurisdictions)
-goes into its own `oxcache-store-<provider>` crate, never into the core. The adapter
-probes the bucket at startup (presigned round trip, ranged read, batch delete, list)
-and refuses to start on a failure. Checksum headers (`x-amz-checksum-sha256`) are an
-optional capability the probe detects. When present, the server signs them into PUT
-URLs as a transport check; integrity never depends on them.
+goes into its own `oxabl-cache-store-<provider>` crate, never into the core. The adapter
+probes the bucket at startup (presigned round trip, ranged read, batch delete, list,
+ETag on `HEAD`) and refuses to start on a failure. Two capabilities are optional and
+detected by the probe: `If-None-Match: *` on PUT and `x-amz-checksum-sha256`. When
+present, the server signs them into PUT URLs as extra guards; correctness never
+depends on them.
 
 ## Storage
 
@@ -202,7 +211,7 @@ subset. The black-box suite runs in full against both.
   would then need a database server. SQLite-only is rejected because nodes cannot
   share it.
 
-Growth from one node to many is `oxcache-server migrate --from a.toml --to b.toml`.
+Growth from one node to many is `oxabl-cache-server migrate --from a.toml --to b.toml`.
 It runs offline and copies metadata (SQLite to Postgres) and packs (disk to S3),
 re-hashing every segment against its id from the pack footer and comparing row counts
 per table. It refuses to finish on any difference. The schema uses no SQLite-only
@@ -216,11 +225,18 @@ Core tables: `tenants`, `caches`, `users`, `workload_policies`, `tokens`,
 
 - `entries`: key `(cache_id, ns, lookup_id)`, where `ns` is `0` for trusted and the
   user id for personal. Columns `segment_id`, `dict_id`, `epoch`, `record` (sealed
-  bytes), `created_at`, `access_day`.
-- `segments`: key `(cache_id, segment_id)`; columns `pack_id`, `offset`, `length`,
-  `dead_since`.
-- `packs`: key `(cache_id, pack_id)`; columns `ns`, `uploader`, `size`,
-  `live_bytes`, `state`, `lease_until`, `dead_since`.
+  bytes), `created_at`. Insert-only.
+- `entry_access`: same key, one column `access_day`, index `(cache_id, access_day)`.
+  It is a narrow table, so the daily touch never rewrites a row that carries a
+  512-byte record.
+- `segments`: key `(cache_id, segment_id)` (the uniqueness of invariant 3); columns
+  `pack_id`, `offset`, `length`, `dead_since`.
+- `packs`: key `(cache_id, pack_id)`; columns `ns`, `uploader`, `client_ref`, `size`,
+  `etag`, `live_bytes`, `state`, `committable`, `lease_until`, `dead_since`.
+- `caches` carries `live_bytes` (sum of live segment lengths) and `pending_bytes`,
+  updated in the same transactions as the rows they sum.
+- `nodes`: `node_id`, `heartbeat_at`, written every 10 s, for the live node count
+  (rate limits, operations.md).
 
 ## Write and read paths
 
@@ -231,15 +247,29 @@ them.
    locally (client.md).
 2. `POST uploads` declares each pack's size. The server reserves quota, inserts a
    `pending` pack row with a 1-hour lease, and returns a pack id and a presigned PUT.
+   A PUT URL is issued only while the pack is `pending` and has never been committed.
+   A `client_ref` retry after the first commit returns `committed` and no URL. Where
+   the probe found `If-None-Match`, it is signed into the PUT, so the store also
+   refuses a second write.
 3. The client PUTs the pack. S3 acknowledges only durable objects. The local adapter
-   writes into `tmp/`, fsyncs, renames and fsyncs the directory before answering 200.
-4. `POST entries` for that pack: the segment table (id, offset, length) and up to
-   2,000 sealed records. The server checks the pack is `pending` or `live`, belongs to
-   the caller and namespace, and that `HEAD` (or `stat`) reports exactly the declared
-   size. It also checks that segments are in bounds and do not overlap. In one
-   transaction it inserts segments, inserts entries with `ON CONFLICT DO NOTHING`, sets
-   the pack `live` and credits `live_bytes` only for segments of entries that won. It
-   returns `committed` or `exists` per entry.
+   writes into `tmp/`, fsyncs, renames and fsyncs the directory before answering 200,
+   and refuses any PUT once the pack is not `pending`.
+4. `POST commit` for that pack: the segment table (id, offset, length) and up to
+   2,000 sealed records. Under a row lock on the pack, the server checks:
+   - the pack is `pending`, or `live` and `committable` (otherwise 409);
+   - it belongs to the caller and to the namespace in the frame;
+   - `HEAD` (or `stat`) reports exactly the declared size. The first commit records
+     the object's ETag, and a later commit that sees a different ETag gets 409 and
+     queues a scrub of the pack;
+   - every segment is in bounds, and no two overlap;
+   - every segment id is new to the cache or a retry (invariant 3). A segment id
+     already recorded anywhere else makes that segment, and every entry naming it,
+     `invalid`. This stops a writer from claiming another namespace's segment.
+
+   In one transaction the server then inserts the segments and inserts the entries
+   with `ON CONFLICT DO NOTHING`. It sets the pack `live` and credits `live_bytes`
+   (pack and cache) only for segments of entries that won. It returns `committed`,
+   `exists` or `invalid` per entry.
 
 A crash before step 4 leaves a `pending` pack that the lease expiry reclaims. A crash
 inside step 4 rolls the transaction back. Concurrent writers of the same key both
@@ -252,7 +282,8 @@ segment ids produces misses on read and is then removed by the report path below
 segment location, plus one presigned GET per pack involved. The client opens and
 verifies the record, range-reads the segment, checks `BLAKE3` against the signed
 segment id, decrypts and decompresses into temporary files beside the targets, checks
-every file hash, and only then renames. Any failure is a miss (client.md, "Install").
+the zstd frame checksum and the signed sizes, and only then renames. Any failure is
+a miss (client.md, "Install").
 
 **Report.** A client that finds a segment whose bytes do not hash to its id posts a
 report. The server range-reads that segment itself, hashes it, and only on a mismatch
@@ -267,24 +298,30 @@ GC runs inside the server, on one node at a time, elected with a Postgres adviso
 lock (with SQLite, the single process runs it). ADR: [0006](adr/0006-gc-leases-grace.md).
 
 - **Retention.** An entry whose `access_day` is older than the cache's retention
-  (default 30 days) is deleted. Lookup hits set `access_day` at most once per entry
-  per day, batched per node every 10 s.
-- **Quota eviction.** Above the soft quota (90% of hard), the oldest entries by
-  `access_day` are deleted until usage is under 80%. Personal namespaces are evicted
-  before trusted.
+  (default 30 days) is deleted. Lookup hits set `entry_access.access_day` at most
+  once per entry per day, batched per node every 10 s.
+- **Quota eviction** works on **live bytes**, the sum of the lengths of segments that
+  entries still name. Deleting an entry lowers that sum in the same transaction, so
+  eviction always reaches its target. When live bytes exceed 90% of the hard quota,
+  the oldest entries by `access_day` are deleted until live bytes are at or below
+  80%. Personal namespaces go before trusted. Bytes still waiting for compaction or
+  the grace are reported separately as `reclaimable_bytes` and never drive eviction.
 - **Epoch purge.** After a key rotation, `cache:admin` may delete every entry of
   epochs below N; otherwise retention expires them.
 - **Mark.** Deleting an entry, in the same transaction, sets `dead_since` on its
   segment when no other entry names it (dictionaries are named by many entries and
   by the dictionary pointer) and subtracts its length from the pack's `live_bytes`.
-  A pack whose `live_bytes` reaches 0 gets `dead_since = now`.
+  A pack whose `live_bytes` reaches 0 gets `dead_since = now` and
+  `committable = false` under the same lock, so no later commit can credit it.
 - **Compaction** (every 10 min). Candidates are `live` packs whose live fraction is
   below 50%, that are older than the 24 h grace, and that hold at least 4 MiB in
   total. The worker range-reads each live segment, verifies `BLAKE3` against its id
   (corrupt ones follow the report path), and writes the survivors into a new pack
-  of the same namespace with a fresh id and footer. One transaction then moves each segment's location if
-  it is still in the source pack and still alive, credits the new pack, and sets the
-  source pack's `live_bytes = 0, dead_since = now`. Compaction never needs a key,
+  of the same namespace with a fresh id and footer. Choosing a source pack sets it
+  `committable = false` first, and its reads use `If-Match` with the recorded ETag.
+  One transaction then moves each segment's location if it is still in the source
+  pack and still alive, credits the new pack, and sets the source pack's
+  `live_bytes = 0, dead_since = now`. Compaction never needs a key,
   never changes a segment's bytes, and never changes a record.
 - **Sweep** (every 10 min). In one transaction, select packs with `dead_since` older
   than the grace, or `pending` with an expired lease, and set them `deleting`. Then
@@ -298,10 +335,13 @@ lock (with SQLite, the single process runs it). ADR: [0006](adr/0006-gc-leases-g
 - **Orphans.** Weekly, the sweeper lists the cache prefix and deletes objects that
   have no pack row and are older than twice the lease. This covers a lost database
   and a crash between deleting an object and deleting its row.
-- **Quotas.** Usage counts every pack byte that is `pending`, `live` or in grace,
-  since all of it occupies storage. `uploads` refuses a pack that would exceed the
-  hard quota; the client treats that as "not stored", and a build never fails because
-  the cache is full.
+- **Quotas.** `uploads` refuses a pack when `live_bytes + pending_bytes + size`
+  would exceed the hard quota. It also refuses one when stored bytes (every pack byte
+  that is `pending`, `live` or in grace) would exceed 3x the hard quota. That ceiling
+  is an abuse guard only: compaction keeps steady-state storage under twice the live
+  bytes, plus one grace window of churn. The client treats a refusal as "not stored",
+  and a build never fails because the cache is full. Billing uses stored bytes
+  (operations.md).
 
 ## Corruption-proofing summary
 
@@ -313,7 +353,9 @@ lock (with SQLite, the single process runs it). ADR: [0006](adr/0006-gc-leases-g
 | Concurrent writers | Unique pack ids; `ON CONFLICT DO NOTHING` on entries; the first commit wins. |
 | Torn read | Packs are immutable. The client hashes each segment and authenticates every chunk before any rename. |
 | Bit rot at rest | The client detects it and reports it; the server confirms and removes the entries. Compaction re-verifies everything it copies. A local-disk scrub re-hashes every pack weekly. |
-| Wrong artifact | The signed record binds the compile key (through the lookup id), epoch, namespace kind, segment id, sizes and per-file hashes. Any mismatch is a miss. |
+| Wrong artifact | The signed record binds the compile key (through the lookup id), epoch, namespace kind, segment id and sizes. The segment id binds every byte. Any mismatch is a miss. |
+| A writer claims another namespace's segment | Segment ids are unique per cache; such a commit is `invalid` (invariant 3). |
+| A live pack rewritten after commit | PUT URLs exist only before the first commit; `If-None-Match` where supported; the ETag is recorded at commit and checked by retries, scrub and compaction. |
 | Lost or rolled-back database | The orphan sweep reclaims bytes. Entries naming missing packs produce misses and reports, which delete them. Never a wrong hit. |
 
 ## Scaling
@@ -324,9 +366,12 @@ API node moves only metadata: a 10,000-id lookup is ~320 KB in and up to ~5.3 MB
 Compaction is the only byte traffic through a node: at most the live half of each
 compacted pack, about 2 GB per tenant-month in the hosting model.
 
-Throughput is bounded by Postgres. A 10,000-id probe costs ~20 to 40 ms of database
-CPU, so a 4-vCPU primary serves about 100 to 200 full lookups per second, enough for
-hundreds of tenants. Beyond that, read replicas serve `lookup`, and tenants are
+Throughput is bounded by Postgres. A 10,000-id probe is estimated at ~20 to 40 ms of
+database CPU, so a 4-vCPU primary would serve about 100 to 200 such probes per
+second. The hosting model needs far less: about 2,000 full-graph lookups (20,000 ids)
+per tenant-month, so 500 tenants average 0.4 per second and peak at about
+4 per second (10x). The prototype measures the probe cost, and the load test
+(testing.md) checks both the peak and the claimed capacity. Beyond that, read replicas serve `lookup`, and tenants are
 sharded by tenant id across Postgres clusters behind the same port; neither is built
 until load demands it. Local-disk mode is single-node by design; its growth path is
 the migration above.
@@ -337,11 +382,13 @@ Assumptions: 1 Gbit/s link (~117 MB/s of goodput), 30 ms RTT, warm TLS
 connections (the first handshake adds ~60 ms once), object-store time to first
 byte of 50 ms (to be measured in the prototype), and an 8-core client. A full set
 is 10,000 artifact sets: 0.9 GB compressed, 0.92 GB sealed (padding plus tags),
-4.3 GB plain, in ~72 packs. CPU rates are from security.md, "Performance cost".
+4.3 GB plain, in ~72 packs, installed as up to 30,000 files (with XREF and debug
+lists). CPU rates are from security.md, "Performance cost".
 
 | Scenario | Breakdown | Estimate |
 | --- | --- | --- |
-| Full cold fetch | Open (OIDC exchange, roster, cache info): ~0.1 s. Lookup of 10,000 with records: 320 KB up, ~40 ms of database, 5.3 MB down: ~0.12 s. ~120 ranged GETs of ≤ 8 MiB over 32 connections: latency floor ~4 waves × 80 ms = 0.3 s, transfer 0.92 GB / 117 MB/s = 7.9 s. Decompression (4.3 core-s) plus security (1.9 core-s) is ~0.8 s on 8 cores, pipelined. | **~8.5 s**, bandwidth-bound. With a 1.6x dictionary gain: ~5.5 s. |
+| Full cold fetch | Open (OIDC exchange, roster, cache info): ~0.1 s. Lookup of 10,000 with records: 320 KB up, ~40 ms of database, 5.3 MB down: ~0.12 s. ~120 ranged GETs of ≤ 8 MiB over 32 connections: latency floor ~4 waves × 80 ms = 0.3 s, transfer 0.92 GB / 117 MB/s = 7.9 s. Decompression (4.3 core-s) plus security (0.8 core-s) is ~0.65 s on 8 cores, pipelined. Install: 4.3 GB of writes overlap the transfer. With `Durability::Caller` (oxabl's stage), one `syncfs` at the end flushes ~4.3 GB at ~1 to 2 GB/s: **+2 to 4 s**. With `Durability::PerFile`, 30,000 fsyncs at 32 in parallel cost ~1 s on local NVMe and ~4 s on cloud block storage (~4 ms each), mostly overlapped. | **~8.5 s** transfer-bound, **~11 to 12 s** with install made durable. With a 1.6x dictionary gain: ~5.5 s and ~8 s. |
 | Incremental fetch of 50 | Lookup of 50: ~40 ms. Segments from 1 to 3 CI packs, worst case 50 parallel ranges: 30 ms RTT + 50 ms first byte + 4.6 MB / 117 MB/s ≈ 0.12 s. Install of 22 MB: milliseconds. | **~0.2 s** (+0.1 s open) |
 | CI upload of 10,000 | zstd-3 of 4.3 GB at 200 to 350 MB/s per core: 12 to 22 core-s, 1.5 to 2.7 s on 8 cores, pipelined. 72 PUTs of ~12.5 MB, 8 in flight: 0.92 GB / 117 MB/s = 7.9 s. Each commit (HEAD + ~140-row insert) ~0.1 s, overlapped; the last one adds ~0.1 s. | **~8.5 to 10 s**, bandwidth-bound with ≥ 4 cores |
+| 10 Gbit/s, same region (for scale) | Transfer ~0.85 s. CPU then dominates: decompression plus security is ~5.1 core-s, ~0.65 s on 8 cores. Security is ~15% of client CPU. | ~1.5 s plus install |
 | Lookup of 20,000 | ids 1.6 ms. Two parallel requests of 10,000: 640 KB up (5.5 ms), ~40 ms of database each, presence replies of 50 KB each: ~0.08 s. Fetch mode returns 2 × 5.3 MB of records (~0.1 s) and verifies 20,000 signatures (0.7 core-s, ~90 ms on 8 cores). | **~0.08 s** plan, **~0.2 s** fetch |
