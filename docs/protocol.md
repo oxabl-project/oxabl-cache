@@ -21,6 +21,11 @@ ciphertext anyway.
 - Ids in JSON and URLs are lowercase hex (pack ids 32 characters, segment and lookup
   ids 64). Cache ids are `c_` plus 26 base32 characters, encoding 16 random bytes.
   Tenant ids are `t_` plus 26 base32 characters.
+- "base32" everywhere in this document is Crockford's alphabet
+  (`0123456789abcdefghjkmnpqrstvwxyz`), lowercase, no padding. 16 bytes are read as
+  one 128-bit big-endian integer and written as 26 characters, the first of which is
+  `0` to `7`. Decoders accept only the lowercase canonical form, so every id has
+  exactly one spelling.
 
 ### Error envelope
 
