@@ -10,3 +10,6 @@ description = "Byte formats: magic, versions, encode and decode, size limits. Ha
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+blake3.workspace = true
