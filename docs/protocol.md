@@ -63,8 +63,10 @@ path as a miss.
 
 ## Authentication
 
-`POST /v1/auth/oidc` (no bearer) with `{"tenant": "t_…", "id_token": "<JWT>"}`
-returns 200 `{"token": "oxs_…", "expires_at": 1793000000, "grants": [{"cache": "c_…", "scopes": ["read", "write:trusted"]}]}`.
+`POST /v1/auth/oidc` (no bearer) with `{"tenant": "t_…", "id_token": "<JWT>"}`.
+The client takes `tenant` from `.oxabl/cache.toml`. The token's `aud` must be exactly
+`oxabl-cache:<tenant>`; this is not configurable, and no endpoint ever suggests an
+audience to the client. The call returns 200 `{"token": "oxs_…", "expires_at": 1793000000, "grants": [{"cache": "c_…", "scopes": ["read", "write:trusted"]}]}`.
 It answers 401 if the token is invalid or no trust policy matches. Workload sessions
 last 1 h and human sessions 12 h.
 
@@ -197,7 +199,7 @@ honours a single `Range: bytes=a-b` (206) and answers 416 outside the object.
 | `GET, POST /v1/tenant/tokens`; `DELETE /v1/tenant/tokens/{id}` | The secret is returned once on creation. |
 | `GET, POST /v1/tenant/users`; `DELETE /v1/tenant/users/{id}` | Human principals, keyed by issuer and subject. Deleting a user revokes their sessions. |
 | `GET, PUT /v1/tenant/grants` | Principal × cache × scopes. |
-| `GET, POST, DELETE /v1/tenant/oidc/issuers`, `…/oidc/policies` | Issuer allowlist and workload trust policies (exact claim conditions, scopes). A new issuer must pass the SSRF guard and, on the hosted service, the operator allowlist (security.md). For a shared issuer, a policy without an immutable id claim is refused with 400. A workload policy may grant only `read`, `write:personal` and `write:trusted`. |
+| `GET, POST, DELETE /v1/tenant/oidc/issuers`, `…/oidc/policies` | Issuer allowlist and workload trust policies (exact claim conditions, scopes). A new issuer must pass the SSRF guard and, on the hosted service, the operator allowlist (security.md). Registering an issuer declares its immutable id claims; GitHub- and GitLab-shaped issuers get theirs by default. Any policy without an exact match on one of them is refused with 400, whatever the issuer. A workload policy may grant only `read`, `write:personal` and `write:trusted`. |
 | `GET /v1/tenant/usage?month=2026-10` | The tenant's own usage. |
 
 Creates use natural keys (name, issuer URL): re-posting identical content returns

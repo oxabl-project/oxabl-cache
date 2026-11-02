@@ -186,9 +186,10 @@ against decompressor faults.
 keeps on disk afterwards (oxabl's local artifact cache) is only as trusted as
 every process that can write it. For that reason, each `Installed` outcome carries
 its `Provenance` (tier, signer, epoch, roster version), and oxabl records it with the
-local entry. In `ci` mode, or when `CI` is set, oxabl turns its local cache off unless
-the config names a per-job directory that oxabl empties first. In developer mode the
-local cache trusts every process of the OS user.
+local entry. That recorded origin is informational, not authenticated: a process of
+the same user can rewrite it. oxabl uses its local cache only in `developer` mode,
+where it trusts every process of the OS user. In `ci` and `read-only` mode it uses no
+local cache, except a per-job directory that oxabl empties first.
 
 **Malicious pull requests** run code inside CI. They never hold a `ci` key or
 `write:trusted`, so they cannot write. A `reader` identity lets them decrypt cached
@@ -225,39 +226,52 @@ cache design can detect that.
   `SHA-256(secret)` (enough for a high-entropy secret; no password hash needed),
   compared in constant time. Each token carries scopes, a cache list and an expiry
   (default 90 days, maximum 1 year).
-- **OIDC workload identity** (GitHub Actions and GitLab CI): the job exchanges its
-  ID token at `POST /v1/auth/oidc` for an opaque session token valid for 1 hour. The
-  server checks:
+- **OIDC workload identity** (GitHub Actions, GitLab CI, and any issuer that
+  publishes discovery and JWKS documents): the job exchanges its ID token at
+  `POST /v1/auth/oidc` for an opaque session token valid for 1 hour. The server
+  checks:
   - the issuer against the tenant's allowlist, and the signature with JWKS fetched
     over TLS (cached at most 1 h, refetched once on an unknown `kid`);
   - the algorithm: RS256, ES256 or EdDSA (never `none` or HMAC);
-  - `aud` equals the tenant's configured audience;
+  - `aud` is exactly `oxabl-cache:<tenant id>`. This is fixed and not configurable.
+    The client derives it from the `tenant` in the committed `.oxabl/cache.toml`,
+    never from the server, and refuses to send a token with any other audience. A
+    malicious server therefore cannot make a client mint a token for another
+    service;
   - `exp`, `nbf` and `iat` within 60 s of skew;
   - the claim conditions of a trust policy, exact matches on claims such as
     `repository_id`, `ref` or `environment`, stored as keyed hashes.
-- **Shared issuers need an immutable subject.** Issuers that serve many unrelated
-  customers (built in: `https://token.actions.githubusercontent.com` and
-  `https://gitlab.com`; operators can add more) accept a policy only if it pins an
-  immutable numeric id:
-  - GitHub: `repository_id`, or `repository_owner_id` plus `repository`;
-  - GitLab: `project_id`, or `namespace_id` plus `project_path`.
+- **Every workload policy pins an immutable id**, whatever the issuer. One issuer can
+  serve many repositories (github.com, gitlab.com, GitHub Enterprise, GHES, a
+  self-hosted GitLab), and names can be re-registered after a rename. Registering an
+  issuer names its immutable id claims, and every policy must include an exact match
+  on at least one of them:
+  - GitHub-shaped tokens: `repository_id`, or `repository_owner_id` plus
+    `repository`;
+  - GitLab-shaped tokens: `project_id`, or `namespace_id` plus `project_path`;
+  - any other issuer: the claims its admin declares at registration (at least one).
 
-  Names can be re-registered after a rename and are never enough on their own. A
-  typical writer policy is `repository_id = 123456789` with `ref =
+  A typical writer policy is `repository_id = 123456789` with `ref =
   refs/heads/main` and `environment = cache-writer`.
 - **Workloads never get administration scopes.** A policy may grant `read`,
   `write:personal` or `write:trusted` only. `cache:admin` and `tenant:admin` belong to
   humans and to tokens a human creates.
-- **Issuer fetches are SSRF-guarded.** Discovery and JWKS URLs must be `https` on
-  port 443. Every resolved address, again after each redirect (at most 3), must be
-  public: loopback, private, link-local, CGNAT, unique-local and metadata ranges are
-  refused. Responses are capped at 256 KiB and 5 s, and errors returned to the tenant
-  are generic. On the hosted service an operator allowlist of issuers is also
-  enforced: the two shared issuers plus self-hosted ones the operator approves.
-- **Gitea Actions** gains OIDC ID tokens in Gitea 29 (merged upstream 2026-10-18,
-  not yet released as of 2026-11-02). Until then Gitea CI uses a scoped API token
-  held as a CI secret. When a release ships it, Gitea is added as a non-shared
-  issuer (each instance is its own issuer) with its own test.
+- **Issuer fetches are SSRF-guarded**, on every discovery and JWKS fetch:
+  registration, each periodic refetch and each refetch on an unknown `kid`.
+  - URLs must be `https` on port 443.
+  - The server resolves the name itself and checks every address. Loopback,
+    private, link-local, CGNAT, unique-local and metadata ranges are refused, except
+    ranges the operator explicitly allows (`[oidc] allowed_private_ranges`, for a
+    self-hosted IdP on an internal network).
+  - It then connects to the address it checked, with SNI and `Host` set to the name.
+    DNS rebinding between the check and the connect, or between fetches, therefore
+    cannot redirect it.
+  - Each redirect (at most 3) is checked the same way.
+  - Responses are capped at 256 KiB and 5 s, and errors returned to the tenant are
+    generic.
+
+  On the hosted service an operator allowlist of issuers is also enforced.
+- **Gitea Actions** uses a scoped API token held as a CI secret.
 - **Humans:** `oxabl-cache login` runs the OAuth device authorization grant
   (RFC 8628) against the tenant's IdP (or the hosted service's IdP) and exchanges the
   ID token at the same endpoint for a 12-hour session.

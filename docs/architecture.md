@@ -81,7 +81,8 @@ Invariants the core enforces:
    source.
 3. A segment id is unique within a cache. A commit may name a segment id only if it
    is new to the cache, or is already recorded in the same pack at the same offset and
-   length (a retry).
+   length and is not dead (a retry). A retry that names a segment whose `dead_since`
+   is set is `invalid`: dead segments are never revived.
 4. A pack is deleted only when no entry names any of its segments and it has been
    dead for the grace period, or it is `pending` with an expired lease.
 5. Writes into `trusted` need `write:trusted`; writes into `personal(u)` need
@@ -227,6 +228,8 @@ Core tables: `tenants`, `caches`, `users`, `workload_policies`, `tokens`,
   user id for personal. Columns `segment_id`, `dict_id`, `epoch`, `record` (sealed
   bytes), `created_at`. Insert-only.
 - `entry_access`: same key, one column `access_day`, index `(cache_id, access_day)`.
+  The row is inserted with the entry at commit (`access_day` = the commit day), so
+  every entry has one.
   It is a narrow table, so the daily touch never rewrites a row that carries a
   512-byte record.
 - `segments`: key `(cache_id, segment_id)` (the uniqueness of invariant 3); columns
@@ -266,10 +269,18 @@ them.
      already recorded anywhere else makes that segment, and every entry naming it,
      `invalid`. This stops a writer from claiming another namespace's segment.
 
-   In one transaction the server then inserts the segments and inserts the entries
-   with `ON CONFLICT DO NOTHING`. It sets the pack `live` and credits `live_bytes`
-   (pack and cache) only for segments of entries that won. It returns `committed`,
-   `exists` or `invalid` per entry.
+   In one transaction the server then:
+   - inserts the segments, with `dead_since = now` for every segment whose entries
+     all lost or are `invalid`;
+   - inserts the entries with `ON CONFLICT DO NOTHING`, and an `entry_access` row
+     (`access_day = today`) for each entry that won;
+   - sets the pack `live` and credits `live_bytes` (pack and cache) only for
+     segments of entries that won.
+
+   If the pack's credited `live_bytes` is 0 after the commit (every entry lost),
+   the pack gets `dead_since = now` and `committable = false` in the same
+   transaction, so the sweep removes it after the grace. Packs of losing writers
+   never linger. The server returns `committed`, `exists` or `invalid` per entry.
 
 A crash before step 4 leaves a `pending` pack that the lease expiry reclaims. A crash
 inside step 4 rolls the transaction back. Concurrent writers of the same key both
@@ -336,7 +347,18 @@ lock (with SQLite, the single process runs it). ADR: [0006](adr/0006-gc-leases-g
   have no pack row and are older than twice the lease. This covers a lost database
   and a crash between deleting an object and deleting its row.
 - **Quotas.** `uploads` refuses a pack when `live_bytes + pending_bytes + size`
-  would exceed the hard quota. It also refuses one when stored bytes (every pack byte
+  would exceed the hard quota, with two rules that protect the trusted tier:
+  - **Personal cap.** Each user's personal namespace (its live plus pending bytes)
+    is capped at 10% of the cache's hard quota. A personal upload over the cap is
+    refused, so 25 developers doing full builds cannot fill the cache.
+  - **Trusted admission evicts personal entries.** A `trusted` upload that would
+    exceed the hard quota deletes personal entries, oldest `access_day` first, in its
+    own admission transaction, until the pack fits. It is refused only if trusted
+    bytes alone would exceed the quota. Personal bytes freed this way leave
+    `live_bytes` at once (the usual mark rules), so CI is never starved by personal
+    writes while it waits for the GC interval.
+
+  `uploads` also refuses a pack when stored bytes (every pack byte
   that is `pending`, `live` or in grace) would exceed 3x the hard quota. That ceiling
   is an abuse guard only: compaction keeps steady-state storage under twice the live
   bytes, plus one grace window of churn. The client treats a refusal as "not stored",
@@ -370,10 +392,11 @@ Throughput is bounded by Postgres. A 10,000-id probe is estimated at ~20 to 40 m
 database CPU, so a 4-vCPU primary would serve about 100 to 200 such probes per
 second. The hosting model needs far less: about 2,000 full-graph lookups (20,000 ids)
 per tenant-month, so 500 tenants average 0.4 per second and peak at about
-4 per second (10x). The prototype measures the probe cost, and the load test
-(testing.md) checks both the peak and the claimed capacity. Beyond that, read replicas serve `lookup`, and tenants are
-sharded by tenant id across Postgres clusters behind the same port; neither is built
-until load demands it. Local-disk mode is single-node by design; its growth path is
+4 per second (10x), which is 8 probes of 10,000 ids. The prototype measures the
+probe cost. The load test (testing.md) gates the modelled peak, and separately
+requires headroom of 10x that peak (80 probes per second). Beyond that, read replicas
+serve `lookup`, and tenants are sharded by tenant id across Postgres clusters behind
+the same port; neither is built until load demands it. Local-disk mode is single-node by design; its growth path is
 the migration above.
 
 ## Performance budget

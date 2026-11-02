@@ -77,10 +77,13 @@ rate = 50
 burst = 200
 
 [oidc]
-# Issuers that need an immutable id claim in every policy (built-ins always apply).
-shared_issuers = []
 # When set (the hosted service), only these issuers may be registered.
 issuer_allowlist = ["https://token.actions.githubusercontent.com", "https://gitlab.com"]
+# Private ranges an issuer may resolve to (self-hosted IdP on an internal network).
+allowed_private_ranges = []
+# Resolvers and extra CA bundle for issuer fetches; defaults: system resolver, system roots.
+dns_servers = []
+extra_ca_file = ""
 
 [log]
 level = "info"
@@ -162,13 +165,23 @@ through the tenant API (protocol.md) or the `oxabl-cache` CLI.
 
 The ledger is append-only. Each node keeps counters in memory and flushes every 60 s.
 It writes only non-zero deltas, as rows `(node_id, flush_seq, tenant, cache, day,
-metric, value)`, unique on everything but the value, so a retried flush is
-idempotent. A node crash loses at most 60 s of counters, which is acceptable for
+metric, value)`. A node crash loses at most 60 s of counters, which is acceptable for
 monthly billing.
 
-Once a UTC day is closed (from 01:00 the next day), the GC leader rolls it up. In one
-transaction it replaces that day's rows with one row per tenant, cache and metric
-(`node_id = 0`). The table therefore holds at most one day of fine-grained rows plus
+Each flush is one transaction that:
+
+- reads and raises the node's high-water mark in `ledger_nodes(node_id,
+  max_flush_seq)`. A flush whose `flush_seq` is not above the mark is acknowledged
+  and ignored, so a retried flush is idempotent even after a roll-up has removed its
+  rows;
+- refuses rows for a closed day (`ledger_days.closed_at` set). Those counters are
+  dropped and counted in `oxabl_cache_ledger_late_dropped_total`. A day closes one
+  hour after it ends, so only a node that could not flush for an hour loses
+  counters.
+
+At 01:00 UTC the GC leader closes the previous day and rolls it up. In one
+transaction it sets `closed_at` and replaces that day's rows with one row per
+tenant, cache and metric (`node_id = 0`). The table therefore holds at most one day of fine-grained rows plus
 one row per tenant, cache, metric and day. The GC leader also writes a stored-bytes
 snapshot per cache at 00:00 UTC.
 
@@ -187,6 +200,9 @@ Quotas:
 - **Live bytes**, hard and soft, per tenant and per cache: the bytes that entries
   still name. `uploads` refuses a pack that would take live plus pending bytes over
   the hard quota. Above 90% of hard, eviction runs down to 80% (architecture.md).
+  Each user's personal namespace is capped at 10% of the cache's hard quota. A
+  `trusted` upload that would exceed the hard quota first evicts personal entries,
+  oldest first, in its own admission transaction (architecture.md, "Quotas").
   Bytes awaiting compaction or the grace (`reclaimable_bytes`) are reported
   separately and billed as stored bytes, but never drive eviction.
 - **Stored-bytes ceiling**: 3x the hard quota, counting every byte that is `pending`,

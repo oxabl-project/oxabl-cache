@@ -21,13 +21,23 @@ and the storage attacks below use it, so it also checks the spec.
   test hooks.
 - **Backends.** Every scenario runs twice through a macro: `fs + sqlite` and
   `s3 + postgres`.
-- **S3: MinIO**, run as a child process from the pinned nixpkgs binary in the repo's
-  devshell (`nix develop`), one per test binary, each test on its own bucket and
-  random port. It supports every operation in the portable subset. A nightly job
-  repeats the S3 suite against Garage (a second, independent implementation) and
-  runs `oxabl-cache-server check-store` against a dedicated R2 test bucket.
-- **Postgres:** `initdb` and `postgres -k <dir> -p <port>` from the same devshell,
-  one cluster per test binary, one database per test.
+- **S3: Garage** (nixpkgs `garage`, 1.3.1) is the primary store, run as a child
+  process from the repo's devshell (`nix develop`). There is one single-node
+  instance per test binary, with each test on its own bucket and random ports.
+  **versitygw** (nixpkgs `versitygw`, POSIX backend) is the second, independent
+  implementation. The full S3 suite runs against both on every pull request, so the
+  portable subset never drifts toward one server's behaviour. Optional capabilities
+  (`If-None-Match`, checksum headers) are tested where a server has them and skipped
+  with a logged reason where it does not. MinIO is not used: nixpkgs marks it
+  insecure. The real R2 bucket is exercised by the prototype, outside this suite.
+- **Postgres 18** (nixpkgs `postgresql`): `initdb` and `postgres -k <dir> -p <port>`
+  from the same devshell, one cluster per test binary, one database per test.
+- **Fault proxy.** A small TCP proxy that the harness puts in front of Postgres or
+  the store can delay, cut or drop a chosen reply. It fakes the network, never the
+  program under test.
+- **Fake clock.** Day-boundary tests run the server under `libfaketime` with an
+  accelerated clock. This fakes the environment's time; the server has no clock
+  hook.
 - **No Docker.** Every dependency is a child process in its own process group, with
   `PR_SET_PDEATHSIG`, killed on drop. The harness never lists, stops or creates
   containers, so it cannot touch anyone else's.
@@ -37,9 +47,14 @@ and the storage attacks below use it, so it also checks the spec.
 - **Driver.** `oxabl-cache-e2e-driver` is a small binary over the public client API. It
   prints one progress line per phase, so the harness can `SIGKILL` it at an exact
   point.
-- **Fake IdP.** A test tool that serves JWKS and mints ID tokens shaped like those of
-  GitHub Actions and GitLab CI. The harness registers it as a shared issuer when a
-  test needs that. Gitea Actions is added once a Gitea release issues ID tokens.
+- **Fake IdP.** A test tool that serves discovery and JWKS and mints ID tokens
+  shaped like those of GitHub Actions and GitLab CI. It also serves a GitHub-style
+  token request endpoint that records the audience each client asks for. OIDC tests
+  run the server, the fake IdP and a fake DNS server inside an unprivileged user and
+  network namespace (`unshare --user --map-root-user --net`). There, the IdP
+  listens on port 443 at addresses the test chooses, with a test CA the server
+  trusts. The server is configured with that DNS server and with
+  `allowed_private_ranges` covering only the IdP's "public" address.
 - **Break it once.** Every scenario and adversarial test below is first run against a
   deliberately broken server or client build (the protecting check removed) and must
   fail, naming its assertion. The break is recorded in the pull request that adds the
@@ -53,20 +68,26 @@ Each test names the behaviour it protects.
 | --- | --- |
 | Round trip | CI stores 500 sets; a developer fetches them. Installed files are byte-identical, `Provenance` names the `ci` signer and `Tier::Trusted`, and no temp files remain. Repeated with `Durability::PerFile` and `Durability::Caller`. |
 | Streaming fetch | Outcomes arrive per key before the whole fetch completes. A store throttled to 1 MB/s keeps the fetch alive past 30 s, because bytes flow. A store that stalls makes every pending key `Timeout` after the idle timeout, and sets already installed stay installed. |
+| Output layout | Outputs live in a non-default layout (`rcode/…` for r-code, `reports/xref/…` for XREF), and `ArtifactFileRef.disk_path` points there while `path` stays `r/…` and `xref/…`. CI stores them and a developer fetches 1,000 keys in one `fetch` call: every set installs under `stage/<artifact path>`, byte-identical. A relative `disk_path` or one through a symlink reports `Failed(Unreadable)`. |
 | Lazy store | 2,000 sets of 5 MB each are fed through `put` while the driver runs under a 512 MiB `RLIMIT_AS`, with no failure. A file rewritten after `put`, with the same size and different bytes and with a different size, reports `Changed`, and a fetch of that key afterwards is `NotFound` (nothing was uploaded). A file whose `ArtifactFileRef` hash is wrong from the start also reports `Changed`. A missing file reports `Failed(Unreadable)`. Duplicate or invalid paths report `Rejected`. |
-| Config trust | `from_repo` fails with `TrustOverride` when `OXABL_CACHE_OWNER_KEYS`, `OXABL_CACHE_MIN_ROSTER_VERSION` or `OXABL_CACHE_CACHE` is set, and when `cache.toml` has an unknown key. `OXABL_CACHE_SERVER` is honoured. |
+| Config trust | `from_repo` fails with `TrustOverride` when any one of `OXABL_CACHE_TENANT`, `OXABL_CACHE_CACHE`, `OXABL_CACHE_OWNER_KEYS` or `OXABL_CACHE_MIN_ROSTER_VERSION` is set (each in its own case), and fails when `cache.toml` has an unknown key. `OXABL_CACHE_SERVER` is honoured. |
+| OIDC audience | The client requests a GitHub-style token, and the fake IdP records audience `oxabl-cache:<tenant>`. A hostile proxy then adds an `audience` field to every server response, and answers 401 with a different audience in the message: the next request still asks for `oxabl-cache:<tenant>`. A GitLab-style `OXABL_CACHE_ID_TOKEN` minted for `sts.amazonaws.com` gives `OpenError`, and the proxy sees no request carrying it. The server gets 401 for a valid token with any other audience. |
 | First write wins | Two CI writers store different bytes for the same 1,000 keys. Per key, one gets `committed` and the other `exists`. Every reader installs exactly one writer's complete set. |
 | Tiers | A developer's personal writes are invisible to CI and to other developers. A developer token gets 403 writing `trusted` over raw HTTP. A developer-signed record copied into `trusted` in the database is a miss (`Untrusted`) for CI. |
+| Personal crowding | 25 developer identities each store a full set (25 × the synthetic full size) against a hard quota of 4 full sets, with the GC interval set longer than the test. Each developer is refused at 10% of hard (`QuotaExceeded`). CI's full upload then commits completely: its admission evicts personal entries synchronously, oldest first, and every CI entry installs. |
 | Quotas | Writes over the hard quota report `QuotaExceeded` and the build continues. With the grace set longer than the test, a full-rebuild workload pushes live bytes past 90%. Eviction stops at or just under 80% live, trusted entries written last still install, personal namespaces go first, and `reclaimable_bytes` reports the lag. |
-| Retention and GC | An entry idle past retention disappears and its pack is deleted after the grace. A reader holding a URL issued before eviction still downloads within the grace. |
+| Losing packs | Two CI writers store different bytes for the same 500 keys, one after the other. Every entry of the second pack is `exists`. After the grace, the second pack's object is gone from the store and `stored_bytes` is back to one pack's worth. |
+| Retention and GC | An entry idle past retention disappears and its pack is deleted after the grace. An entry that is never read retires on time too (it has an access row from commit). A reader holding a URL issued before eviction still downloads within the grace. |
 | Compaction | A churn-heavy workload leaves packs under 50% live. After compaction every live entry still installs correctly and stored bytes drop. |
 | Rotation | After `member remove`, the removed identity cannot open new-epoch records. Clients pinned to the new `min_roster_version` refuse the old roster. |
-| OIDC | A matching policy yields a session with the policy's scopes. A wrong `aud`, an expired token, `alg: none`, an HMAC algorithm, an unknown `kid` or an unmatched claim gets 401. On a shared issuer, a policy with only `environment` (no `repository_id` or `project_id`) is refused with 400, and a token from another repository with the same environment name gets 401. A workload policy granting `cache:admin` or `tenant:admin` is refused. |
+| OIDC | A matching policy yields a session with the policy's scopes. A wrong `aud`, an expired token, `alg: none`, an HMAC algorithm, an unknown `kid` or an unmatched claim gets 401. A policy with only `environment` (no immutable id claim) is refused with 400 on a GitHub-shaped issuer, on a GitLab-shaped one, and on a generic issuer registered with `sub` as its id claim. A token from another repository with the same environment name gets 401. A workload policy granting `cache:admin` or `tenant:admin` is refused. |
 | Issuer SSRF | Registering issuers at `https://127.0.0.1`, at a private address, at a name that resolves to a private address, and at a public URL that redirects to a private one: every case is refused, and the harness's listener on the private address sees no request. With an issuer allowlist configured, an unlisted public issuer is refused. |
+| DNS rebinding | The issuer's name resolves to its allowed address at registration. The fake DNS then answers with a private address for the periodic JWKS refetch, and again for a refetch on an unknown `kid`, and then alternates answers between the check and the connect. The listener on the private address never sees a connection, the refetch fails, and the IdP's own listener sees only connections whose SNI is the issuer name. |
 | Roster checks | A `cache:admin` token's PUT of an unsigned roster, a roster signed by an unregistered key, or one with epoch `current + 2` gets 400, and clients keep working. A roster signed by both the old and the new owner key opens for clients pinned to either. |
 | Tokens | A revoked or expired token gets 401 on the next call, mid-session included. |
 | Tenancy | Tenant B's token on tenant A's cache gets 404. |
 | Usage | `usage export` equals the counts the test drove (bytes, ids, hits, commits). |
+| Ledger across roll-up | Two server nodes share one Postgres through the fault proxy, under an accelerated fake clock. The proxy drops the reply to one of node A's flush commits just before midnight, so node A retries after the 01:00 roll-up. Node B is `SIGSTOP`ped across the roll-up with counters in memory, then resumed. The monthly export equals the driven counts minus exactly node B's late counters (also reported by `oxabl_cache_ledger_late_dropped_total`), and nothing is counted twice. |
 | Migration | `fs + sqlite` is migrated to `s3 + postgres`; every entry still installs. A migration with one corrupted pack refuses to finish. |
 | Restore | A database snapshot older, then newer, than the bucket gives only misses, and reports clear the stale entries. |
 
@@ -76,7 +97,7 @@ The common assertion: no file at a final path ever differs from what a trusted
 producer stored, the outcome is a miss, and no temp file remains.
 
 - **Tampered storage.** Flip one byte of a pack in the segment header, a chunk body, a
-  tag, the footer and the trailer, on disk and in MinIO. Fetch misses, the report is
+  tag, the footer and the trailer, on disk, in Garage and in versitygw. Fetch misses, the report is
   confirmed, the entry is gone, and a fresh `put` then hits.
 - **Swapped records.** Swap the `record` columns of two entries in the database. Both
   keys miss.
@@ -112,6 +133,9 @@ producer stored, the outcome is a miss, and no temp file remains.
   supports `If-None-Match`, and refused by the local route. Where the store lacks it,
   the overwrite is caught: the next commit retry gets `pack_changed`, and scrub and
   compaction report the ETag change.
+- **Retry after the segment died.** A commit whose reply is dropped by the fault
+  proxy is followed by a purge of its entries. The retried commit gets `invalid` for
+  those entries, no `live_bytes` are credited, and after the grace the pack is gone.
 - **Commit into closed packs.** A commit into a pack whose entries were all evicted
   (`dead_since` set), and into a pack chosen as a compaction source, gets 409
   `pack_closed`. After the sweep, every live entry still installs.
@@ -146,8 +170,8 @@ comes from `tc netem` inside a network namespace on that runner only.
 | Scenario | Pass |
 | --- | --- |
 | 50 concurrent CI full uploads of 10,000 synthetic sets | zero errors; each ≤ 12.5 s at 1 Gbit/s |
-| Peak hosted load: 500 tenants' worth, 40 full-graph plan lookups (20,000 ids) per second for 10 min, which is 10x the hosting model's peak of about 4 per second | p99 ≤ 300 ms; database CPU < 50% on a 4-vCPU primary |
-| Capacity: ramp 10,000-id probes until p99 exceeds 1 s | reports the measured probe cost; must sustain ≥ 100 probes/s on a 4-vCPU primary, or architecture.md "Scaling" is corrected in the same change |
+| Modelled peak: 500 tenants' worth, 4 full-graph plan lookups (20,000 ids, so 8 probes of 10,000) per second for 10 min | p99 ≤ 300 ms; database CPU ≤ 25% of a 4-vCPU primary (8 probes × 40 ms = 0.32 cores at the pessimistic estimate, 8%) |
+| Capacity ramp: 10,000-id probes, raised until p99 exceeds 1 s | Reports the measured probe cost and the probes per second at p99 = 300 ms. Must reach ≥ 80 probes/s (10x the modelled peak) on a 4-vCPU primary. If it does not, the headroom in architecture.md "Scaling" is corrected in the same change. The gate never tightens a CPU threshold beyond what the measured cost allows. |
 | Cold-fetch install: one client, 10,000 sets with XREF and debug lists (~30,000 files) | reports install time for `PerFile` and for `Caller` plus one `syncfs`; within 25% of the budget |
 | 200 concurrent cold fetches | per-client time within 25% of the budget (architecture.md); zero wrong installs |
 

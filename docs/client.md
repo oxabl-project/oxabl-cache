@@ -16,10 +16,16 @@ cache never defines it.
 - `fetch` streams one outcome per key as it completes and installs into a stage
   directory that oxabl chooses. oxabl promotes from there.
 - `store` is an `Uploader` that oxabl feeds during the build, one artifact set at a
-  time, as soon as a unit's verification passes. Each file is an `ArtifactFileRef`
-  (artifact path, size, BLAKE3) under the artifact root the uploader was opened with.
-  The client reads it lazily and checks size and hash on that read, so a file edited
-  between verification and upload is never stored.
+  time, as soon as a unit's verification passes. Each file is an `ArtifactFileRef`:
+  its artifact path, its absolute location on disk, its size and its BLAKE3. The
+  client reads the file lazily from that location and checks size and hash on that
+  read, so a file edited between verification and upload is never stored. The
+  artifact path and the disk location are independent, so any output layout works
+  (for example `output = "rcode"` and `xref = "reports/xref"`).
+- `fetch` installs every key of one call into the same tree,
+  `stage/<artifact path>`. Artifact paths are unique within a build (oxabl's
+  output-collision rule), so sets never overlap, and one call keeps the batched
+  lookup of 10,000 ids per request.
 - Each `Installed` outcome carries its origin (`Provenance`: tier and the signer's
   public key, plus epoch and roster version), so oxabl's local cache keeps the tier.
 - Every cache failure is a miss or "not stored". The cache never fails a build;
@@ -70,9 +76,8 @@ impl Cache {
     /// Starts fetching; yields one outcome per request as each completes.
     pub fn fetch(&self, requests: Vec<FetchRequest>, options: FetchOptions) -> Fetch;
 
-    /// Starts a batched upload session reading files under `artifact_root`.
-    /// Fails if the mode does not write.
-    pub fn uploader(&self, artifact_root: std::path::PathBuf) -> Result<Uploader, CacheError>;
+    /// Starts a batched upload session. Fails if the mode does not write.
+    pub fn uploader(&self) -> Result<Uploader, CacheError>;
 
     pub fn mode(&self) -> Mode;
     pub fn stats(&self) -> Stats;
@@ -128,8 +133,14 @@ pub enum MissReason {
     Install(std::io::ErrorKind),
 }
 
-/// A verified output on disk at `artifact_root/path`, as the caller saw it.
-pub struct ArtifactFileRef { pub path: ArtifactPath, pub size: u64, pub blake3: [u8; 32] }
+/// A verified output as the caller saw it: stored under `path`, read from `disk_path`.
+pub struct ArtifactFileRef {
+    pub path: ArtifactPath,
+    /// Absolute; opened with `O_NOFOLLOW` and read once, lazily.
+    pub disk_path: std::path::PathBuf,
+    pub size: u64,
+    pub blake3: [u8; 32],
+}
 
 pub struct Uploader { /* private */ }
 impl Uploader {
@@ -221,8 +232,9 @@ A final path never holds a partial or unverified file.
    path bytes ≤ 3,072, total size within the plaintext cap). It queues only the
    references and waits when 10,000 sets are queued or 256 MiB of sealed bytes are in
    flight.
-2. Workers take one set at a time. They open each file beneath `artifact_root`
-   (`openat`, `O_NOFOLLOW`), read it once into memory, and check its size and BLAKE3
+2. Workers take one set at a time. They open each file at its absolute `disk_path`
+   (`O_NOFOLLOW`; a relative path, a symlink or a non-regular file gives
+   `Failed(Unreadable)`), read it once into memory, and check its size and BLAKE3
    against the `ArtifactFileRef`.
    - Any mismatch makes the key `Changed`, and nothing of that set is sealed or
      uploaded. Because the bytes compressed are exactly the bytes checked, a file
@@ -253,7 +265,8 @@ A final path never holds a partial or unverified file.
 
 If no mode is given and the `CI` environment variable is set, the mode is
 `read-only`; otherwise it is `developer`. Writing to trusted always needs an explicit
-`ci`.
+`ci`. CI systems that do not set `CI` (Jenkins, TeamCity, Bamboo agents, for
+example) must set `OXABL_CACHE_MODE`.
 
 ## Configuration
 
@@ -262,17 +275,22 @@ of the cache identity and the root of trust, and it holds no secrets:
 
 ```toml
 server = "https://cache.example.com"
+tenant = "t_2h8k4m6p9q1r3s5t7v0w2x4y6z"
 cache = "c_6v2k9q3m8x1r4t7w0y5z2b8n4d"
 owner_keys = ["ed25519:Jx1…"]
 min_roster_version = 12
 ```
 
-- `Config::from_repo(root)` reads exactly these four keys. Unknown keys are an
+- `Config::from_repo(root)` reads exactly these five keys. Unknown keys are an
   error, and so is a file that is not a regular file inside `root`.
-- `owner_keys`, `min_roster_version` and `cache` can never be overridden. `Config`
-  has no setter for them. `from_repo` fails with `ConfigError::TrustOverride` if the
-  environment sets `OXABL_CACHE_OWNER_KEYS`, `OXABL_CACHE_MIN_ROSTER_VERSION` or
-  `OXABL_CACHE_CACHE`. That way an attempt is loud, never silently ignored.
+- `tenant`, `cache`, `owner_keys` and `min_roster_version` can never be overridden.
+  `Config` has no setter for them. `from_repo` fails with
+  `ConfigError::TrustOverride` if the environment sets `OXABL_CACHE_TENANT`,
+  `OXABL_CACHE_CACHE`, `OXABL_CACHE_OWNER_KEYS` or `OXABL_CACHE_MIN_ROSTER_VERSION`.
+  That way an attempt is loud, never silently ignored.
+- The OIDC audience is always `oxabl-cache:<tenant>`, derived from the committed
+  `tenant`. The client never takes an audience from the server, the environment or
+  a flag.
 - `server` may be overridden by `OXABL_CACHE_SERVER` or `with_server`. The server is
   untrusted anyway.
 - Tuning (concurrency, zstd level, plaintext cap) is set by the caller through
@@ -290,10 +308,21 @@ Mode, credentials and identity come from the environment or from the caller's fl
 | `OXABL_CACHE_SERVER` | Server URL override |
 | `OXABL_CACHE_ID_TOKEN` | A GitLab CI ID token from the job's `id_tokens` |
 
-`Credentials::Auto` tries, in order: `OXABL_CACHE_TOKEN`; GitHub Actions OIDC (when
-`ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN` are set, it
-requests a token for the tenant's audience); GitLab (`OXABL_CACHE_ID_TOKEN`); the
-stored `oxabl-cache login` session.
+`Credentials::Auto` tries, in order:
+
+1. `OXABL_CACHE_TOKEN`.
+2. GitHub Actions OIDC, when `ACTIONS_ID_TOKEN_REQUEST_URL` and
+   `ACTIONS_ID_TOKEN_REQUEST_TOKEN` are set. It requests a token with audience
+   `oxabl-cache:<tenant>`.
+3. GitLab, through `OXABL_CACHE_ID_TOKEN`. The job declares it under `id_tokens`
+   with `aud: oxabl-cache:<tenant>`.
+4. The stored `oxabl-cache login` session.
+
+Before sending any ID token, the client decodes its payload and refuses to send it
+(`OpenError`) unless `aud` is exactly `oxabl-cache:<tenant>`. A token minted for
+another audience therefore never reaches the server. Gitea Actions uses a scoped
+token (`OXABL_CACHE_TOKEN`). OIDC works with any issuer that publishes discovery and
+JWKS documents, once the tenant registers it.
 
 Local state (`$XDG_STATE_HOME/oxabl-cache/<cache>/`) holds the roster high-water
 mark and the last verified roster. The root key lives only in memory and is zeroed on
