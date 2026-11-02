@@ -1,0 +1,134 @@
+[package]
+name = "oxabl-cache-fuzz"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+description = "cargo-fuzz targets for oxabl-cache-format."
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = "1"
+blake3 = "1"
+libfuzzer-sys = "0.4"
+oxabl-cache-format = { path = "../crates/oxabl-cache-format" }
+
+[workspace]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "lookup_request"
+path = "fuzz_targets/lookup_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lookup_response"
+path = "fuzz_targets/lookup_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "commit_request"
+path = "fuzz_targets/commit_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "commit_response"
+path = "fuzz_targets/commit_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pack_header"
+path = "fuzz_targets/pack_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pack_trailer"
+path = "fuzz_targets/pack_trailer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pack_footer"
+path = "fuzz_targets/pack_footer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "segment"
+path = "fuzz_targets/segment.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "segment_plaintext"
+path = "fuzz_targets/segment_plaintext.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "record"
+path = "fuzz_targets/record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "entry_payload"
+path = "fuzz_targets/entry_payload.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "roster"
+path = "fuzz_targets/roster.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dictionary_pointer"
+path = "fuzz_targets/dictionary_pointer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "member_descriptor"
+path = "fuzz_targets/member_descriptor.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "structured"
+path = "fuzz_targets/structured.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "text_ids"
+path = "fuzz_targets/text_ids.rs"
+test = false
+doc = false
+bench = false
