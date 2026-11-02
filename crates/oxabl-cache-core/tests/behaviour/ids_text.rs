@@ -76,14 +76,7 @@ fn hex_ids_are_lowercase_and_exact_in_length() {
         "same shape, distinct type"
     );
     assert!(format!("{segment}0").parse::<SegmentId>().is_err());
-    assert!(
-        segment
-            .to_string()
-            .replace('a', "g")
-            .parse::<SegmentId>()
-            .is_err()
-            || !segment.to_string().contains('a')
-    );
+    assert!("g".repeat(64).parse::<SegmentId>().is_err());
 }
 
 #[test]
