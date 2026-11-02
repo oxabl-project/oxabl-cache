@@ -13,3 +13,13 @@ workspace = true
 
 [dependencies]
 oxabl-cache-format.workspace = true
+age.workspace = true
+aws-lc-rs.workspace = true
+blake3.workspace = true
+ed25519-dalek = { workspace = true, features = ["zeroize"] }
+subtle.workspace = true
+zeroize = { workspace = true, features = ["derive"] }
+zstd.workspace = true
+
+[dev-dependencies]
+nix = { workspace = true, features = ["resource"] }

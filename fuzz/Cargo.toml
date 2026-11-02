@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.99"
 license = "MIT"
 publish = false
-description = "cargo-fuzz targets for oxabl-cache-format."
+description = "cargo-fuzz targets for oxabl-cache-format and oxabl-cache-crypto."
 
 [package.metadata]
 cargo-fuzz = true
@@ -14,6 +14,7 @@ cargo-fuzz = true
 arbitrary = "1"
 blake3 = "1"
 libfuzzer-sys = "0.4"
+oxabl-cache-crypto = { path = "../crates/oxabl-cache-crypto" }
 oxabl-cache-format = { path = "../crates/oxabl-cache-format" }
 
 [workspace]
@@ -129,6 +130,48 @@ bench = false
 [[bin]]
 name = "text_ids"
 path = "fuzz_targets/text_ids.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "crypto_segment"
+path = "fuzz_targets/crypto_segment.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "crypto_record"
+path = "fuzz_targets/crypto_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "crypto_roster"
+path = "fuzz_targets/crypto_roster.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "crypto_identity"
+path = "fuzz_targets/crypto_identity.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "crypto_identity_file"
+path = "fuzz_targets/crypto_identity_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "crypto_pointer"
+path = "fuzz_targets/crypto_pointer.rs"
 test = false
 doc = false
 bench = false
