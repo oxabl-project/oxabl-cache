@@ -6,6 +6,7 @@ mod crash_recovery;
 mod credentials;
 mod dictionary;
 mod eviction;
+mod ids_text;
 mod lookup_modes;
 mod object_route;
 mod reports;

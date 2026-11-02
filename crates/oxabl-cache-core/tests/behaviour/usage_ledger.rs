@@ -120,6 +120,7 @@ async fn a_flush_whose_acknowledgement_was_lost_is_repeated_without_counting_twi
 #[tokio::test]
 async fn a_closed_day_is_rolled_up_and_refuses_late_counters() {
     let env = Env::new().await;
+    let month = month_key(env.engine.clock().now());
     env.fetch(&env.reader, &[1], false).await;
     env.engine.flush_usage().await.expect("flush");
     env.fetch(&env.reader, &[1], false).await;
@@ -152,11 +153,7 @@ async fn a_closed_day_is_rolled_up_and_refuses_late_counters() {
         late.late_dropped > 0 && late.written == 0,
         "counters for a closed day are dropped: {late:?}"
     );
-    let after = env
-        .engine
-        .usage_export(&month_key(env.engine.clock().now() - 2 * 86_400))
-        .await
-        .expect("export");
+    let after = env.engine.usage_export(&month).await.expect("export");
     assert_eq!(
         value(&after, Metric::Requests),
         1,
