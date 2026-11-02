@@ -1,0 +1,15 @@
+[package]
+name = "oxabl-cache-oidc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "IdentityVerifier adapter: JWT and JWKS validation, issuer guard, trust policies."
+
+[lints]
+workspace = true
+
+[dependencies]
+oxabl-cache-core.workspace = true

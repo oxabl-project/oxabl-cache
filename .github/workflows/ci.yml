@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Format, lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.rustup/toolchains
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'flake.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - name: Install the pinned toolchain
+        run: nix develop --command rustup toolchain install
+      - name: Format
+        run: nix develop --command cargo fmt --all --check
+      - name: Clippy
+        run: nix develop --command cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test
+        run: nix develop --command cargo test --workspace --locked
+
+  dependency-gate:
+    name: Server dependency gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.rustup/toolchains
+          key: gate-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'flake.lock', 'scripts/gate-fixture/Cargo.lock') }}
+          restore-keys: gate-${{ runner.os }}-
+      - name: Install the pinned toolchain
+        run: nix develop --command rustup toolchain install
+      - name: The server tree holds no client-side crate
+        run: nix develop --command scripts/check-server-deps.sh
+      - name: The gate rejects the fixture that does
+        run: nix develop --command scripts/check-gate-fixture.sh

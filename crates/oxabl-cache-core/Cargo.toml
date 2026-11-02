@@ -1,0 +1,15 @@
+[package]
+name = "oxabl-cache-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Domain model, use cases and port traits of the cache server."
+
+[lints]
+workspace = true
+
+[dependencies]
+oxabl-cache-format.workspace = true

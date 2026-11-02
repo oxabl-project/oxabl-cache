@@ -1,0 +1,15 @@
+[package]
+name = "oxabl-cache-http"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "HTTP routes, extractors, error envelope and rate limiting of the cache server."
+
+[lints]
+workspace = true
+
+[dependencies]
+oxabl-cache-core.workspace = true
