@@ -7,9 +7,12 @@ Status: accepted
 - Entries are deleted by retention (30 idle days by default), quota eviction or an
   epoch purge. Bytes are never deleted in the same step.
 - Packs are `pending` (1-hour lease), `live` or `deleting`. A commit only names
-  the caller's own pack, while it is `pending` or still `committable`, and flips it
-  to `live` under a row lock. A pack stops being committable for good when it first
-  dies or is chosen for compaction. Segment ids are unique per cache.
+  the caller's own `pending` pack and flips it to `live` under a row lock. Each pack
+  is committed exactly once, and a repeat is answered from the recorded statuses.
+  Segment ids are unique per cache, and a dead segment is never revived.
+- A segment is live if and only if `dead_since IS NULL`. Dictionary segments are
+  credited with no entries and stay live while the dictionary pointer or any entry
+  references them.
 - A pack is deleted only after it has had no live segment for a 24-hour grace, which
   exceeds the 15-minute URL lifetime by far, or when its lease expired while still
   pending.

@@ -136,7 +136,7 @@ pub enum MissReason {
 /// A verified output as the caller saw it: stored under `path`, read from `disk_path`.
 pub struct ArtifactFileRef {
     pub path: ArtifactPath,
-    /// Absolute; opened with `O_NOFOLLOW` and read once, lazily.
+    /// Absolute; read once, lazily. Only the final component must not be a symlink.
     pub disk_path: std::path::PathBuf,
     pub size: u64,
     pub blake3: [u8; 32],
@@ -233,8 +233,11 @@ A final path never holds a partial or unverified file.
    references and waits when 10,000 sets are queued or 256 MiB of sealed bytes are in
    flight.
 2. Workers take one set at a time. They open each file at its absolute `disk_path`
-   (`O_NOFOLLOW`; a relative path, a symlink or a non-regular file gives
-   `Failed(Unreadable)`), read it once into memory, and check its size and BLAKE3
+   with `O_NOFOLLOW`, which refuses a symlink in the final component only.
+   Intermediate directories may be symlinks (a workspace under a symlinked
+   directory is normal), and that is harmless because the verified size and BLAKE3
+   bind the content. A relative path, a final-component symlink or a non-regular file
+   gives `Failed(Unreadable)`. Each file is read once into memory, and check its size and BLAKE3
    against the `ArtifactFileRef`.
    - Any mismatch makes the key `Changed`, and nothing of that set is sealed or
      uploaded. Because the bytes compressed are exactly the bytes checked, a file

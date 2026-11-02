@@ -168,12 +168,26 @@ It writes only non-zero deltas, as rows `(node_id, flush_seq, tenant, cache, day
 metric, value)`. A node crash loses at most 60 s of counters, which is acceptable for
 monthly billing.
 
+Identity and order:
+
+- `node_id` is 16 random bytes drawn at each process start. It is never a hostname,
+  a pod ordinal or a configured value, so a restarted process can never collide with
+  its predecessor's high-water mark.
+- `flush_seq` starts at 1 for each `node_id` and rises by one per flush.
+- Flushes are serial. A failed flush is retried with the same `flush_seq` and the
+  same rows until it succeeds. Counters that arrive meanwhile wait for the next
+  flush, so flush N+1 is never sent before N is acknowledged.
+
 Each flush is one transaction that:
 
 - reads and raises the node's high-water mark in `ledger_nodes(node_id,
   max_flush_seq)`. A flush whose `flush_seq` is not above the mark is acknowledged
   and ignored, so a retried flush is idempotent even after a roll-up has removed its
-  rows;
+  rows. Every ignored flush is counted in `oxabl_cache_ledger_ignored_flushes_total`.
+  With serial flushes, that counter rises only for retries of a flush that had in
+  fact been written. Rows of `ledger_nodes` whose node has not flushed for 2 days
+  are pruned; any later flush from such a node is for a closed day and is refused by
+  the next rule;
 - refuses rows for a closed day (`ledger_days.closed_at` set). Those counters are
   dropped and counted in `oxabl_cache_ledger_late_dropped_total`. A day closes one
   hour after it ends, so only a node that could not flush for an hour loses
@@ -220,6 +234,12 @@ Quotas:
 
 `oxabl-cache dict train --outputs <dir>` samples up to 2,000 artifact sets, trains on
 80% and measures the ratio on the held-out 20%. `--publish` uploads the dictionary
-only if the measured gain is at least 1.3x over zstd-3 without it. CI retrains after
-a toolchain or schema change (a full rebuild). Older dictionaries stay alive while
-entries name them.
+only if the measured gain is at least 1.3x over zstd-3 without it.
+
+Publishing commits a `trusted` pack holding only the dictionary segment (kind
+`dictionary`, no entries), then moves the pointer (protocol.md, "dictionary"). CI
+retrains after a toolchain or schema change (a full rebuild).
+
+A dictionary stays live while the pointer or any entry names it. It dies when both
+have moved on, or after the grace if it was never referenced. Its pack is then
+swept or compacted like any other.

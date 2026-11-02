@@ -106,7 +106,18 @@ verify the signature against their own pinned keys.
 ### `GET|PUT /v1/caches/{cache}/dictionary`
 
 The `OXDP` pointer, under the same `If-Match` rules. PUT needs `write:trusted`, and
-the named segment must be `live` in this cache.
+the named segment must be a live (`dead_since IS NULL`) `dictionary` segment of this
+cache. The pointer counts as a reference to its segment; moving it releases the
+previous dictionary to the usual mark rules (architecture.md, "Mark").
+
+Publishing has two steps:
+1. Upload and commit a `trusted` pack whose segment table lists the dictionary
+   segment with kind 1, and no entries. The commit credits it as live although no
+   entry names it.
+2. `PUT` the pointer naming that segment.
+
+A dictionary segment that no pointer and no entry has referenced within the grace
+is marked dead.
 
 ### `POST /v1/caches/{cache}/lookup`
 
@@ -153,21 +164,30 @@ The body is the `OXPK` bytes, with exactly the signed headers. S3 stores answer
 
 ### `POST /v1/caches/{cache}/packs/{pack_id}/commit`
 
-Request `OXCM`, response `OXCA`. The pack must be uploaded by the caller and in the
-namespace named by the frame. It must be `pending`, or `live` and still
-`committable`; otherwise the server answers 409 `conflict` with `pack_closed`. It must
-also be present at exactly the declared size, or 409 with `pack_incomplete`. A retry
-that sees a different object ETag than the first commit recorded gets 409 with
-`pack_changed`, and the server queues a scrub of the pack. Per-entry statuses:
+Request `OXCM`, response `OXCA`. Each pack is committed exactly once. The pack must
+be uploaded by the caller, be in the namespace named by the frame, and be `pending`,
+with one exception: a repeat of its commit. That pack must be present at exactly the
+declared size, or the server answers 409 `conflict` with `pack_incomplete`.
+
+A repeat of the commit of an already-committed pack (keyed by pack id) is handled
+first:
+- if the object's ETag differs from the one recorded, the server answers 409
+  `pack_changed` and queues a scrub;
+- if the request body's BLAKE3 equals the recorded digest, it returns the recorded
+  `OXCA` bytes unchanged;
+- otherwise it answers 409 `pack_closed`.
+
+Retries therefore see exactly the first answer, even after the pack's segments have
+died, the pack has closed, or GC has run. Per-entry statuses:
 
 | Status | Meaning |
 | --- | --- |
-| 0 `committed` | Inserted, or already present naming the same segment (a retry). |
+| 0 `committed` | Inserted. |
 | 1 `exists` | Another write won; this segment is dead. |
-| 2 `invalid` | Malformed record header, wrong epoch, segment index out of range, or the segment id already recorded elsewhere in the cache (a different pack, offset or length). |
-| 3 `missing_dictionary` | The dictionary segment is not `live`. |
+| 2 `invalid` | Malformed record header, wrong epoch, segment index out of range, an entry naming a `dictionary` segment as its own, or a segment id already recorded in the cache. |
+| 3 `missing_dictionary` | `dict_id` names no live `dictionary` segment of this cache. |
 
-Retrying a commit is safe and returns the same statuses.
+Retrying a commit is safe and returns byte-identical statuses.
 
 ### `POST /v1/caches/{cache}/urls`
 
@@ -254,7 +274,7 @@ tries `trusted` first, then `personal`.
 | reserved | `u8` = 0 |
 | pack_size | `u64` |
 | seg_count | `u32` ≤ 2,000 |
-| segments | `seg_count × (bytes32 segment_id, u64 offset, u32 length)` |
+| segments | `seg_count × (bytes32 segment_id, u64 offset, u32 length, u8 kind)`, with kind 0 `artifact` or 1 `dictionary`; kind 1 is allowed only when `ns` is 0 |
 | entry_count | `u32` ≤ 2,000 |
 | entries | `entry_count × (bytes32 lookup_id, u32 segment_idx, bytes32 dict_id or zero, u32 epoch, u16 record_len, record)` |
 

@@ -62,8 +62,8 @@ ADR: [0001](adr/0001-hexagonal-core.md).
 | Grant | Principal × cache × scopes (`read`, `write:personal`, `write:trusted`, `cache:admin`); tenant-wide `tenant:admin`. | yes |
 | Namespace | Where an entry lives: `trusted` (CI) or `personal(user)` (one per developer). | yes |
 | Entry | `(cache, namespace, lookup_id) → sealed record`, plus the ids of the segment and dictionary it names, its epoch and sizes. Immutable once committed. | ids and sizes |
-| Segment | One sealed, compressed artifact set (or a compression dictionary), named by the BLAKE3 hash of its sealed bytes. Lives at `(pack, offset, length)`. | id, size, location |
-| Pack | An immutable object of 5 to 32 MiB holding segments back to back, with a plaintext footer index of segment ids and offsets. State `pending`, `live` or `deleting`, plus a `committable` flag that only ever goes from true to false. | id, size, live bytes, ETag |
+| Segment | One sealed, compressed artifact set (kind `artifact`) or a compression dictionary (kind `dictionary`), named by the BLAKE3 hash of its sealed bytes. Lives at `(pack, offset, length)`. A segment is **live** if and only if `dead_since IS NULL`. | id, kind, size, location |
+| Pack | An immutable object of 5 to 32 MiB holding segments back to back, with a plaintext footer index of segment ids and offsets. State `pending`, `live` or `deleting`. Committed exactly once. | id, size, live bytes, ETag |
 | Roster | Signed, versioned list of the cache's members and their public keys, plus the cache root key wrapped to those members. Opaque to the server except its version. | version |
 | Epoch | Generation of the cache root key. Rotation starts a new epoch, and lookup ids change with it. | number |
 | Usage | Append-only ledger rows: tenant, cache, day, metric, value. | yes |
@@ -74,15 +74,14 @@ Invariants the core enforces:
 1. An entry is inserted at most once per `(cache, namespace, lookup_id)`. The first
    commit wins; later commits are told `exists`. The database arbitrates this; the
    object store is never asked for conditional writes.
-2. Entries are committed only into a pack the same principal uploaded, that is
-   `pending`, or `live` and still `committable`, and that is verified present at its
-   declared size. The pack flips to `live` in the same transaction. A pack stops being
-   committable, for good, when it first gets `dead_since` or is chosen as a compaction
-   source.
+2. A pack is committed exactly once: by the principal that uploaded it, while it is
+   `pending`, and after it is verified present at its declared size. The pack flips
+   to `live` in the same transaction. The server records that commit's request
+   digest and per-entry statuses. A repeat with the same digest is answered from the
+   record and changes nothing. A different body gets 409 `pack_closed`.
 3. A segment id is unique within a cache. A commit may name a segment id only if it
-   is new to the cache, or is already recorded in the same pack at the same offset and
-   length and is not dead (a retry). A retry that names a segment whose `dead_since`
-   is set is `invalid`: dead segments are never revived.
+   is new to the cache. Retries never reach insertion (invariant 2), and no path ever
+   clears `dead_since`: a dead segment is never revived.
 4. A pack is deleted only when no entry names any of its segments and it has been
    dead for the grace period, or it is `pending` with an expired lease.
 5. Writes into `trusted` need `write:trusted`; writes into `personal(u)` need
@@ -233,9 +232,11 @@ Core tables: `tenants`, `caches`, `users`, `workload_policies`, `tokens`,
   It is a narrow table, so the daily touch never rewrites a row that carries a
   512-byte record.
 - `segments`: key `(cache_id, segment_id)` (the uniqueness of invariant 3); columns
-  `pack_id`, `offset`, `length`, `dead_since`.
+  `pack_id`, `offset`, `length`, `kind` (`artifact` or `dictionary`), `created_at`,
+  `dead_since`. Live means `dead_since IS NULL`.
 - `packs`: key `(cache_id, pack_id)`; columns `ns`, `uploader`, `client_ref`, `size`,
-  `etag`, `live_bytes`, `state`, `committable`, `lease_until`, `dead_since`.
+  `etag`, `live_bytes`, `state`, `lease_until`, `dead_since`, `commit_digest` (BLAKE3
+  of the `OXCM` body) and `commit_statuses` (the `OXCA` bytes returned).
 - `caches` carries `live_bytes` (sum of live segment lengths) and `pending_bytes`,
   updated in the same transactions as the rows they sum.
 - `nodes`: `node_id`, `heartbeat_at`, written every 10 s, for the live node count
@@ -257,30 +258,37 @@ them.
 3. The client PUTs the pack. S3 acknowledges only durable objects. The local adapter
    writes into `tmp/`, fsyncs, renames and fsyncs the directory before answering 200,
    and refuses any PUT once the pack is not `pending`.
-4. `POST commit` for that pack: the segment table (id, offset, length) and up to
-   2,000 sealed records. Under a row lock on the pack, the server checks:
-   - the pack is `pending`, or `live` and `committable` (otherwise 409);
+4. `POST commit` for that pack, once: the segment table (id, offset, length, kind)
+   and up to 2,000 sealed records. Under a row lock on the pack, the server first
+   handles a repeat. If the pack already has a `commit_digest`, it re-checks the
+   object's ETag; a different ETag gets 409 `pack_changed` and queues a scrub. It
+   then returns `commit_statuses` if the digest matches, or 409 `pack_closed` if it
+   does not. Otherwise it checks:
+   - the pack is `pending` (otherwise 409 `pack_closed`);
    - it belongs to the caller and to the namespace in the frame;
-   - `HEAD` (or `stat`) reports exactly the declared size. The first commit records
-     the object's ETag, and a later commit that sees a different ETag gets 409 and
-     queues a scrub of the pack;
+   - `HEAD` (or `stat`) reports exactly the declared size. The ETag is recorded;
    - every segment is in bounds, and no two overlap;
-   - every segment id is new to the cache or a retry (invariant 3). A segment id
-     already recorded anywhere else makes that segment, and every entry naming it,
-     `invalid`. This stops a writer from claiming another namespace's segment.
+   - every segment id is new to the cache (invariant 3). A segment id already
+     recorded makes that segment, and every entry naming it, `invalid`. This stops a
+     writer from claiming another namespace's segment;
+   - a `dictionary` segment appears only in a `trusted` commit by a caller with
+     `write:trusted`, and no entry names it as its own segment.
 
    In one transaction the server then:
-   - inserts the segments, with `dead_since = now` for every segment whose entries
-     all lost or are `invalid`;
+   - inserts the segments. An `artifact` segment whose entries all lost or are
+     `invalid` gets `dead_since = now`. A `dictionary` segment is exempt: it is
+     inserted live and referenced by nothing yet (see "Mark");
    - inserts the entries with `ON CONFLICT DO NOTHING`, and an `entry_access` row
      (`access_day = today`) for each entry that won;
-   - sets the pack `live` and credits `live_bytes` (pack and cache) only for
-     segments of entries that won.
+   - sets the pack `live` and credits `live_bytes` (pack and cache) for every live
+     segment: winning artifact segments and every dictionary segment;
+   - records `commit_digest` and `commit_statuses`.
 
    If the pack's credited `live_bytes` is 0 after the commit (every entry lost),
-   the pack gets `dead_since = now` and `committable = false` in the same
-   transaction, so the sweep removes it after the grace. Packs of losing writers
-   never linger. The server returns `committed`, `exists` or `invalid` per entry.
+   the pack gets `dead_since = now` in the same transaction, so the sweep removes it
+   after the grace. Packs of losing writers never linger. The server returns
+   `committed`, `exists` or `invalid` per entry, and returns exactly the same bytes
+   to any retry.
 
 A crash before step 4 leaves a `pending` pack that the lease expiry reclaims. A crash
 inside step 4 rolls the transaction back. Concurrent writers of the same key both
@@ -320,27 +328,35 @@ lock (with SQLite, the single process runs it). ADR: [0006](adr/0006-gc-leases-g
 - **Epoch purge.** After a key rotation, `cache:admin` may delete every entry of
   epochs below N; otherwise retention expires them.
 - **Mark.** Deleting an entry, in the same transaction, sets `dead_since` on its
-  segment when no other entry names it (dictionaries are named by many entries and
-  by the dictionary pointer) and subtracts its length from the pack's `live_bytes`.
-  A pack whose `live_bytes` reaches 0 gets `dead_since = now` and
-  `committable = false` under the same lock, so no later commit can credit it.
+  artifact segment and subtracts the segment's length from its pack's `live_bytes`.
+  A dictionary segment is referenced by the dictionary pointer and by every entry
+  whose `dict_id` names it. It gets `dead_since` only when neither references it:
+  - when the last such entry is deleted while the pointer names another
+    dictionary;
+  - when the pointer moves away while no entry names it;
+  - when it was committed but never referenced and is older than the grace (a
+    publish whose pointer update never happened).
+
+  A pack whose `live_bytes` reaches 0 gets `dead_since = now` under the same lock.
 - **Compaction** (every 10 min). Candidates are `live` packs whose live fraction is
   below 50%, that are older than the 24 h grace, and that hold at least 4 MiB in
   total. The worker range-reads each live segment, verifies `BLAKE3` against its id
   (corrupt ones follow the report path), and writes the survivors into a new pack
-  of the same namespace with a fresh id and footer. Choosing a source pack sets it
-  `committable = false` first, and its reads use `If-Match` with the recorded ETag.
-  One transaction then moves each segment's location if it is still in the source
-  pack and still alive, credits the new pack, and sets the source pack's
+  of the same namespace with a fresh id and footer. Its reads use `If-Match` with the
+  recorded ETag. The new pack is recorded as committed by the GC, so it never accepts
+  a client commit. One transaction then moves each segment's location if it is
+  still in the source pack and still live (`dead_since IS NULL`), keeping its kind,
+  credits the new pack, and sets the source pack's
   `live_bytes = 0, dead_since = now`. Compaction never needs a key,
   never changes a segment's bytes, and never changes a record.
 - **Sweep** (every 10 min). In one transaction, select packs with `dead_since` older
   than the grace, or `pending` with an expired lease, and set them `deleting`. Then
   delete the objects, then the rows.
-- **Safety.** Deleting an entry never touches bytes. Commits only name the caller's
-  own new pack plus a dictionary segment that must not be dead, and the transaction
-  holds both rows' locks, so a commit and a sweep can
-  never interleave on the same pack. The grace (24 h) is far longer than a URL's
+- **Safety.** Deleting an entry never touches bytes. A commit names only the
+  caller's own `pending` pack plus, through `dict_id`, a dictionary segment that
+  must be live. The transaction holds both rows' locks, so a commit and a sweep can
+  never interleave on the same pack, and a dictionary cannot die while an entry is
+  being committed against it. The grace (24 h) is far longer than a URL's
   lifetime (15 min), so a reader that resolved a location just before compaction or
   eviction still finds the bytes where its URL points.
 - **Orphans.** Weekly, the sweeper lists the cache prefix and deletes objects that
@@ -353,10 +369,15 @@ lock (with SQLite, the single process runs it). ADR: [0006](adr/0006-gc-leases-g
     refused, so 25 developers doing full builds cannot fill the cache.
   - **Trusted admission evicts personal entries.** A `trusted` upload that would
     exceed the hard quota deletes personal entries, oldest `access_day` first, in its
-    own admission transaction, until the pack fits. It is refused only if trusted
-    bytes alone would exceed the quota. Personal bytes freed this way leave
-    `live_bytes` at once (the usual mark rules), so CI is never starved by personal
-    writes while it waits for the GC interval.
+    own admission transaction, until the pack fits. Personal bytes freed this way
+    leave `live_bytes` at once (the usual mark rules), so CI is never starved by
+    personal writes while it waits for the GC interval. Personal **pending** bytes
+    cannot be evicted (they are mid-upload). A trusted pack that still does not fit
+    once every personal live entry is gone is admitted anyway, as long as trusted
+    live plus trusted pending bytes stay within the hard quota. The overshoot is
+    bounded by the personal pending bytes, which are at most 10% of hard per user
+    and expire with their 1-hour lease, and by the stored-bytes ceiling below. A
+    trusted pack is refused only when trusted bytes alone would exceed the quota.
 
   `uploads` also refuses a pack when stored bytes (every pack byte
   that is `pending`, `live` or in grace) would exceed 3x the hard quota. That ceiling
@@ -377,7 +398,7 @@ lock (with SQLite, the single process runs it). ADR: [0006](adr/0006-gc-leases-g
 | Bit rot at rest | The client detects it and reports it; the server confirms and removes the entries. Compaction re-verifies everything it copies. A local-disk scrub re-hashes every pack weekly. |
 | Wrong artifact | The signed record binds the compile key (through the lookup id), epoch, namespace kind, segment id and sizes. The segment id binds every byte. Any mismatch is a miss. |
 | A writer claims another namespace's segment | Segment ids are unique per cache; such a commit is `invalid` (invariant 3). |
-| A live pack rewritten after commit | PUT URLs exist only before the first commit; `If-None-Match` where supported; the ETag is recorded at commit and checked by retries, scrub and compaction. |
+| A live pack rewritten after commit | PUT URLs exist only before the commit; `If-None-Match` where supported; the ETag is recorded at commit and checked by repeats, scrub and compaction. |
 | Lost or rolled-back database | The orphan sweep reclaims bytes. Entries naming missing packs produce misses and reports, which delete them. Never a wrong hit. |
 
 ## Scaling

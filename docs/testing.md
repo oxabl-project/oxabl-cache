@@ -68,14 +68,15 @@ Each test names the behaviour it protects.
 | --- | --- |
 | Round trip | CI stores 500 sets; a developer fetches them. Installed files are byte-identical, `Provenance` names the `ci` signer and `Tier::Trusted`, and no temp files remain. Repeated with `Durability::PerFile` and `Durability::Caller`. |
 | Streaming fetch | Outcomes arrive per key before the whole fetch completes. A store throttled to 1 MB/s keeps the fetch alive past 30 s, because bytes flow. A store that stalls makes every pending key `Timeout` after the idle timeout, and sets already installed stay installed. |
-| Output layout | Outputs live in a non-default layout (`rcode/…` for r-code, `reports/xref/…` for XREF), and `ArtifactFileRef.disk_path` points there while `path` stays `r/…` and `xref/…`. CI stores them and a developer fetches 1,000 keys in one `fetch` call: every set installs under `stage/<artifact path>`, byte-identical. A relative `disk_path` or one through a symlink reports `Failed(Unreadable)`. |
+| Output layout | Outputs live in a non-default layout (`rcode/…` for r-code, `reports/xref/…` for XREF), and `ArtifactFileRef.disk_path` points there while `path` stays `r/…` and `xref/…`. CI stores them and a developer fetches 1,000 keys in one `fetch` call: every set installs under `stage/<artifact path>`, byte-identical. A relative `disk_path`, or one whose final component is a symlink, reports `Failed(Unreadable)`. A `disk_path` under a symlinked intermediate directory stores normally. |
 | Lazy store | 2,000 sets of 5 MB each are fed through `put` while the driver runs under a 512 MiB `RLIMIT_AS`, with no failure. A file rewritten after `put`, with the same size and different bytes and with a different size, reports `Changed`, and a fetch of that key afterwards is `NotFound` (nothing was uploaded). A file whose `ArtifactFileRef` hash is wrong from the start also reports `Changed`. A missing file reports `Failed(Unreadable)`. Duplicate or invalid paths report `Rejected`. |
 | Config trust | `from_repo` fails with `TrustOverride` when any one of `OXABL_CACHE_TENANT`, `OXABL_CACHE_CACHE`, `OXABL_CACHE_OWNER_KEYS` or `OXABL_CACHE_MIN_ROSTER_VERSION` is set (each in its own case), and fails when `cache.toml` has an unknown key. `OXABL_CACHE_SERVER` is honoured. |
 | OIDC audience | The client requests a GitHub-style token, and the fake IdP records audience `oxabl-cache:<tenant>`. A hostile proxy then adds an `audience` field to every server response, and answers 401 with a different audience in the message: the next request still asks for `oxabl-cache:<tenant>`. A GitLab-style `OXABL_CACHE_ID_TOKEN` minted for `sts.amazonaws.com` gives `OpenError`, and the proxy sees no request carrying it. The server gets 401 for a valid token with any other audience. |
 | First write wins | Two CI writers store different bytes for the same 1,000 keys. Per key, one gets `committed` and the other `exists`. Every reader installs exactly one writer's complete set. |
 | Tiers | A developer's personal writes are invisible to CI and to other developers. A developer token gets 403 writing `trusted` over raw HTTP. A developer-signed record copied into `trusted` in the database is a miss (`Untrusted`) for CI. |
-| Personal crowding | 25 developer identities each store a full set (25 × the synthetic full size) against a hard quota of 4 full sets, with the GC interval set longer than the test. Each developer is refused at 10% of hard (`QuotaExceeded`). CI's full upload then commits completely: its admission evicts personal entries synchronously, oldest first, and every CI entry installs. |
+| Personal crowding | Hard quota of 4 full sets, GC interval longer than the test. 8 developer identities each try to store a full set. Each one's personal live bytes stop at or below 10% of hard (0.4 full sets), and the rest of each set reports `QuotaExceeded`; personal live bytes total about 3.2 full sets. CI's full upload (1 full set, so 4.2 > 4) then commits completely: its admission evicts personal entries synchronously, oldest first, and every CI entry installs. In a second case, a developer holds a large personal upload `pending` (not yet committed) while CI's upload arrives. CI is admitted over the hard quota by at most those pending bytes, every CI entry installs, and stored bytes stay under the 3x ceiling. |
 | Quotas | Writes over the hard quota report `QuotaExceeded` and the build continues. With the grace set longer than the test, a full-rebuild workload pushes live bytes past 90%. Eviction stops at or just under 80% live, trusted entries written last still install, personal namespaces go first, and `reclaimable_bytes` reports the lag. |
+| Dictionary lifecycle | CI publishes a dictionary (a pack with one `dictionary` segment and no entries), then moves the pointer. After waiting past the grace, the pack and segment are still live. CI stores 200 sets with the dictionary, and a developer fetches them. CI publishes a second dictionary. The first stays live while any entry names it. After those entries are evicted and the grace passes, its pack is swept. A dictionary committed without a pointer update is marked dead after the grace, and its pack is swept. |
 | Losing packs | Two CI writers store different bytes for the same 500 keys, one after the other. Every entry of the second pack is `exists`. After the grace, the second pack's object is gone from the store and `stored_bytes` is back to one pack's worth. |
 | Retention and GC | An entry idle past retention disappears and its pack is deleted after the grace. An entry that is never read retires on time too (it has an access row from commit). A reader holding a URL issued before eviction still downloads within the grace. |
 | Compaction | A churn-heavy workload leaves packs under 50% live. After compaction every live entry still installs correctly and stored bytes drop. |
@@ -87,7 +88,7 @@ Each test names the behaviour it protects.
 | Tokens | A revoked or expired token gets 401 on the next call, mid-session included. |
 | Tenancy | Tenant B's token on tenant A's cache gets 404. |
 | Usage | `usage export` equals the counts the test drove (bytes, ids, hits, commits). |
-| Ledger across roll-up | Two server nodes share one Postgres through the fault proxy, under an accelerated fake clock. The proxy drops the reply to one of node A's flush commits just before midnight, so node A retries after the 01:00 roll-up. Node B is `SIGSTOP`ped across the roll-up with counters in memory, then resumed. The monthly export equals the driven counts minus exactly node B's late counters (also reported by `oxabl_cache_ledger_late_dropped_total`), and nothing is counted twice. |
+| Ledger across roll-up | Two server nodes share one Postgres through the fault proxy, under an accelerated fake clock. The proxy drops the reply to one of node A's flush commits just before midnight, so node A retries after the 01:00 roll-up. Node B is `SIGSTOP`ped across the roll-up with counters in memory, then resumed. The monthly export equals the driven counts minus exactly node B's late counters (also reported by `oxabl_cache_ledger_late_dropped_total`), and nothing is counted twice. A third node restarts mid-test: its new process draws a new `node_id`, and its first flush after the restart is counted, not ignored. The fault proxy fails one of node A's flushes outright. Node A sends nothing newer until that flush succeeds, and `oxabl_cache_ledger_ignored_flushes_total` counts only replies that were dropped after the write. |
 | Migration | `fs + sqlite` is migrated to `s3 + postgres`; every entry still installs. A migration with one corrupted pack refuses to finish. |
 | Restore | A database snapshot older, then newer, than the bucket gives only misses, and reports clear the stale entries. |
 
@@ -133,12 +134,18 @@ producer stored, the outcome is a miss, and no temp file remains.
   supports `If-None-Match`, and refused by the local route. Where the store lacks it,
   the overwrite is caught: the next commit retry gets `pack_changed`, and scrub and
   compaction report the ETag change.
-- **Retry after the segment died.** A commit whose reply is dropped by the fault
-  proxy is followed by a purge of its entries. The retried commit gets `invalid` for
-  those entries, no `live_bytes` are credited, and after the grace the pack is gone.
-- **Commit into closed packs.** A commit into a pack whose entries were all evicted
-  (`dead_since` set), and into a pack chosen as a compaction source, gets 409
-  `pack_closed`. After the sweep, every live entry still installs.
+- **Commit retries.** The fault proxy drops the reply to a commit, and the client
+  retries. The retry returns byte-identical `OXCA` statuses in each of three states:
+  - after the commit's entries were purged and their segments died;
+  - after a losing commit whose entries were all `exists`, so its pack is already
+    dead;
+  - after compaction moved the pack's segments.
+
+  No retry credits `live_bytes` or revives a segment, and the client reports
+  `Committed` or `Existed` exactly as the first answer said.
+- **Second commit to a pack.** A commit to an already-committed pack with a
+  different body gets 409 `pack_closed`, and so does a client commit to a pack
+  written by compaction. After the sweep, every live entry still installs.
 - **Decompression bombs.** A signed record with `plain_len` above the limit, and a
   stream that expands past its declared `plain_len`. Both miss with bounded memory
   (the driver runs under a 512 MiB `RLIMIT_AS`).
