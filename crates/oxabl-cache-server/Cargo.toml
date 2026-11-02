@@ -11,10 +11,30 @@ description = "The oxabl-cache-server binary: configuration, wiring, serve, migr
 [lints]
 workspace = true
 
+[[bin]]
+name = "oxabl-cache-server"
+path = "src/main.rs"
+
 [dependencies]
+oxabl-cache-core.workspace = true
+oxabl-cache-format.workspace = true
 oxabl-cache-http.workspace = true
 oxabl-cache-meta-sqlite.workspace = true
-oxabl-cache-meta-postgres.workspace = true
 oxabl-cache-store-fs.workspace = true
-oxabl-cache-store-s3.workspace = true
-oxabl-cache-oidc.workspace = true
+axum.workspace = true
+blake3.workspace = true
+getrandom.workspace = true
+hyper-util = { workspace = true, features = ["http1", "http2", "server-auto", "server-graceful", "service", "tokio"] }
+rustls = { workspace = true, features = ["std", "aws_lc_rs"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-rustls = { workspace = true, features = ["aws_lc_rs"] }
+toml.workspace = true
+
+[dev-dependencies]
+oxabl-cache-format.workspace = true
+blake3.workspace = true
+getrandom.workspace = true
+serde_json.workspace = true
+ed25519-dalek.workspace = true
