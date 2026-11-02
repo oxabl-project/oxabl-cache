@@ -21,6 +21,8 @@ mod gc_sweep;
 mod lookup;
 mod node_heartbeat;
 mod object_route;
+mod operator_tenants;
+mod operator_token;
 mod pack_commit;
 mod pack_verify;
 mod purge;
@@ -34,6 +36,7 @@ mod session_open;
 mod session_revoke;
 mod signature_check;
 mod tenant_create;
+mod tenant_listing;
 mod token_create;
 mod token_revoke;
 mod upload_reserve;
@@ -52,6 +55,7 @@ pub use lookup::{
     DictionaryLocation, LookupHit, LookupRequest, LookupResponse, NamespaceSet, PackLocator,
     SegmentLocation,
 };
+pub use operator_token::NewOperatorToken;
 pub use pack_commit::CommitRequest;
 pub use pack_verify::VerifyOutcome;
 pub use purge::PurgeScope;

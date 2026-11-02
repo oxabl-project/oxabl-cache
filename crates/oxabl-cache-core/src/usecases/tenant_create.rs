@@ -28,7 +28,8 @@ where
     A: PackAssembler,
     C: Clock,
 {
-    /// Creates a tenant (an operator action).
+    /// Creates a tenant (an operator action). A name is unique: a second tenant of
+    /// that name is `Conflict(Exists)`.
     pub async fn create_tenant(&self, spec: TenantSpec) -> Result<TenantId> {
         if spec.name.is_empty() {
             return Err(Error::bad_request("a tenant needs a name"));
@@ -46,6 +47,13 @@ where
         let id = tenant.id;
         self.meta
             .transact(move |tx| {
+                if tx
+                    .all_tenants()?
+                    .iter()
+                    .any(|existing| existing.name == tenant.name)
+                {
+                    return Err(Error::Conflict(Conflict::Exists));
+                }
                 if tx.insert_tenant(&tenant)? {
                     Ok(())
                 } else {

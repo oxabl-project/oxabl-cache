@@ -46,3 +46,39 @@ pub struct Credential {
     /// What the credential may do.
     pub grants: Vec<Grant>,
 }
+
+/// A credential as listed to its tenant: everything but the secret hash.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenSummary {
+    /// Public id.
+    pub id: CredentialId,
+    /// The principal it acts as.
+    pub principal: PrincipalId,
+    /// Operator-visible label.
+    pub name: String,
+    /// Creation time, unix seconds.
+    pub created_at: i64,
+    /// Expiry, unix seconds.
+    pub expires_at: i64,
+    /// Revocation time, if revoked.
+    pub revoked_at: Option<i64>,
+    /// What the credential may do.
+    pub grants: Vec<Grant>,
+}
+
+/// A service operator's credential, `oxo_<id>_<secret>`. It belongs to no tenant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorToken {
+    /// Public id.
+    pub id: CredentialId,
+    /// Operator-visible label.
+    pub name: String,
+    /// SHA-256 of the secret.
+    pub secret_hash: [u8; 32],
+    /// Creation time, unix seconds.
+    pub created_at: i64,
+    /// Expiry, unix seconds.
+    pub expires_at: i64,
+    /// Revocation time, if revoked.
+    pub revoked_at: Option<i64>,
+}

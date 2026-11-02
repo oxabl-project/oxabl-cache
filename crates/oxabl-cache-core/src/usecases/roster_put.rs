@@ -23,8 +23,9 @@ where
 {
     /// Replaces the roster. Needs `cache:admin`. `expected_version` is the
     /// `If-Match` version (`PreconditionFailed` if stale); the body must be
-    /// `current + 1`, of epoch `current` or `current + 1`, and carry a valid
-    /// signature by a registered owner key. Only public keys are used.
+    /// `current + 1`, of epoch `current` or `current + 1` (the first roster is
+    /// version 1 with epoch 1), and carry a valid signature by a registered owner
+    /// key. Only public keys are used.
     pub async fn put_roster(
         &self,
         caller: &Caller,
@@ -54,7 +55,12 @@ where
                 if roster.version != found.roster_version + 1 {
                     return Err(Error::bad_request("roster version must be current + 1"));
                 }
-                if roster.epoch != found.epoch && roster.epoch != found.epoch.saturating_add(1) {
+                let epoch_ok = if found.roster_version == 0 {
+                    roster.epoch == 1
+                } else {
+                    roster.epoch == found.epoch || roster.epoch == found.epoch.saturating_add(1)
+                };
+                if !epoch_ok {
                     return Err(Error::bad_request("roster epoch out of range"));
                 }
                 let owners = tx.owner_keys(&cache)?;
