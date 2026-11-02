@@ -57,6 +57,20 @@ async fn a_dictionary_stays_alive_while_the_pointer_names_it() {
     assert_eq!(env.engine.gc_sweep().await.expect("sweep"), 0);
     assert!(env.object_exists(pack).await);
     assert_eq!(env.info().await.quota.live_bytes, 1024);
+
+    let built = env.artifacts(&[1], 2048);
+    let mut named = entry(1, 0);
+    named.dict_id = Some(id);
+    env.publish(&env.ci, Trusted, &built, vec![named]).await;
+    env.engine
+        .purge(&env.cache_admin, env.cache, PurgeScope::BelowEpoch(1))
+        .await
+        .expect("purge");
+    assert_eq!(
+        env.info().await.quota.live_bytes,
+        1024,
+        "deleting the last entry does not release a pointed dictionary"
+    );
     env.assert_consistent().await;
 }
 

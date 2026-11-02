@@ -7,6 +7,7 @@ mod credentials;
 mod dictionary;
 mod eviction;
 mod lookup_modes;
+mod object_route;
 mod reports;
 mod retention;
 mod roster;

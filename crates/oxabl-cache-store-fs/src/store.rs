@@ -4,9 +4,9 @@ use crate::error::io_error;
 use crate::layout::tmp_dir;
 use crate::url_signing::{UrlRejection, object_path, sign, verify};
 use crate::writer::ObjectWriter;
-use oxabl_cache_core::Result;
 use oxabl_cache_core::ids::{CacheId, PackId};
 use oxabl_cache_core::ports::ObjectKey;
+use oxabl_cache_core::{Error, Result};
 use std::fs;
 use std::path::PathBuf;
 
@@ -41,10 +41,9 @@ impl FsStore {
     /// object route; `url_keys` lists the HMAC keys, the first of which signs and
     /// all of which verify (two during rotation).
     pub fn open(root: PathBuf, public_url: &str, url_keys: Vec<[u8; 32]>) -> Result<Self> {
-        assert!(
-            !url_keys.is_empty(),
-            "an fs store needs at least one URL key"
-        );
+        if url_keys.is_empty() {
+            return Err(Error::bad_request("an fs store needs at least one URL key"));
+        }
         fs::create_dir_all(root.join("v1")).map_err(|e| io_error(&e))?;
         let tmp = tmp_dir(&root);
         fs::create_dir_all(&tmp).map_err(|e| io_error(&e))?;

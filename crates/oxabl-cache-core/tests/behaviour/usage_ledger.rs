@@ -6,7 +6,7 @@ use oxabl_cache_core::domain::namespace::NamespaceKind::Trusted;
 use oxabl_cache_core::domain::usage::{Metric, UsageTotal};
 use oxabl_cache_core::ports::Clock;
 
-fn month_key(timestamp: i64) -> String {
+pub fn month_key(timestamp: i64) -> String {
     let day = timestamp.div_euclid(86_400) + 719_468;
     let era = day.div_euclid(146_097);
     let day_of_era = day - era * 146_097;

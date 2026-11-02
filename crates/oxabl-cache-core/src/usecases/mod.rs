@@ -20,6 +20,7 @@ mod gc_retention;
 mod gc_sweep;
 mod lookup;
 mod node_heartbeat;
+mod object_route;
 mod pack_commit;
 mod pack_verify;
 mod purge;
