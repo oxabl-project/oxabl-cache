@@ -91,3 +91,44 @@ fn credential_ids_are_sixteen_base32_characters() {
             .is_err()
     );
 }
+
+#[test]
+fn text_forms_agree_with_the_format_crate() {
+    use oxabl_cache_core::encoding::{base32_decode, base32_encode, hex_encode};
+    for _ in 0..200 {
+        let cache = CacheId::random();
+        let tenant = TenantId::random();
+        let pack = PackId::random();
+        let segment = SegmentId::of_bytes(cache.as_bytes());
+        assert_eq!(
+            oxabl_cache_format::CacheId(*cache.as_bytes()).to_text(),
+            cache.to_string()
+        );
+        assert_eq!(
+            oxabl_cache_format::TenantId(*tenant.as_bytes()).to_text(),
+            tenant.to_string()
+        );
+        assert_eq!(
+            oxabl_cache_format::PackId(*pack.as_bytes()).to_hex(),
+            pack.to_string()
+        );
+        assert_eq!(
+            oxabl_cache_format::SegmentId(*segment.as_bytes()).to_hex(),
+            segment.to_string()
+        );
+
+        let ten: [u8; 10] = *CredentialId::random().as_bytes();
+        assert_eq!(
+            oxabl_cache_format::base32::encode(&ten),
+            base32_encode(&ten)
+        );
+        let thirty_two = *segment.as_bytes();
+        assert_eq!(
+            oxabl_cache_format::base32::encode(&thirty_two),
+            base32_encode(&thirty_two)
+        );
+        let theirs = oxabl_cache_format::base32::encode(&thirty_two);
+        assert_eq!(base32_decode::<32>(&theirs), Some(thirty_two));
+        assert_eq!(hex_encode(&thirty_two), segment.to_string());
+    }
+}
