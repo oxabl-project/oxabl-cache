@@ -65,7 +65,7 @@ ADR: [0001](adr/0001-hexagonal-core.md).
 | Segment | One sealed, compressed artifact set (kind `artifact`) or a compression dictionary (kind `dictionary`), named by the BLAKE3 hash of its sealed bytes. Lives at `(pack, offset, length)`. A segment is **live** if and only if `dead_since IS NULL`. | id, kind, size, location |
 | Pack | An immutable object of 5 to 32 MiB holding segments back to back, with a plaintext footer index of segment ids and offsets. State `pending`, `live` or `deleting`. Committed exactly once. | id, size, live bytes, ETag |
 | Roster | Signed, versioned list of the cache's members and their public keys, plus the cache root key wrapped to those members. Opaque to the server except its version. | version |
-| Epoch | Generation of the cache root key. Rotation starts a new epoch, and lookup ids change with it. | number |
+| Epoch | Generation of the cache root key. Rotation starts a new epoch, and lookup ids change with it. A new cache starts at epoch 0 and roster version 0, meaning "no roster yet". The first roster is version 1 with epoch 1. | number |
 | Usage | Append-only ledger rows: tenant, cache, day, metric, value. | yes |
 | Quota | Per tenant and per cache: live bytes (soft and hard), a stored-bytes ceiling, monthly egress bytes, request rate. | yes |
 
@@ -81,7 +81,10 @@ Invariants the core enforces:
    record and changes nothing. A different body gets 409 `pack_closed`.
 3. A segment id is unique within a cache. A commit may name a segment id only if it
    is new to the cache. Retries never reach insertion (invariant 2), and no path ever
-   clears `dead_since`: a dead segment is never revived.
+   clears `dead_since`: a dead segment is never revived. A dead segment's row stays
+   until its pack is swept. Byte-identical sealed bytes uploaded again in that window
+   are therefore `invalid`; after the sweep the id is free again. Real clients never
+   meet this, because every sealing draws a fresh salt.
 4. One entry per artifact segment. An artifact segment is named by exactly one
    entry for its whole life, so deleting that entry is what kills it. A commit in
    which two or more entries name the same artifact segment makes all of them
@@ -224,9 +227,21 @@ types (ids are bytes or text, times are integer seconds), so nothing is converte
 During the window, builds see misses, never errors. The path has its own black-box
 test. ADR: [0003](adr/0003-metadata-sqlite-and-postgres.md).
 
-Core tables: `tenants`, `caches`, `users`, `workload_policies`, `tokens`,
-`sessions`, `grants`, `entries`, `segments`, `packs`, `rosters`,
-`dictionary_pointers`, `usage_ledger`.
+Core tables: `tenants`, `caches`, `cache_owner_keys`, `users`, `grants`, `tokens`
+and `token_grants`, `sessions` and `session_grants`, `workload_policies`,
+`rosters` and `roster_signers` (the public keys and roles of the current roster),
+`dictionary_pointers`, `packs`, `segments`, `entries`, `entry_access`,
+`usage_ledger`, `ledger_nodes`, `ledger_days`, `nodes`, `scrub_queue`. The schema
+enforces the invariants as well as the code:
+- `UNIQUE (cache_id, segment_id)` on entries (invariant 4);
+- foreign keys from entries to segments (their own segment and the dictionary),
+  from segments to packs, and from the dictionary pointer to its segment;
+- `CHECK live_bytes <= size` and non-negative counters;
+- `UNIQUE (cache_id, uploader, client_ref)` on packs.
+
+A violation is a hard error, never a silent accept. Entry inserts use a targeted
+`ON CONFLICT (cache_id, ns, lookup_id) DO NOTHING`, so only the first-write-wins
+conflict is absorbed.
 
 - `entries`: key `(cache_id, ns, lookup_id)`, where `ns` is `0` for trusted and the
   user id for personal. Columns `segment_id`, `dict_id`, `epoch`, `record` (sealed
@@ -237,13 +252,15 @@ Core tables: `tenants`, `caches`, `users`, `workload_policies`, `tokens`,
   It is a narrow table, so the daily touch never rewrites a row that carries a
   512-byte record.
 - `segments`: key `(cache_id, segment_id)` (the uniqueness of invariant 3); columns
-  `pack_id`, `offset`, `length`, `kind` (`artifact` or `dictionary`), `created_at`,
-  `dead_since`. Live means `dead_since IS NULL`.
+  `pack_id`, `byte_offset`, `byte_length` (not `offset` or `length`, which clash with
+  SQL keywords), `kind` (`artifact` or `dictionary`), `created_at`, `dead_since`. Live
+  means `dead_since IS NULL`.
 - `packs`: key `(cache_id, pack_id)`; columns `ns`, `uploader`, `client_ref`, `size`,
   `etag`, `live_bytes`, `state`, `lease_until`, `dead_since`, `commit_digest` (BLAKE3
   of the `OXCM` body) and `commit_statuses` (the `OXCA` bytes returned).
-- `caches` carries `live_bytes` (sum of live segment lengths) and `pending_bytes`,
-  updated in the same transactions as the rows they sum.
+- `caches` carries `live_bytes` (sum of live segment lengths), `pending_bytes`,
+  `epoch` and `roster_version`, updated in the same transactions as the rows they
+  sum or describe.
 - `nodes`: `node_id`, `heartbeat_at`, written every 10 s, for the live node count
   (rate limits, operations.md).
 
@@ -268,10 +285,23 @@ them.
    touching the pack or the store: the caller needs `write:trusted` or
    `write:personal` for the namespace in the frame, and must be the principal that
    uploaded the pack. Otherwise it answers 403 and does nothing more, so a `read`
-   principal cannot cause store requests or scrubs. Then, under a row lock on the
-   pack, it handles a repeat. If the pack already has a `commit_digest`, it
-   re-checks the object's ETag; a different ETag gets 409 `pack_changed` and queues a scrub. It
-   then returns `commit_statuses` if the digest matches, or 409 `pack_closed` if it
+   principal cannot cause store requests or scrubs.
+
+   The order of work is fixed, and the object store is never called inside a
+   metadata transaction:
+   1. A read transaction authorizes the caller and reads the pack.
+   2. `HEAD` (or `stat`) runs outside any transaction.
+   3. One write transaction re-reads the pack under the write lock and decides
+      everything below.
+
+   On S3, a PUT that replaced the object between that `HEAD` and the write
+   transaction would leave an ETag of the old bytes recorded. Refusing PUTs to any
+   pack that is no longer `pending` keeps this window tiny, but not zero. If it
+   happens, the next repeat answers `pack_changed`, and a scrub follows.
+
+   The write transaction first handles a repeat. If the pack already has a
+   `commit_digest`, it compares the object's ETag from step 2 with the recorded one;
+   a different ETag gets 409 `pack_changed` and queues a scrub. It then returns `commit_statuses` if the digest matches, or 409 `pack_closed` if it
    does not. Otherwise it checks:
    - the pack is `pending` (otherwise 409 `pack_closed`);
    - the pack's namespace is the one in the frame;
@@ -320,7 +350,19 @@ report. The server range-reads that segment itself, hashes it, and only on a mis
 deletes every entry naming a corrupt segment of that pack after verifying the whole
 pack. The next producer then rewrites the key. Reports that the server cannot
 confirm (a signature or key failure on the client) are counted and change nothing.
-Each principal may have at most 10 report verifications per minute.
+Each principal may have at most 10 report verifications per minute. The limit is a
+sliding window kept in memory per node, so with several nodes it applies per
+principal per node.
+
+The ETag is a change detector, not a trust anchor. When a scrub or report
+verification proves every live segment of a pack by hash, the recorded ETag is
+refreshed to the object's current one. A pack whose object was replaced with
+bytes that still verify is therefore usable again for repeats and compaction.
+
+If the corrupt segment is a dictionary, the server deletes every entry naming it as
+their dictionary and removes the dictionary pointer row. The next published pointer
+starts again at version 1. Without that, the pointer's foreign key would block the
+sweep of the corrupt dictionary.
 
 ## Garbage collection, compaction and retention
 
@@ -336,6 +378,10 @@ lock (with SQLite, the single process runs it). ADR: [0006](adr/0006-gc-leases-g
   the oldest entries by `access_day` are deleted until live bytes are at or below
   80%. Personal namespaces go before trusted. Bytes still waiting for compaction or
   the grace are reported separately as `reclaimable_bytes` and never drive eviction.
+  `reclaimable_bytes` counts the dead segment bytes inside live packs plus every byte
+  of packs in grace. It excludes the framing of live packs (header, footer, trailer),
+  which compaction never frees. So `stored = live + pending + reclaimable + framing
+  of live packs`.
 - **Epoch purge.** After a key rotation, `cache:admin` may delete every entry of
   epochs below N; otherwise retention expires them.
 - **Mark.** Every transition of a segment to `dead_since`, whatever its kind and
@@ -381,8 +427,11 @@ lock (with SQLite, the single process runs it). ADR: [0006](adr/0006-gc-leases-g
   - **Personal cap.** Each user's personal namespace (its live plus pending bytes)
     is capped at 10% of the cache's hard quota. A personal upload over the cap is
     refused, so 25 developers doing full builds cannot fill the cache.
-  - **Trusted admission evicts personal entries.** A `trusted` upload that would
-    exceed the hard quota deletes personal entries, oldest `access_day` first, in its
+  - **Trusted admission evicts personal entries.** The order is fixed. First, a
+    trusted pack whose trusted live plus pending bytes alone would exceed the hard
+    quota is refused, and nothing is evicted, so a refused pack never costs anyone
+    their entries. Otherwise, a `trusted` upload that would exceed the hard quota
+    deletes personal entries, oldest `access_day` first, in its
     own admission transaction, until the pack fits. Personal bytes freed this way
     leave `live_bytes` at once (the usual mark rules), so CI is never starved by
     personal writes while it waits for the GC interval. Personal **pending** bytes
@@ -392,6 +441,13 @@ lock (with SQLite, the single process runs it). ADR: [0006](adr/0006-gc-leases-g
     bounded by the personal pending bytes, which are at most 10% of hard per user
     and expire with their 1-hour lease, and by the stored-bytes ceiling below. A
     trusted pack is refused only when trusted bytes alone would exceed the quota.
+
+  - **Tenant quota.** A tenant may also have a `hard_bytes` limit, counting live
+    plus pending bytes summed over all its caches. Every upload must fit both the
+    cache and the tenant limit. Trusted admission evicts personal entries only in
+    the admitting cache. If the tenant limit still fails after that, the pack is
+    refused (fail closed). This is stricter than the cache rule, which admits over
+    the quota by personal pending bytes.
 
   `uploads` also refuses a pack when stored bytes (every pack byte
   that is `pending`, `live` or in grace) would exceed 3x the hard quota. That ceiling

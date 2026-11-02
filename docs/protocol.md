@@ -97,22 +97,35 @@ All routes are under `/v1/caches/{cache}`. Scope `read` is needed unless noted.
 
 `live_bytes` drives eviction and admission. `stored_bytes` is what occupies storage
 and is billed. `reclaimable_bytes` is the part of it that compaction and the sweep
-will free.
+will free: dead segment bytes inside live packs, plus every byte of packs in grace.
+It excludes the framing of live packs (header, footer, trailer), which is never
+freed, so `stored_bytes = live_bytes + pending_bytes + reclaimable_bytes + framing`.
 
 ### `GET|PUT /v1/caches/{cache}/roster`
 
 GET returns the `OXRS` bytes with `ETag: "v<version>"`. PUT needs `cache:admin` and
-`If-Match: "v<current>"`. The body's version must be `current + 1`, its epoch
-`current` or `current + 1`, and at least one of its signatures must verify under an
-owner key registered for the cache. It answers 204 on success, 412 on a stale
+`If-Match: "v<current>"`. A new cache has roster version 0 and epoch 0, meaning
+"no roster yet". GET then answers 404, and the first PUT carries `If-Match: "v0"`.
+The body's version must be `current + 1`. Its epoch must be `current` or
+`current + 1`, except for the first roster, which must be version 1 with epoch 1. At
+least one of its signatures must verify under an owner key registered for the cache. It answers 204 on success, 412 on a stale
 `If-Match`, and 400 on a malformed, unsigned or out-of-range body. Clients still
 verify the signature against their own pinned keys.
 
 ### `GET|PUT /v1/caches/{cache}/dictionary`
 
-The `OXDP` pointer, under the same `If-Match` rules. PUT needs `write:trusted`, and
-the named segment must be a live (`dead_since IS NULL`) `dictionary` segment of this
-cache. The pointer counts as a reference to its segment; moving it releases the
+The `OXDP` pointer. PUT needs `write:trusted` and `If-Match: "v<current>"`, where
+version 0 means no pointer yet (GET answers 404). The pointer's rules:
+- its version must be `current + 1`;
+- its epoch must equal the cache's current epoch;
+- its signer must be a `ci` or `owner` key of the current roster, so a pointer needs
+  a roster first;
+- the named segment must be a live (`dead_since IS NULL`) `dictionary` segment of
+  this cache.
+
+The server removes the pointer row when its dictionary is condemned by a confirmed
+corruption (architecture.md, "Report"). The next pointer then starts again at
+version 1. The pointer counts as a reference to its segment; moving it releases the
 previous dictionary to the usual mark rules (architecture.md, "Mark").
 
 Publishing has two steps:
@@ -154,7 +167,10 @@ request order:
 ]}
 ```
 
-`client_ref` is 16 random bytes per pack. Repeating it while the pack is `pending`
+`client_ref` is 16 random bytes per pack, unique per `(cache, uploader, client_ref)`.
+If a repeat finds its pack `deleting`, or still `pending` with an expired lease, the
+whole request gets 409 `conflict` with `pack_closed`; the client starts again with
+a fresh `client_ref`. Repeating it while the pack is `pending`
 and has never been committed returns the same `pack_id` with a fresh URL, so retries
 never strand quota. Repeating it after the first commit returns `committed` and no
 URL. No PUT URL is ever issued for a committed pack. The `if-none-match` and checksum
@@ -215,7 +231,11 @@ returns 202 `{"entries_marked": 10342}`.
 ### Local-disk object route
 
 `PUT|GET /v1/caches/{cache}/objects/{pack_id}?exp=<unix>&sig=<base64url>`, where
-`sig = HMAC-SHA256(url_key, method ‖ path ‖ exp ‖ content-length-or-empty)`. GET
+`sig = HMAC-SHA256(url_key, method "\n" path "\n" exp "\n" content-length)`. The
+four fields are joined with a newline byte (0x0A): `method` in upper case, `path`
+without the query, `exp` and the content length in decimal ASCII. For GET the
+content length is the empty string, so the message ends with `\n`. The separators
+keep the digits of `exp` and the length apart. GET
 honours a single `Range: bytes=a-b` (206) and answers 416 outside the object.
 
 ## Tenant administration (JSON, scope `tenant:admin`)
@@ -266,7 +286,7 @@ All magics are 4 ASCII bytes followed by `u8 version = 1` and `u8 flags = 0`.
 | magic, version, flags | `OXLR`, 1, echo of request flags |
 | reserved | `u16` = 0 |
 | pack_count | `u32` |
-| packs | `pack_count × (bytes16 pack_id, str16 url, u64 expires_at)`; url empty without bit1 |
+| packs | `pack_count × (bytes16 pack_id, str16 url, u64 expires_at)`. In plan mode (no bit0) `pack_count` is 0. In fetch mode without bit1, each url is empty and `expires_at` is 0 |
 | hit_count | `u32` |
 | hits | `hit_count × (u32 index, u8 ns)`, plus, with bit0, `(u32 pack_idx, u64 offset, u32 length, u16 record_len, record)` |
 | dict_count | `u32`; 0 without bit0 |
