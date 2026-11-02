@@ -149,3 +149,56 @@ fn api_routes_are_rate_limited_per_tenant_and_object_routes_are_not() {
         "the API is still throttled"
     );
 }
+
+#[test]
+fn fetch_lookups_are_refused_over_the_monthly_egress_quota_and_plan_lookups_keep_working() {
+    let world = World::start("egress", Options::default());
+    let pack = frames::pack(world.cache_bytes, &[3_000]);
+    let key = frames::lookup_id();
+    world.publish(
+        &world.ci,
+        format::Namespace::Trusted,
+        &pack,
+        &[Entry::new(key, 0)],
+    );
+    let quota = world.server.admin_call(
+        "PUT",
+        &format!("/admin/v1/tenants/{}/quota", world.tenant),
+        Some(&json!({"egress_bytes": 1_000, "rate": 50, "burst": 200})),
+    );
+    assert_eq!(quota.status, 200);
+
+    let (bytes, shape) = world.fetch(&world.reader, &[key]);
+    assert_eq!(
+        format::LookupResponse::decode(&bytes, &shape)
+            .expect("OXLR")
+            .hits
+            .len(),
+        1
+    );
+    let month = "2000-01";
+    let flushed = world
+        .server
+        .admin_call("GET", &format!("/admin/v1/usage?month={month}"), None);
+    assert_eq!(
+        flushed.status, 200,
+        "reading usage flushes this node's counters"
+    );
+
+    let (frame, _) = frames::lookup(&[key], true, true, true, false);
+    let refused = world.reader.binary("POST", &world.path("/lookup"), &frame);
+    assert_eq!(
+        (refused.status, refused.error_code().as_str()),
+        (403, "quota_exceeded")
+    );
+    let (frame, shape) = frames::lookup(&[key], false, false, true, false);
+    let plan = world.reader.binary("POST", &world.path("/lookup"), &frame);
+    assert_eq!(plan.status, 200, "plan mode keeps working");
+    assert_eq!(
+        format::LookupResponse::decode(&plan.body, &shape)
+            .expect("OXLR")
+            .hits
+            .len(),
+        1
+    );
+}

@@ -74,6 +74,11 @@ fn an_operator_bootstraps_a_tenant_and_ci_uploads_then_readers_fetch_byte_identi
     assert_eq!((whole.status, whole.body), (200, pack.bytes.clone()));
     let outside = world.get_object(&url, Some(&format!("bytes={}-", pack.bytes.len())));
     assert_eq!(outside.status, 416);
+    let past_the_end = world.get_object(&url, Some(&format!("bytes=0-{}", pack.bytes.len())));
+    assert_eq!(
+        past_the_end.status, 416,
+        "a range ending beyond the object is refused"
+    );
     assert_eq!(outside.error_code(), "bad_request");
 
     let (frame, shape) = frames::lookup(&[a], true, false, false, true);

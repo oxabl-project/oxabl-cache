@@ -161,6 +161,11 @@ impl Config {
                 ("server.admin_listen", admin_listen),
             ],
         )?;
+        if raw.server.public_url.is_none() && listen.ip().is_unspecified() {
+            return Err(
+                "server.public_url is required when server.listen is a wildcard address".to_owned(),
+            );
+        }
         if raw.store.kind != "fs" {
             return Err(format!(
                 "store kind `{}` is not available in this build (fs only)",

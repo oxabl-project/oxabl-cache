@@ -1,6 +1,6 @@
 //! The configuration is strict, secrets live in files, and plaintext is explicit.
 
-use crate::support::cli::run;
+use crate::support::cli::{run, run_many};
 
 const BASE: &str = "[server]
 listen = \"127.0.0.1:0\"
@@ -62,7 +62,10 @@ fn unknown_keys_and_inline_secrets_are_errors() {
 
 #[test]
 fn plaintext_beyond_loopback_needs_an_explicit_upstream_terminator() {
-    let open = BASE.replace("127.0.0.1:0", "0.0.0.0:0");
+    let open = BASE.replace(
+        "listen = \"127.0.0.1:0\"",
+        "listen = \"0.0.0.0:0\"\npublic_url = \"https://cache.example\"",
+    );
     let refused = run("config-plain", &open, &["check-store"], &[]);
     assert!(!refused.status.success());
     assert!(
@@ -122,4 +125,33 @@ fn init_mints_the_first_operator_token_once_and_unbuilt_subcommands_say_so() {
     );
     assert!(!postgres.status.success());
     assert!(stderr(&postgres).contains("not available"));
+}
+
+#[test]
+fn a_wildcard_listener_needs_a_public_url_and_check_store_reports_the_capabilities() {
+    let wildcard = BASE.replace("127.0.0.1:0", "0.0.0.0:0");
+    let refused = run(
+        "config-public-url",
+        &format!("{wildcard}[tls]\nterminated_upstream = true\n"),
+        &["init"],
+        &[],
+    );
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("public_url"),
+        "{}",
+        stderr(&refused)
+    );
+
+    let outputs = run_many(
+        "config-check-store",
+        BASE,
+        &[&["init"], &["check-store"]],
+        &[],
+    );
+    assert!(outputs[1].status.success(), "{}", stderr(&outputs[1]));
+    let capabilities: serde_json::Value =
+        serde_json::from_slice(&outputs[1].stdout).expect("check-store prints JSON");
+    assert_eq!(capabilities["kind"], "fs");
+    assert_eq!(capabilities["if_none_match"], false);
 }

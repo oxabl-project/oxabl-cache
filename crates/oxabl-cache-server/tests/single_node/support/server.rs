@@ -158,6 +158,16 @@ impl Server {
         self.child = Some(child);
     }
 
+    /// Runs another subcommand of the binary on this server's configuration.
+    pub fn cli(&self, args: &[&str]) -> std::process::Output {
+        Command::new(BIN)
+            .arg("-c")
+            .arg(&self.config)
+            .args(args)
+            .output()
+            .expect("run subcommand")
+    }
+
     pub fn pid(&self) -> u32 {
         self.child.as_ref().expect("running").id()
     }
