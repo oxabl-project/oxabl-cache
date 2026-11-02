@@ -17,6 +17,7 @@ pub struct Options {
     pub url_lifetime: &'static str,
     pub shutdown_timeout: &'static str,
     pub extra: &'static str,
+    pub tls: bool,
 }
 
 impl Default for Options {
@@ -28,6 +29,7 @@ impl Default for Options {
             url_lifetime: "5s",
             shutdown_timeout: "1s",
             extra: "",
+            tls: false,
         }
     }
 }
@@ -37,8 +39,10 @@ pub struct Server {
     pub public: String,
     pub admin: String,
     pub metrics: String,
+    pub public_url: String,
     pub dir: PathBuf,
     pub operator: String,
+    pub cert_pem: Option<String>,
     config: PathBuf,
     runs: u32,
 }
@@ -60,7 +64,11 @@ fn config_text(dir: &Path, options: &Options) -> String {
         options.lease,
         options.interval,
         options.extra,
-    )
+    ) + &if options.tls {
+        format!("[tls]\ncert_file = \"{dir}/tls.crt\"\nkey_file = \"{dir}/tls.key\"\n")
+    } else {
+        String::new()
+    }
 }
 
 impl Server {
@@ -70,6 +78,14 @@ impl Server {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("data dir");
         let config = dir.join("server.toml");
+        let mut cert_pem = None;
+        if options.tls {
+            let issued = rcgen::generate_simple_self_signed(vec!["localhost".to_owned()])
+                .expect("certificate");
+            fs::write(dir.join("tls.crt"), issued.cert.pem()).expect("cert file");
+            fs::write(dir.join("tls.key"), issued.signing_key.serialize_pem()).expect("key file");
+            cert_pem = Some(issued.cert.pem());
+        }
         fs::write(&config, config_text(&dir, &options)).expect("config");
         let init = Command::new(BIN)
             .arg("-c")
@@ -91,8 +107,10 @@ impl Server {
             public: String::new(),
             admin: String::new(),
             metrics: String::new(),
+            public_url: String::new(),
             dir,
             operator,
+            cert_pem,
             config,
             runs: 0,
         };
@@ -136,6 +154,7 @@ impl Server {
             .as_str()
             .expect("metrics")
             .to_owned();
+        self.public_url = ready["public_url"].as_str().expect("public_url").to_owned();
         self.child = Some(child);
     }
 

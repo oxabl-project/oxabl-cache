@@ -102,6 +102,12 @@ pub(crate) async fn envelope<B: Backend>(
     if let Ok(value) = HeaderValue::from_str(&ctx.id) {
         response.headers_mut().insert(REQUEST_ID, value);
     }
+    let headers = response.headers_mut();
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
 
     let elapsed = started.elapsed();
     let route = ctx.route();

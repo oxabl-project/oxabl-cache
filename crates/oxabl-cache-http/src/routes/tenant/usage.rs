@@ -21,7 +21,7 @@ pub(crate) async fn get<B: Backend>(
     auth: Authed,
     Query(query): Query<Month>,
 ) -> Result<Response, ApiError> {
-    let _ = app.engine.flush_usage().await;
+    let _ = app.flush_usage().await;
     let totals = app.engine.tenant_usage(&auth.caller, &query.month).await?;
     let usage: Vec<Value> = totals
         .iter()

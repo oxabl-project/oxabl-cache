@@ -4,6 +4,7 @@ use crate::limiter::RateLimiter;
 use crate::metrics::Metrics;
 use oxabl_cache_core::Engine;
 use oxabl_cache_core::ports::{Clock, IdentityVerifier, MetadataStore, ObjectStore, PackAssembler};
+use oxabl_cache_core::usecases::FlushReport;
 use oxabl_cache_store_fs::FsStore;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -73,6 +74,24 @@ impl<B: Backend> App<B> {
             limiter: RateLimiter::default(),
             leader: AtomicBool::new(false),
         }
+    }
+
+    /// Flushes this node's usage counters to the ledger and counts what the ledger
+    /// ignored or dropped.
+    pub async fn flush_usage(&self) -> oxabl_cache_core::Result<FlushReport> {
+        let report = self.engine.flush_usage().await?;
+        if report.ignored {
+            self.metrics
+                .inc("oxabl_cache_ledger_ignored_flushes_total", &[], 1);
+        }
+        if report.late_dropped > 0 {
+            self.metrics.inc(
+                "oxabl_cache_ledger_late_dropped_total",
+                &[],
+                report.late_dropped,
+            );
+        }
+        Ok(report)
     }
 
     /// Records whether this node runs the garbage collector.

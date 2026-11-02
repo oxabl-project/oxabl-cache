@@ -24,7 +24,7 @@ pub(crate) async fn get<B: Backend>(
     _operator: Operator,
     Query(query): Query<UsageQuery>,
 ) -> Result<Response, ApiError> {
-    let _ = app.engine.flush_usage().await;
+    let _ = app.flush_usage().await;
     let totals = app.engine.usage_export(&query.month).await?;
     match query.format.as_deref() {
         None | Some("json") => {

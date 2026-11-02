@@ -2,8 +2,10 @@
 //! directory. Records and segments are random bytes of valid outer shape: the
 //! server never opens them.
 
+mod administration;
 mod commit_retry;
 mod config_rules;
+mod dictionary_and_reports;
 mod first_write_wins;
 mod gc;
 mod lifecycle;
@@ -14,3 +16,4 @@ mod roster_rules;
 mod round_trip;
 mod scopes;
 mod support;
+mod tls_listener;

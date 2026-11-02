@@ -3,3 +3,4 @@ pub mod fixture;
 pub mod frames;
 pub mod http;
 pub mod server;
+pub mod tls;

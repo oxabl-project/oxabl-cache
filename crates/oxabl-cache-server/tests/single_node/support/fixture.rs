@@ -3,7 +3,7 @@
 use super::frames::{self, Entry, Pack};
 use super::http::{Response, request, split_url};
 use super::server::{Client, Options, Server};
-use ed25519_dalek::SigningKey;
+use ed25519_dalek::{Signer, SigningKey};
 use oxabl_cache_format as format;
 use serde_json::{Value, json};
 
@@ -211,4 +211,46 @@ pub fn wait_until(timeout: std::time::Duration, mut condition: impl FnMut() -> b
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     false
+}
+
+/// An `OXRS` roster with the owner and `others` as members, signed by `signer`.
+pub fn roster_bytes(
+    world: &World,
+    others: &[(format::Role, [u8; 32])],
+    version: u64,
+    epoch: u32,
+    signer: &SigningKey,
+) -> Vec<u8> {
+    let mut members = vec![format::Member {
+        label: "owner",
+        role: format::Role::Owner,
+        sign_keys: vec![owner().verifying_key().to_bytes()],
+        age_recipients: Vec::new(),
+    }];
+    members.extend(others.iter().map(|(role, key)| format::Member {
+        label: "member",
+        role: *role,
+        sign_keys: vec![*key],
+        age_recipients: Vec::new(),
+    }));
+    let unsigned = format::Roster {
+        cache_id: format::CacheId(world.cache_bytes),
+        version,
+        epoch,
+        members,
+        keyring: b"opaque age file",
+        signatures: Vec::new(),
+    };
+    let mut message = b"oxabl-cache v1 roster".to_vec();
+    message.extend_from_slice(&unsigned.signed_bytes().expect("signed bytes"));
+    let signature = format::RosterSignature {
+        owner_key: signer.verifying_key().to_bytes(),
+        signature: signer.sign(&message).to_bytes(),
+    };
+    format::Roster {
+        signatures: vec![signature],
+        ..unsigned
+    }
+    .encode()
+    .expect("roster")
 }

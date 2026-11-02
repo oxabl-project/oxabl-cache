@@ -38,7 +38,7 @@ async fn job<T>(name: &str, work: impl Future<Output = oxabl_cache_core::Result<
 /// Flushes access days and usage counters; used on a timer and once more at shutdown.
 pub(crate) async fn flush_counters(app: &App<Prod>) {
     job("access_flush", app.engine.flush_access_days()).await;
-    job("usage_flush", app.engine.flush_usage()).await;
+    job("usage_flush", app.flush_usage()).await;
 }
 
 async fn flush_loop(app: Arc<App<Prod>>, mut stop: watch::Receiver<bool>) {
@@ -52,7 +52,7 @@ async fn flush_loop(app: Arc<App<Prod>>, mut stop: watch::Receiver<bool>) {
         tokio::select! {
             _ = heartbeat.tick() => { job("heartbeat", app.engine.heartbeat()).await; }
             _ = access.tick() => { job("access_flush", app.engine.flush_access_days()).await; }
-            _ = usage.tick() => { job("usage_flush", app.engine.flush_usage()).await; }
+            _ = usage.tick() => { job("usage_flush", app.flush_usage()).await; }
             _ = stop.changed() => return,
         }
     }

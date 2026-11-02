@@ -33,6 +33,8 @@ tokio-rustls = { workspace = true, features = ["aws_lc_rs"] }
 toml.workspace = true
 
 [dev-dependencies]
+rcgen = { workspace = true, features = ["aws_lc_rs", "pem"] }
+rustls = { workspace = true, features = ["std", "aws_lc_rs", "tls12"] }
 oxabl-cache-format.workspace = true
 blake3.workspace = true
 getrandom.workspace = true

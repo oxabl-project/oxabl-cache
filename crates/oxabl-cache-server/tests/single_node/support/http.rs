@@ -64,7 +64,7 @@ pub fn read_response(stream: &mut TcpStream) -> Response {
     parse(&raw)
 }
 
-fn parse(raw: &[u8]) -> Response {
+pub fn parse(raw: &[u8]) -> Response {
     let split = raw
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
