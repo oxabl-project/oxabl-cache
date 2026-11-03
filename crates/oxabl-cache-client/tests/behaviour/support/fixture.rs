@@ -168,3 +168,24 @@ pub fn single(root: &Path, seed: &str, len: usize) -> Set {
         }],
     }
 }
+
+/// Writes `count` sets of one r-code file of `len` bytes each, keyed like [`sets`].
+pub fn large(root: &Path, count: usize, len: usize, seed: &str) -> Vec<Set> {
+    (0..count)
+        .map(|n| {
+            let name = format!("ar/large{n}.r");
+            let bytes = rcode_like(&format!("{seed}-{n}"), len);
+            let path = root.join("r").join(&name);
+            fs::create_dir_all(path.parent().expect("parent")).expect("directory");
+            fs::write(&path, &bytes).expect("write");
+            Set {
+                key: key(n),
+                files: vec![Made {
+                    path: format!("r/{name}"),
+                    disk: path,
+                    bytes,
+                }],
+            }
+        })
+        .collect()
+}
