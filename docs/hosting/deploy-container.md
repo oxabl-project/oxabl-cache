@@ -146,7 +146,9 @@ forward.
 `deploy/container/cluster-smoke.sh` starts two containers of the image against one TLS Postgres (`ca_file`) and
 one Garage bucket, the shape of the Kubernetes and hosted deployments. It checks that both become ready, that
 `init` and `check-store` work, that the admin health route reports the database and the store, and that exactly
-one node holds the garbage-collection lease.
+one node holds the garbage-collection lease. It needs docker plus `garage`, `postgres` and `openssl`, which
+`nix develop` provides. The image workflow runs it on the amd64 build of every pull request that touches the
+server, the image or the scripts, right after `smoke.sh` (about ten seconds once the devshell is fetched).
 
 ## Backups and upgrades
 
