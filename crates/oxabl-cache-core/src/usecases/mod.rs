@@ -14,6 +14,7 @@ mod dictionary_put;
 mod entry_removal;
 mod gc_compaction;
 mod gc_eviction;
+mod gc_leadership;
 mod gc_mark;
 mod gc_orphans;
 mod gc_retention;

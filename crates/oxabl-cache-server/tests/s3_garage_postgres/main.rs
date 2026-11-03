@@ -51,6 +51,8 @@ mod tamper;
 
 #[path = "../multi_node/database_crash.rs"]
 mod database_crash;
+#[path = "../multi_node/gc_fencing.rs"]
+mod gc_fencing;
 #[path = "../multi_node/gc_leader.rs"]
 mod gc_leader;
 #[path = "../multi_node/nodes.rs"]

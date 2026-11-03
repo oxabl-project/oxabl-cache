@@ -117,6 +117,7 @@ impl From<Error> for ApiError {
                 limited.retry_after = Some(retry_after_secs);
                 limited
             }
+            Error::Fenced => Self::from(Error::unavailable("garbage-collection leadership lost")),
             Error::Unavailable(detail) => {
                 let mut down = Self::new(
                     StatusCode::SERVICE_UNAVAILABLE,

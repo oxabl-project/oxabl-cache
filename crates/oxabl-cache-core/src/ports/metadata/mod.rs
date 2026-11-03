@@ -4,6 +4,7 @@ mod admin;
 mod caches;
 mod credentials;
 mod entries;
+mod fence;
 mod grants;
 mod ledger;
 mod oidc;
@@ -20,6 +21,7 @@ pub use admin::AdminTx;
 pub use caches::CachesTx;
 pub use credentials::CredentialsTx;
 pub use entries::{EntriesTx, EvictionScope};
+pub use fence::FenceTx;
 pub use grants::GrantsTx;
 pub use ledger::LedgerTx;
 pub use oidc::OidcTx;
@@ -53,6 +55,7 @@ pub trait MetaTx:
     + SegmentsTx
     + EntriesTx
     + LedgerTx
+    + FenceTx
 {
 }
 
@@ -72,6 +75,7 @@ impl<T> MetaTx for T where
         + SegmentsTx
         + EntriesTx
         + LedgerTx
+        + FenceTx
 {
 }
 

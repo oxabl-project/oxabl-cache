@@ -6,6 +6,7 @@ use crate::ids::{CacheId, TenantId};
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 use crate::state::{AccessBatch, ReportLimiter, UsageRecorder};
 use crate::time::day_of;
+use std::sync::atomic::AtomicU64;
 
 /// The cache service: ports, settings and per-node state. Use cases are methods
 /// spread over the `usecases` modules.
@@ -19,6 +20,7 @@ pub struct Engine<M, S, A, C> {
     pub(crate) usage: UsageRecorder,
     pub(crate) access: AccessBatch,
     pub(crate) reports: ReportLimiter,
+    pub(crate) gc_epoch: AtomicU64,
 }
 
 impl<M, S, A, C> Engine<M, S, A, C>
@@ -39,6 +41,7 @@ where
             usage: UsageRecorder::new(),
             access: AccessBatch::default(),
             reports: ReportLimiter::default(),
+            gc_epoch: AtomicU64::new(0),
         }
     }
 

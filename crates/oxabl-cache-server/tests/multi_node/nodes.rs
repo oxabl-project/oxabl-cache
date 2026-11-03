@@ -24,11 +24,30 @@ pub struct Node {
 
 impl Node {
     pub fn start(world: &World, name: &str) -> Self {
+        Self::start_with(world, name, &[])
+    }
+
+    /// Like [`Node::start`], with the configuration lines starting with a key of `overrides`
+    /// replaced by the given line.
+    pub fn start_with(world: &World, name: &str, overrides: &[(&str, &str)]) -> Self {
+        let text = fs::read_to_string(world.server.dir.join("server.toml")).expect("configuration");
+        let config: String = text
+            .lines()
+            .map(|line| {
+                overrides
+                    .iter()
+                    .find(|(key, _)| line.starts_with(*key))
+                    .map_or(line, |(_, replacement)| *replacement)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let path = world.server.dir.join(format!("server-{name}.toml"));
+        fs::write(&path, config).expect("node configuration");
         let stderr =
             File::create(world.server.dir.join(format!("stderr-{name}.log"))).expect("stderr file");
         let mut child = Command::new(BIN)
             .arg("-c")
-            .arg(world.server.dir.join("server.toml"))
+            .arg(&path)
             .arg("serve")
             .process_group(0)
             .stdout(Stdio::piped())

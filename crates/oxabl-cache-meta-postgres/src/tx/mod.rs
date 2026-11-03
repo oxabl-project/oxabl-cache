@@ -3,6 +3,7 @@
 mod accounts;
 mod admin;
 mod entries;
+mod fence;
 mod ledger;
 mod oidc;
 mod packs;

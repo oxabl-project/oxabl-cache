@@ -3,7 +3,7 @@
 use crate::domain::pack::PackState;
 use crate::engine::Engine;
 use crate::error::Result;
-use crate::ports::{Clock, MetadataStore, ObjectKey, ObjectStore, PackAssembler};
+use crate::ports::{Clock, MetadataStore, ObjectKey, ObjectStore, PackAssembler, TxScope};
 
 impl<M, S, A, C> Engine<M, S, A, C>
 where
@@ -23,8 +23,7 @@ where
         loop {
             let now = self.now();
             let due = self
-                .meta
-                .transact(move |tx| {
+                .gc_transact_in(TxScope::Global, move |tx| {
                     let due = tx.packs_due_for_sweep(now, grace, batch)?;
                     for pack in &due {
                         if tx.set_pack_deleting(&pack.cache, &pack.id)? == Some(PackState::Pending)
@@ -45,12 +44,11 @@ where
                     pack: pack.id,
                 };
                 self.store.delete(&key).await?;
-                self.meta
-                    .transact(move |tx| {
-                        tx.delete_dead_segments_of_pack(&pack.cache, &pack.id)?;
-                        tx.delete_pack(&pack.cache, &pack.id)
-                    })
-                    .await?;
+                self.gc_transact_in(TxScope::Global, move |tx| {
+                    tx.delete_dead_segments_of_pack(&pack.cache, &pack.id)?;
+                    tx.delete_pack(&pack.cache, &pack.id)
+                })
+                .await?;
                 removed += 1;
             }
         }

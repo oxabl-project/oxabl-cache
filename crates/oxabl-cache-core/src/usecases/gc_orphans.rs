@@ -29,6 +29,7 @@ where
             let cutoff = self.now() - 2 * self.config.lease_secs;
             for object in self.store.list(&id).await? {
                 if !known.contains(&object.pack) && object.modified_at < cutoff {
+                    self.require_gc_leadership().await?;
                     self.store
                         .delete(&ObjectKey {
                             cache: id,
