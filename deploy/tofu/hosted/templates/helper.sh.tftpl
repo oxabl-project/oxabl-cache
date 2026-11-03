@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# ${description}
+set -euo pipefail
+args=(--rm -i --network host --read-only --cap-drop ALL --security-opt no-new-privileges
+  -v /etc/oxabl-cache/server.toml:/etc/oxabl-cache/server.toml:ro
+  -v /etc/oxabl-cache/secrets:/run/secrets/oxabl-cache:ro)
+%{ if data_mount != "" ~}
+args+=(-v ${data_mount}:/var/lib/oxabl-cache)
+%{ endif ~}
+%{ if entrypoint != "" ~}
+args+=(--entrypoint ${entrypoint} --user 0:0)
+if [ -f /etc/oxabl-cache/operator-token ]; then
+  args+=(-v /etc/oxabl-cache/operator-token:/run/secrets/operator-token:ro)
+fi
+%{ endif ~}
+exec podman run "$${args[@]}" ${image} "$@"

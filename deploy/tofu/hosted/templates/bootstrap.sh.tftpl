@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Runs once from cloud-init: mounts the data volume, fixes ownership, starts the containers.
+set -euo pipefail
+exec > >(tee -a /var/log/oxabl-cache-bootstrap.log) 2>&1
+
+%{ if data_mount != "" ~}
+device=""
+for _ in $(seq 1 120); do
+  device="$(ls /dev/disk/by-id/scsi-0HC_Volume_* 2>/dev/null | head -1 || true)"
+  [ -n "$device" ] && break
+  sleep 2
+done
+[ -n "$device" ] || { echo "the data volume did not appear" >&2; exit 1; }
+install -d -m 0750 ${data_mount}
+grep -q " ${data_mount} " /etc/fstab || echo "$device ${data_mount} ext4 discard,nofail,defaults 0 0" >> /etc/fstab
+mountpoint -q ${data_mount} || mount ${data_mount}
+%{ endif ~}
+%{ if role == "api" ~}
+%{ if data_mount != "" ~}
+chown 65532:65532 ${data_mount}
+chmod 0750 ${data_mount}
+%{ endif ~}
+chown -R 65532:65532 /etc/oxabl-cache/secrets
+chmod 0700 /etc/oxabl-cache/secrets
+chmod 0600 /etc/oxabl-cache/secrets/*
+%{ if bind_low_ports ~}
+sysctl -w net.ipv4.ip_unprivileged_port_start=443
+%{ endif ~}
+%{ endif ~}
+%{ if floating_ip != "" ~}
+dev="$(ip -4 route show default | awk '{print $5; exit}')"
+cat > /etc/netplan/60-floating-ip.yaml <<EOF
+network:
+  version: 2
+  ethernets:
+    $dev:
+      addresses:
+        - ${floating_ip}/32
+EOF
+chmod 0600 /etc/netplan/60-floating-ip.yaml
+netplan apply
+%{ endif ~}
+systemctl daemon-reload
+%{ for unit in units ~}
+systemctl start ${unit}.service
+%{ endfor ~}

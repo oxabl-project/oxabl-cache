@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (ignored by git). No secret belongs in this file.
+domain                = "cache-proto.example.com"
+cloudflare_account_id = "ACCOUNT_ID"
+location              = "ash"
+server_type           = "cx23" # the cheapest type with 2 vCPU and 4 GB: hcloud server-type list
+ssh_public_keys       = ["ssh-ed25519 AAAA... operator@example.com"]
+ssh_allowed_cidrs     = ["203.0.113.7/32"]

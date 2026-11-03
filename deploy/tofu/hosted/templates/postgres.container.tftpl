@@ -1,0 +1,25 @@
+[Unit]
+Description=Postgres for oxabl-cache
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Container]
+ContainerName=postgres
+Image=${image}
+Network=host
+Environment=POSTGRES_USER=oxabl_cache
+Environment=POSTGRES_DB=oxabl_cache
+Environment=POSTGRES_PASSWORD_FILE=/run/secrets/db-password
+Environment=POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256
+Volume=/etc/oxabl-cache/secrets/db-password:/run/secrets/db-password:ro
+Volume=${data_mount}:/var/lib/postgresql
+Exec=postgres -c listen_addresses=${private_ip} -c password_encryption=scram-sha-256
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

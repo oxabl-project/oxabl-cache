@@ -1,0 +1,15 @@
+#cloud-config
+package_update: true
+packages:
+  - podman
+  - curl
+write_files:
+%{ for f in files ~}
+  - path: ${f.path}
+    permissions: "${f.permissions}"
+    owner: root:root
+    encoding: b64
+    content: ${base64encode(f.content)}
+%{ endfor ~}
+runcmd:
+  - [/usr/local/sbin/oxabl-cache-bootstrap]

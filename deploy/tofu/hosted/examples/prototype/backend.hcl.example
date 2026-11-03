@@ -1,0 +1,12 @@
+# Copy to backend.hcl (ignored by git). Credentials come from AWS_ACCESS_KEY_ID and
+# AWS_SECRET_ACCESS_KEY, never from this file.
+bucket                      = "example-tofu-state"
+key                         = "oxabl-cache/prototype.tfstate"
+region                      = "auto"
+endpoints                   = { s3 = "https://ACCOUNT_ID.r2.cloudflarestorage.com" }
+skip_credentials_validation = true
+skip_region_validation      = true
+skip_requesting_account_id  = true
+skip_metadata_api_check     = true
+skip_s3_checksum            = true
+use_path_style              = true

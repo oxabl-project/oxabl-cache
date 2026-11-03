@@ -1,0 +1,6 @@
+# Copy to backend.tf for a remote state, and run: tofu init -backend-config=backend.hcl
+# The state holds the generated keys and the R2 secret: keep it in an encrypted bucket and
+# turn on state encryption (TF_ENCRYPTION, see docs/hosting/deploy-hosted.md).
+terraform {
+  backend "s3" {}
+}
