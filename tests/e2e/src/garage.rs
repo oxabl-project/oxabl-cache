@@ -116,11 +116,13 @@ impl Garage {
             &access_key,
         ];
         garage_cli(&self.config, &allow)?;
-        Ok(S3Bucket {
+        let bucket = S3Bucket {
             access_key,
             secret_key,
             ..bucket
-        })
+        };
+        until_answers(|| bucket.head("e2e-ready")).await?;
+        Ok(bucket)
     }
 
     /// Creates a bucket that only this call's caller knows about.
@@ -138,13 +140,36 @@ impl Garage {
             &self.access_key,
         ];
         garage_cli(&self.config, &allow)?;
-        Ok(S3Bucket {
+        let bucket = S3Bucket {
             endpoint: self.endpoint.clone(),
             region: REGION.to_owned(),
             access_key: self.access_key.clone(),
             secret_key: self.secret_key.clone(),
             bucket: name,
+        };
+        until_answers(|| async {
+            bucket.put("e2e-ready", b"ready".to_vec()).await?;
+            bucket.delete("e2e-ready").await
         })
+        .await?;
+        Ok(bucket)
+    }
+}
+
+/// Garage applies a new layout, bucket and key grant a little after its CLI returns, and
+/// its health route reports ready before any layout exists; a request is the only proof.
+async fn until_answers<T, F: Future<Output = Result<T>>>(
+    mut request: impl FnMut() -> F,
+) -> Result<T> {
+    let deadline = std::time::Instant::now() + STARTUP;
+    loop {
+        match request().await {
+            Ok(value) => return Ok(value),
+            Err(error) if std::time::Instant::now() >= deadline => {
+                return Err(error.context("garage never accepted the bucket"));
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+        }
     }
 }
 
