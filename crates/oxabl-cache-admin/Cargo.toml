@@ -10,3 +10,21 @@ description = "The oxabl-cache-admin binary: operator command line over the admi
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "oxabl-cache-admin"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-context", "env"] }
+reqwest = { workspace = true, features = ["blocking", "rustls", "json"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+rcgen = { workspace = true, features = ["aws_lc_rs", "pem"] }
+serde_json.workspace = true
+ed25519-dalek.workspace = true
+reqwest = { workspace = true, features = ["blocking", "rustls", "json"] }
+oxabl-cache-format.workspace = true
+getrandom.workspace = true
