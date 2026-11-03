@@ -6,6 +6,7 @@ use crate::domain::scope::Scope;
 use crate::engine::Engine;
 use crate::error::{Error, Result};
 use crate::ids::CacheId;
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 use crate::usecases::scoped_cache::scoped_cache;
 use crate::usecases::segment_death::release_dictionary;
@@ -32,7 +33,7 @@ where
         let caller = caller.clone();
         let now = self.now();
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Cache(cache), move |tx| {
                 let found = scoped_cache(tx, &caller, &cache, Scope::WriteTrusted)?;
                 let previous = tx.dictionary_pointer(&cache)?;
                 let current = previous.as_ref().map_or(0, |p| p.version);

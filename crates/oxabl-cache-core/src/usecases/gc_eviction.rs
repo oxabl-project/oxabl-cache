@@ -2,6 +2,7 @@
 
 use crate::engine::Engine;
 use crate::error::{Error, Result};
+use crate::ports::TxScope;
 use crate::ports::metadata::EvictionScope;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 use crate::usecases::entry_removal::remove_entries;
@@ -16,7 +17,7 @@ where
     /// For each cache above the high watermark of its hard quota, deletes entries
     /// until live bytes are at or below the low watermark. Returns the entries deleted.
     pub async fn gc_eviction(&self) -> Result<u64> {
-        let caches = self.meta.transact(|tx| tx.all_caches()).await?;
+        let caches = self.meta.read(|tx| tx.all_caches()).await?;
         let (high, low) = (
             self.config.evict_high_permille,
             self.config.evict_low_permille,
@@ -34,7 +35,7 @@ where
                     let now = self.now();
                     let removed = self
                         .meta
-                        .transact(move |tx| {
+                        .transact_in(TxScope::Cache(id), move |tx| {
                             let current = tx.cache(&tenant, &id)?.ok_or(Error::NotFound)?;
                             if current.live_bytes <= target {
                                 return Ok(0);

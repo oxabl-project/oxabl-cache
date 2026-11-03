@@ -54,7 +54,7 @@ where
         let caller = caller.clone();
         let (found, dictionary_version, totals) = self
             .meta
-            .transact(move |tx| {
+            .read(move |tx| {
                 let found = scoped_cache(tx, &caller, &cache, Scope::Read)?;
                 let dictionary_version = tx.dictionary_pointer(&cache)?.map_or(0, |p| p.version);
                 let totals = tx.pack_totals(&cache)?;

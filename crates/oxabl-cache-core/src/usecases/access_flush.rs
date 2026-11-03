@@ -4,7 +4,7 @@ use crate::domain::namespace::NamespaceKey;
 use crate::engine::Engine;
 use crate::error::Result;
 use crate::ids::{CacheId, LookupId};
-use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
+use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler, TxScope};
 use std::collections::BTreeMap;
 
 type DayKey = (CacheId, i64);
@@ -31,15 +31,18 @@ where
                 .push((*namespace, *id));
         }
         let count = u64::try_from(taken.len()).unwrap_or(u64::MAX);
-        let outcome = self
-            .meta
-            .transact(move |tx| {
-                for ((cache, day), keys) in &groups {
-                    tx.touch_entries(cache, *day, keys)?;
-                }
-                Ok(())
-            })
-            .await;
+        let mut outcome = Ok(());
+        for ((cache, day), keys) in groups {
+            outcome = self
+                .meta
+                .transact_in(TxScope::Cache(cache), move |tx| {
+                    tx.touch_entries(&cache, day, &keys)
+                })
+                .await;
+            if outcome.is_err() {
+                break;
+            }
+        }
         match outcome {
             Ok(()) => Ok(count),
             Err(error) => {

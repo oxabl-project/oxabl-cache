@@ -24,7 +24,7 @@ where
     ) -> Result<StoredDictionaryPointer> {
         let caller = caller.clone();
         self.meta
-            .transact(move |tx| {
+            .read(move |tx| {
                 scoped_cache(tx, &caller, &cache, Scope::Read)?;
                 tx.dictionary_pointer(&cache)?.ok_or(Error::NotFound)
             })

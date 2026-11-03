@@ -72,7 +72,7 @@ where
 
     /// Whether an operator token was ever created.
     pub async fn operator_tokens_exist(&self) -> Result<bool> {
-        self.meta.transact(|tx| tx.operator_tokens_exist()).await
+        self.meta.read(|tx| tx.operator_tokens_exist()).await
     }
 
     /// Verifies an operator token. Every failure is `Unauthenticated`; the secret
@@ -82,7 +82,7 @@ where
         let now = self.now();
         let presented = hash_secret(&parsed.secret);
         let id = parsed.id;
-        let token = self.meta.transact(move |tx| tx.operator_token(&id)).await?;
+        let token = self.meta.read(move |tx| tx.operator_token(&id)).await?;
         let stored = token.as_ref().map_or([0u8; 32], |token| token.secret_hash);
         let matches: bool = presented.ct_eq(&stored).into();
         match token {

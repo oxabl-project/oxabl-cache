@@ -28,7 +28,7 @@ where
 
     /// Verifies every pack of a cache now.
     pub async fn scrub_cache(&self, cache: CacheId) -> Result<VerifyOutcome> {
-        let packs = self.meta.transact(move |tx| tx.pack_ids(&cache)).await?;
+        let packs = self.meta.read(move |tx| tx.pack_ids(&cache)).await?;
         let mut total = VerifyOutcome::default();
         for pack in packs {
             let outcome = self.verify_pack(cache, pack).await?;

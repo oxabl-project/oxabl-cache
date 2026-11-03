@@ -1,6 +1,7 @@
-//! A tenant, a cache and its principals on the real SQLite and filesystem adapters.
+//! A tenant, a cache and its principals on the real metadata and filesystem adapters.
 
 use super::assembler::TestAssembler;
+use super::backend::AnyMeta;
 use super::clock::TestClock;
 use super::flaky::FlakyMeta;
 use super::keys::Keys;
@@ -10,22 +11,21 @@ use oxabl_cache_core::domain::scope::{Grant, Scope, ScopeSet};
 use oxabl_cache_core::ids::{CacheId, TenantId};
 use oxabl_cache_core::usecases::{CacheSpec, TenantSpec};
 use oxabl_cache_core::{Config, Engine};
-use oxabl_cache_meta_sqlite::SqliteStore;
 use oxabl_cache_store_fs::FsStore;
 use std::path::Path;
 use std::sync::Arc;
 
-pub type TestEngine = Engine<FlakyMeta<SqliteStore>, FsStore, TestAssembler, TestClock>;
+pub type TestEngine = Engine<FlakyMeta<AnyMeta>, FsStore, TestAssembler, TestClock>;
 
 pub const URL_KEY: [u8; 32] = [7; 32];
 
 /// Opens an engine on the files under `dir`; reopening the same `dir` is a process restart.
-pub fn open_engine(
+pub async fn open_engine(
     dir: &Path,
     clock: &TestClock,
     config: Config,
-) -> (TestEngine, FlakyMeta<SqliteStore>) {
-    let meta = FlakyMeta::new(SqliteStore::open(&dir.join("meta.db")).expect("open metadata"));
+) -> (TestEngine, FlakyMeta<AnyMeta>) {
+    let meta = FlakyMeta::new(AnyMeta::open(dir).await);
     let store =
         FsStore::open(dir.join("objects"), "http://cache.test", vec![URL_KEY]).expect("open store");
     (
@@ -36,7 +36,7 @@ pub fn open_engine(
 
 pub struct Env {
     pub engine: Arc<TestEngine>,
-    pub meta: FlakyMeta<SqliteStore>,
+    pub meta: FlakyMeta<AnyMeta>,
     pub clock: TestClock,
     pub dir: Scratch,
     pub tenant: TenantId,
@@ -80,7 +80,7 @@ impl Env {
     async fn build(config: Config, hard_bytes: u64, egress_bytes: Option<u64>) -> Self {
         let dir = Scratch::new();
         let clock = TestClock::new();
-        let (engine, meta) = open_engine(dir.path(), &clock, config);
+        let (engine, meta) = open_engine(dir.path(), &clock, config).await;
         let engine = Arc::new(engine);
         let tenant = engine
             .create_tenant(TenantSpec {

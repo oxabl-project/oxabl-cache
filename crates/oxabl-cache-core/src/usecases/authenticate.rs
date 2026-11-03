@@ -24,7 +24,7 @@ where
         let presented = hash_secret(&parsed.secret);
         let (credential, tenant) = self
             .meta
-            .transact(move |tx| {
+            .read(move |tx| {
                 let credential = tx.credential(parsed.kind, &parsed.id)?;
                 let tenant = match &credential {
                     Some(credential) => tx.tenant(&credential.tenant)?,

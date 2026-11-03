@@ -5,6 +5,7 @@ use crate::domain::principal::Caller;
 use crate::engine::Engine;
 use crate::error::{Error, Result};
 use crate::ids::CredentialId;
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 
 impl<M, S, A, C> Engine<M, S, A, C>
@@ -20,7 +21,7 @@ where
         let tenant = caller.tenant;
         let now = self.now();
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Tenant(tenant), move |tx| {
                 match tx.credential(CredentialKind::Token, &id)? {
                     Some(credential) if credential.tenant == tenant => {}
                     _ => return Err(Error::NotFound),

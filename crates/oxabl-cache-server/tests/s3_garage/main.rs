@@ -1,9 +1,13 @@
 //! The store-independent scenarios and the S3 scenarios against Garage.
 
+use support::backend::Backend;
 use support::objects::Kind;
 
 /// The store this target runs against.
 pub const STORE: Kind = Kind::Garage;
+
+/// The metadata these scenarios run on.
+pub const BACKEND: Backend = Backend::Sqlite;
 
 #[path = "../s3_suite/support.rs"]
 mod support;

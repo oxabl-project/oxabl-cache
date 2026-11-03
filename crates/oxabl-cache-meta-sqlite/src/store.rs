@@ -3,7 +3,7 @@
 use crate::db::DbResult;
 use crate::migrate::migrate;
 use crate::tx::SqliteTx;
-use oxabl_cache_core::ports::{MetaTx, MetadataStore};
+use oxabl_cache_core::ports::{MetaTx, MetadataStore, TxScope};
 use oxabl_cache_core::{Error, Result};
 use rusqlite::Connection;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -61,7 +61,7 @@ fn run<T>(conn: &Connection, work: impl FnOnce(&mut dyn MetaTx) -> Result<T>) ->
 }
 
 impl MetadataStore for SqliteStore {
-    async fn transact<T, F>(&self, work: F) -> Result<T>
+    async fn transact_in<T, F>(&self, _scope: TxScope, work: F) -> Result<T>
     where
         T: Send + 'static,
         F: FnOnce(&mut dyn MetaTx) -> Result<T> + Send + 'static,

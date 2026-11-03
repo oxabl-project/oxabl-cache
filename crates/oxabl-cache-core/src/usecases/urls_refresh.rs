@@ -33,7 +33,7 @@ where
         let principal = caller.principal;
         let readable = self
             .meta
-            .transact(move |tx| {
+            .read(move |tx| {
                 scoped_cache(tx, &caller, &cache, Scope::Read)?;
                 let mut readable = Vec::new();
                 for id in packs {

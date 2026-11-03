@@ -6,6 +6,7 @@ use crate::domain::usage::Metric;
 use crate::engine::Engine;
 use crate::error::{Error, Result};
 use crate::ids::{ClientRef, PackId, PrincipalId, SegmentId};
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectKey, ObjectStore, PackAssembler, PackPart};
 use crate::usecases::pack_verify::condemn_segment;
 
@@ -40,7 +41,7 @@ where
         );
         let candidates = self
             .meta
-            .transact(move |tx| tx.compaction_candidates(now - grace, permille, min_size, batch))
+            .read(move |tx| tx.compaction_candidates(now - grace, permille, min_size, batch))
             .await?;
         let mut report = CompactionReport::default();
         for pack in candidates {
@@ -56,7 +57,7 @@ where
         let (cache, source_id) = (source.cache, source.id);
         let live: Vec<Segment> = self
             .meta
-            .transact(move |tx| {
+            .read(move |tx| {
                 Ok(tx
                     .segments_of_pack(&cache, &source_id)?
                     .into_iter()
@@ -89,7 +90,9 @@ where
                 Err(Error::Conflict(_)) => {
                     let now = self.now();
                     self.meta
-                        .transact(move |tx| tx.queue_scrub(&cache, &source_id, now))
+                        .transact_in(TxScope::Cache(cache), move |tx| {
+                            tx.queue_scrub(&cache, &source_id, now)
+                        })
                         .await?;
                     return Ok(None);
                 }
@@ -99,7 +102,7 @@ where
         let now = self.now();
         if !corrupt.is_empty() {
             self.meta
-                .transact(move |tx| {
+                .transact_in(TxScope::Cache(cache), move |tx| {
                     for id in &corrupt {
                         condemn_segment(tx, &cache, id, now)?;
                     }
@@ -129,7 +132,7 @@ where
         let now = self.now();
         let moved = self
             .meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Cache(cache), move |tx| {
                 let current = tx.pack(&cache, &source_id)?.ok_or(Error::NotFound)?;
                 if current.state != PackState::Live {
                     return Ok(0);
@@ -178,10 +181,7 @@ where
         if moved == 0 {
             return Ok(None);
         }
-        let owner = self
-            .meta
-            .transact(move |tx| tx.cache_tenant(&cache))
-            .await?;
+        let owner = self.meta.read(move |tx| tx.cache_tenant(&cache)).await?;
         if let Some(tenant) = owner {
             self.count(tenant, cache, Metric::CompactionBytes, moved);
         }

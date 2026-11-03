@@ -5,6 +5,7 @@ use crate::domain::segment::Segment;
 use crate::engine::Engine;
 use crate::error::{Error, Result};
 use crate::ids::{CacheId, PackId, SegmentId};
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetaTx, MetadataStore, ObjectKey, ObjectStore, PackAssembler};
 use crate::usecases::entry_removal::remove_entries;
 use crate::usecases::segment_death::kill_segment;
@@ -64,7 +65,7 @@ where
     pub async fn verify_pack(&self, cache: CacheId, pack: PackId) -> Result<VerifyOutcome> {
         let live = self
             .meta
-            .transact(move |tx| {
+            .read(move |tx| {
                 let Some(row) = tx.pack(&cache, &pack)? else {
                     return Ok(Vec::new());
                 };
@@ -90,7 +91,7 @@ where
         let count = u64::try_from(corrupt.len()).unwrap_or(u64::MAX);
         let entries_removed = self
             .meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Cache(cache), move |tx| {
                 let mut removed = 0;
                 for id in &corrupt {
                     removed += condemn_segment(tx, &cache, id, now)?;

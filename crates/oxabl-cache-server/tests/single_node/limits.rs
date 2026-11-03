@@ -106,7 +106,7 @@ fn api_routes_are_rate_limited_per_tenant_and_object_routes_are_not() {
     let world = World::build(
         "rate-limit",
         Options::default(),
-        json!({"rate": 2, "burst": 60}),
+        json!({"rate": 1, "burst": 60}),
         json!({}),
     );
     let pack = frames::pack(world.cache_bytes, &[3_000]);

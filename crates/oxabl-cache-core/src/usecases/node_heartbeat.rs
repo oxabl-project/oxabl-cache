@@ -2,6 +2,7 @@
 
 use crate::engine::Engine;
 use crate::error::Result;
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 
 const LIVE_WINDOW_SECS: i64 = 30;
@@ -18,7 +19,7 @@ where
     pub async fn heartbeat(&self) -> Result<()> {
         let (node, now) = (self.usage.node(), self.now());
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Independent, move |tx| {
                 tx.heartbeat(&node, now)?;
                 tx.prune_nodes(now - PRUNE_AFTER_SECS)?;
                 Ok(())
@@ -29,6 +30,6 @@ where
     /// Nodes that beat within the last 30 seconds.
     pub async fn live_node_count(&self) -> Result<u32> {
         let since = self.now() - LIVE_WINDOW_SECS;
-        self.meta.transact(move |tx| tx.live_nodes(since)).await
+        self.meta.read(move |tx| tx.live_nodes(since)).await
     }
 }

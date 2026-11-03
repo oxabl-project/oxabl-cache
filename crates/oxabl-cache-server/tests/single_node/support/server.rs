@@ -1,5 +1,6 @@
 //! The real `oxabl-cache-server` binary on a fresh data directory.
 
+use super::backend;
 use super::http::{Response, request};
 use super::objects::Objects;
 use serde_json::{Value, json};
@@ -50,13 +51,13 @@ pub struct Server {
 
 const BIN: &str = env!("CARGO_BIN_EXE_oxabl-cache-server");
 
-fn config_text(dir: &Path, objects: &Objects, options: &Options) -> String {
+fn config_text(dir: &Path, metadata_url: &str, objects: &Objects, options: &Options) -> String {
     let store = objects.section(dir);
     let dir = dir.display();
     format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nadmin_listen = \"127.0.0.1:0\"\n\
          metrics_listen = \"127.0.0.1:0\"\nurl_lifetime = \"{}\"\nshutdown_timeout = \"{}\"\n\
-         [metadata]\nurl = \"sqlite://{dir}/meta.db\"\n\
+         [metadata]\nurl = \"{metadata_url}\"\n\
          {store}\
          [keys]\nurl_key_file = \"{dir}/url.key\"\n\
          [gc]\ngrace = \"{}\"\nlease = \"{}\"\ninterval = \"{}\"\n{}\n",
@@ -87,7 +88,8 @@ impl Server {
             fs::write(dir.join("tls.key"), issued.signing_key.serialize_pem()).expect("key file");
         }
         let objects = Objects::open(crate::STORE, &dir);
-        fs::write(&config, config_text(&dir, &objects, &options)).expect("config");
+        let metadata_url = backend::metadata_url(&dir);
+        fs::write(&config, config_text(&dir, &metadata_url, &objects, &options)).expect("config");
         let init = Command::new(BIN)
             .arg("-c")
             .arg(&config)

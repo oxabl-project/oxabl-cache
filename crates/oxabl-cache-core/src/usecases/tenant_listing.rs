@@ -22,7 +22,7 @@ where
     pub async fn list_caches(&self, caller: &Caller) -> Result<Vec<Cache>> {
         caller.require_tenant_admin()?;
         let tenant = caller.tenant;
-        self.meta.transact(move |tx| tx.caches_of(&tenant)).await
+        self.meta.read(move |tx| tx.caches_of(&tenant)).await
     }
 
     /// The owner keys of a cache. Needs `tenant:admin`.
@@ -41,22 +41,20 @@ where
     pub async fn list_tokens(&self, caller: &Caller) -> Result<Vec<TokenSummary>> {
         caller.require_tenant_admin()?;
         let tenant = caller.tenant;
-        self.meta.transact(move |tx| tx.tokens_of(&tenant)).await
+        self.meta.read(move |tx| tx.tokens_of(&tenant)).await
     }
 
     /// The tenant's users. Needs `tenant:admin`.
     pub async fn list_users(&self, caller: &Caller) -> Result<Vec<User>> {
         caller.require_tenant_admin()?;
         let tenant = caller.tenant;
-        self.meta.transact(move |tx| tx.users_of(&tenant)).await
+        self.meta.read(move |tx| tx.users_of(&tenant)).await
     }
 
     /// Every standing grant of the tenant. Needs `tenant:admin`.
     pub async fn list_grants(&self, caller: &Caller) -> Result<Vec<(PrincipalId, Grant)>> {
         caller.require_tenant_admin()?;
         let tenant = caller.tenant;
-        self.meta
-            .transact(move |tx| tx.tenant_grants(&tenant))
-            .await
+        self.meta.read(move |tx| tx.tenant_grants(&tenant)).await
     }
 }

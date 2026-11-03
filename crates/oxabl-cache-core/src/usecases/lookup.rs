@@ -129,7 +129,7 @@ where
         let caller_copy = caller.clone();
         let raw = self
             .meta
-            .transact(move |tx| {
+            .read(move |tx| {
                 let cache = scoped_cache(tx, &caller_copy, &cache_id, Scope::Read)?;
                 if records {
                     let tenant = tx.tenant(&cache.tenant)?.ok_or(Error::NotFound)?;

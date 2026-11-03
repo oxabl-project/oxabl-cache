@@ -5,6 +5,7 @@ use crate::domain::scope::{Grant, Scope};
 use crate::engine::Engine;
 use crate::error::{Conflict, Error, Result};
 use crate::ids::{PrincipalId, TenantId};
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 use crate::usecases::credential_text::{generate, hash_secret};
 use crate::usecases::token_create::NewCredential;
@@ -57,7 +58,7 @@ where
     ) -> Result<(NewCredential, Vec<Grant>)> {
         let grants = self
             .meta
-            .transact(move |tx| match tx.user(&user)? {
+            .transact_in(TxScope::Tenant(tenant), move |tx| match tx.user(&user)? {
                 Some(found) if found.tenant == tenant && found.disabled_at.is_none() => {
                     tx.grants_of(&user)
                 }
@@ -83,7 +84,7 @@ where
         let expires_at = now + lifetime;
         let name = name.to_owned();
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Tenant(tenant), move |tx| {
                 for grant in &grants {
                     if let Some(cache) = &grant.cache {
                         tx.cache(&tenant, cache)?.ok_or(Error::NotFound)?;

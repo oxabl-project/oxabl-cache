@@ -24,3 +24,7 @@ mod scopes;
 mod shutdown_upload;
 mod support;
 mod tls_listener;
+
+use support::backend::Backend;
+
+pub const BACKEND: Backend = Backend::Sqlite;

@@ -3,6 +3,7 @@
 use crate::domain::usage::{Metric, ROLLED_UP_NODE, UsageRow};
 use crate::engine::Engine;
 use crate::error::Result;
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 use crate::time::{DAY_SECS, day_of};
 
@@ -22,7 +23,7 @@ where
     pub async fn close_ledger_days(&self) -> Result<Vec<i64>> {
         let now = self.now();
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Ledger, move |tx| {
                 let mut closed = Vec::new();
                 for day in tx.open_days()? {
                     if now >= (day + 1) * DAY_SECS + CLOSE_DELAY_SECS {
@@ -42,7 +43,7 @@ where
         let now = self.now();
         let today = day_of(now);
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Ledger, move |tx| {
                 let mut written = 0;
                 for cache in tx.all_caches()? {
                     if tx.has_ledger_row(&cache.id, today, Metric::StoredByteDays)? {

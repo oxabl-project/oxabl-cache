@@ -6,6 +6,7 @@ use crate::domain::scope::{Grant, Scope, ScopeSet};
 use crate::engine::Engine;
 use crate::error::{Conflict, Error, Result};
 use crate::ids::{CacheId, CredentialId, PrincipalId};
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 use crate::time::DAY_SECS;
 use crate::usecases::credential_text::{generate, hash_secret};
@@ -80,7 +81,7 @@ where
         }
         let expires_at = now + lifetime;
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Tenant(tenant), move |tx| {
                 if let Some(existing) = existing_principal {
                     match tx.user(&existing)? {
                         Some(user) if user.tenant == tenant && user.disabled_at.is_none() => {}

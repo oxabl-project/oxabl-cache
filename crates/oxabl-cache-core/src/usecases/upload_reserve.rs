@@ -8,6 +8,7 @@ use crate::engine::Engine;
 use crate::error::{Conflict, Error, Result};
 use crate::ids::{CacheId, ClientRef, PackId};
 use crate::limits::{PACK_BYTES, PACK_MIN_BYTES};
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectKey, ObjectStore, PackAssembler, SignedUrl};
 use crate::usecases::admission::admit;
 use crate::usecases::scoped_cache::scoped_cache;
@@ -120,11 +121,12 @@ where
         scope: Scope,
         request: PackRequest,
     ) -> Result<Reservation> {
+        let tenant = caller.tenant;
         let caller = caller.clone();
         let config = self.config.clone();
         let now = self.now();
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::TenantCache(tenant, cache), move |tx| {
                 let found = scoped_cache(tx, &caller, &cache, scope)?;
                 if let Some(existing) =
                     tx.pack_by_client_ref(&cache, &caller.principal, &request.client_ref)?

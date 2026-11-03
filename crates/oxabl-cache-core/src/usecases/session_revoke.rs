@@ -3,6 +3,7 @@
 use crate::domain::credential::CredentialKind;
 use crate::engine::Engine;
 use crate::error::{Error, Result};
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 use crate::usecases::credential_text::parse;
 
@@ -22,7 +23,7 @@ where
         }
         let now = self.now();
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Independent, move |tx| {
                 tx.revoke_credential(CredentialKind::Session, &parsed.id, now)?;
                 Ok(())
             })

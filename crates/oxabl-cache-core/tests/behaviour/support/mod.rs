@@ -1,4 +1,5 @@
 pub mod assembler;
+pub mod backend;
 pub mod clock;
 pub mod env;
 pub mod flaky;

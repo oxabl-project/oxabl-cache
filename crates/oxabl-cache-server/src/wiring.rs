@@ -3,18 +3,18 @@
 use crate::assembler::FormatAssembler;
 use crate::config::Config;
 use crate::keys;
+use crate::meta::{self, AnyMeta};
 use crate::store::{self, AnyStore};
 use oxabl_cache_core::Engine;
 use oxabl_cache_http::{App, Backend, MeteredMeta, MeteredStore, Metrics, TenantDefaults};
-use oxabl_cache_meta_sqlite::SqliteStore;
 use oxabl_cache_oidc::OidcVerifier;
 use std::sync::Arc;
 
-/// The production wiring: SQLite metadata, the configured object store, the system clock.
+/// The production wiring: SQLite or Postgres metadata, the configured object store, the system clock.
 pub(crate) struct Prod;
 
 impl Backend for Prod {
-    type Meta = MeteredMeta<SqliteStore>;
+    type Meta = MeteredMeta<AnyMeta>;
     type Store = MeteredStore<AnyStore>;
     type Assembler = FormatAssembler;
     type Clock = oxabl_cache_core::ports::SystemClock;
@@ -23,9 +23,8 @@ impl Backend for Prod {
 
 /// Opens the stores and wires the engine. `public_url` is the origin object URLs carry.
 pub(crate) async fn build(config: &Config, public_url: &str) -> Result<Arc<App<Prod>>, String> {
+    let meta = meta::open(&config.metadata).await?;
     let metrics = Arc::new(Metrics::default());
-    let meta = SqliteStore::open(&config.metadata_path)
-        .map_err(|error| format!("cannot open the metadata database: {error}"))?;
     let (store, local) = store::open(config, public_url).await?;
     let mut core = config.core.clone();
     if let Some(path) = &config.claim_hash_key_file {

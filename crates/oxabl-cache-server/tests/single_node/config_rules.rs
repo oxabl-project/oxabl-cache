@@ -117,14 +117,65 @@ fn init_mints_the_first_operator_token_once_and_unbuilt_subcommands_say_so() {
             stderr(&output)
         );
     }
-    let postgres = run(
-        "config-postgres",
-        &BASE.replace("sqlite://{dir}/meta.db", "postgres://u@h/db"),
+}
+
+#[test]
+fn postgres_metadata_is_configured_by_url_and_password_file_and_fails_closed() {
+    let postgres = |url: &str| BASE.replace("sqlite://{dir}/meta.db", url);
+    let embedded = run(
+        "config-postgres-password",
+        &postgres("postgres://u:secret@h/db"),
         &["check-store"],
         &[],
     );
-    assert!(!postgres.status.success());
-    assert!(stderr(&postgres).contains("not available"));
+    assert!(!embedded.status.success());
+    assert!(
+        stderr(&embedded).contains("password_file"),
+        "{}",
+        stderr(&embedded)
+    );
+
+    let sqlite_with_password = run(
+        "config-sqlite-password",
+        &BASE.replace("[metadata]\n", "[metadata]\npassword_file = \"{dir}/pw\"\n"),
+        &["check-store"],
+        &[],
+    );
+    assert!(!sqlite_with_password.status.success());
+    assert!(
+        stderr(&sqlite_with_password).contains("postgres only"),
+        "{}",
+        stderr(&sqlite_with_password)
+    );
+
+    let unreachable = run(
+        "config-postgres-unreachable",
+        &postgres("postgres://u@127.0.0.1:1/db?sslmode=disable"),
+        &["check-store"],
+        &[],
+    );
+    assert!(!unreachable.status.success());
+    assert!(
+        stderr(&unreachable).contains("cannot open the metadata database"),
+        "{}",
+        stderr(&unreachable)
+    );
+
+    let no_password_file = run(
+        "config-postgres-password-file",
+        &BASE.replace(
+            "[metadata]\nurl = \"sqlite://{dir}/meta.db\"",
+            "[metadata]\nurl = \"postgres://u@127.0.0.1:1/db?sslmode=disable\"\npassword_file = \"{dir}/missing\"",
+        ),
+        &["check-store"],
+        &[],
+    );
+    assert!(!no_password_file.status.success());
+    assert!(
+        stderr(&no_password_file).contains("password file"),
+        "{}",
+        stderr(&no_password_file)
+    );
 }
 
 #[test]
