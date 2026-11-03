@@ -57,7 +57,7 @@ jobs:
       - name: Smoke test
         run: deploy/container/smoke.sh oxabl-cache-server:smoke
       - name: Log in to the registry
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && vars.PUBLISH_IMAGE == 'true'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -65,7 +65,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Push by digest
         id: push
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && vars.PUBLISH_IMAGE == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -77,13 +77,13 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.suffix }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true
       - name: Export the digest
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && vars.PUBLISH_IMAGE == 'true'
         run: |
           mkdir -p "${{ runner.temp }}/digests"
           digest="${{ steps.push.outputs.digest }}"
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
       - name: Upload the digest
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && vars.PUBLISH_IMAGE == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: digest-${{ matrix.suffix }}
@@ -93,7 +93,7 @@ jobs:
 
   publish:
     name: Publish and sign
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && vars.PUBLISH_IMAGE == 'true'
     needs: build
     runs-on: ubuntu-24.04
     permissions:
@@ -138,6 +138,6 @@ jobs:
           digest="$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest}}' | jq -r .digest)"
           [ -n "$digest" ] && [ "$digest" != null ] || exit 1
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-      - uses: sigstore/cosign-installer@v4
+      - uses: sigstore/cosign-installer@v4.1.2
       - name: Sign the image (keyless)
         run: cosign sign --yes "${IMAGE}@${{ steps.digest.outputs.digest }}"

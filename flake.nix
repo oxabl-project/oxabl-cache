@@ -28,6 +28,7 @@
             pkgs.tflint
             pkgs.kind
             pkgs.kubectl
+            pkgs.systemd
           ];
         };
       });

@@ -102,7 +102,9 @@ and the storage attacks below use it, so it also checks the spec.
   namespace (`netns::enter`). The launcher configures the namespace as root, then
   runs the test as the invoking uid (`unshare --user --map-user`, with
   `ip_unprivileged_port_start=0` so the IdP can bind 443), because Postgres refuses
-  to run as root. The IdP listens at `10.99.0.10:443`, the only allowed range, with a
+  to run as root. Ubuntu 24.04 runners restrict unprivileged user namespaces
+  through AppArmor, so CI lifts that restriction before the tests. The IdP
+  listens at `10.99.0.10:443`, the only allowed range, with a
   test CA the server trusts. **Decoy listeners** sit on every address that must stay
   unreachable: `127.0.0.1`, `::1`, `10.0.0.5`, `172.16.0.1`, `192.168.1.1`,
   `100.64.0.1` and `169.254.169.254`. A refusal is therefore proven by "no
