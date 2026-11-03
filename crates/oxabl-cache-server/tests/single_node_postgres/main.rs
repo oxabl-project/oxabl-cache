@@ -24,6 +24,8 @@ mod limits;
 mod logs;
 #[path = "../single_node/object_urls.rs"]
 mod object_urls;
+#[path = "../single_node/operator_tokens.rs"]
+mod operator_tokens;
 #[path = "../single_node/roster_rules.rs"]
 mod roster_rules;
 #[path = "../single_node/round_trip.rs"]

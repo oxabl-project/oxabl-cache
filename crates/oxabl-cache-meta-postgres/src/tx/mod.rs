@@ -6,6 +6,7 @@ mod entries;
 mod fence;
 mod ledger;
 mod oidc;
+mod operator_tokens;
 mod packs;
 mod roster;
 mod segments;

@@ -19,6 +19,7 @@ mod lifecycle;
 mod limits;
 mod logs;
 mod object_urls;
+mod operator_tokens;
 mod roster_rules;
 mod round_trip;
 mod scopes;

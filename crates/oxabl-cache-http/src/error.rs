@@ -92,6 +92,7 @@ impl From<Error> for ApiError {
                     Conflict::PackClosed => "pack_closed",
                     Conflict::PackChanged => "pack_changed",
                     Conflict::PackIncomplete => "pack_incomplete",
+                    Conflict::LastOperatorToken => "last_operator_token",
                 };
                 let mut conflict = Self::new(StatusCode::CONFLICT, "conflict", reason);
                 conflict.reason = Some(reason);

@@ -129,6 +129,14 @@ pub fn admin_router<B: Backend>(app: Arc<App<B>>) -> Router {
             "/admin/v1/tenants/{tenant}/admins",
             post(admin::admins::post::<B>),
         )
+        .route(
+            "/admin/v1/operator-tokens",
+            get(admin::operator_tokens::list::<B>).post(admin::operator_tokens::create::<B>),
+        )
+        .route(
+            "/admin/v1/operator-tokens/{id}",
+            delete(admin::operator_tokens::revoke::<B>),
+        )
         .route("/admin/v1/usage", get(admin::usage::get::<B>))
         .route(
             "/admin/v1/caches/{cache}/scrub",

@@ -46,6 +46,8 @@ pub enum Conflict {
     PackChanged,
     /// The stored object is missing or its size differs from the declared one.
     PackIncomplete,
+    /// The only operator token still valid cannot be revoked.
+    LastOperatorToken,
 }
 
 /// Result alias used across the crate.

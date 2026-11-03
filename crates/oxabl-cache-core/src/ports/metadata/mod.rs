@@ -8,6 +8,7 @@ mod fence;
 mod grants;
 mod ledger;
 mod oidc;
+mod operator_tokens;
 mod pack_accounting;
 mod pack_selection;
 mod packs;
@@ -26,6 +27,7 @@ pub use fence::FenceTx;
 pub use grants::GrantsTx;
 pub use ledger::LedgerTx;
 pub use oidc::OidcTx;
+pub use operator_tokens::OperatorTokensTx;
 pub use pack_accounting::PackAccountingTx;
 pub use pack_selection::PackSelectionTx;
 pub use packs::{PacksTx, RecordedCommit};
@@ -48,6 +50,7 @@ pub trait MetaTx:
     + GrantsTx
     + CredentialsTx
     + AdminTx
+    + OperatorTokensTx
     + OidcTx
     + RosterTx
     + PacksTx
@@ -69,6 +72,7 @@ impl<T> MetaTx for T where
         + GrantsTx
         + CredentialsTx
         + AdminTx
+        + OperatorTokensTx
         + OidcTx
         + RosterTx
         + PacksTx
