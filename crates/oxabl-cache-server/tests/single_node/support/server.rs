@@ -31,7 +31,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
-            grace: "2s",
+            grace: "6s",
             lease: "2s",
             interval: "200ms",
             url_lifetime: "5s",

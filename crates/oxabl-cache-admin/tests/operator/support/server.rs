@@ -44,11 +44,12 @@ pub struct Server {
 
 impl Server {
     pub fn start(name: &str, tls: bool) -> Self {
-        Self::start_with(name, tls, "")
+        Self::start_with(name, tls, "", "")
     }
 
-    /// Like [`Server::start`] with `extra` appended to the configuration.
-    pub fn start_with(name: &str, tls: bool, extra: &str) -> Self {
+    /// Like [`Server::start`] with `server` added to the `[server]` section and `extra`
+    /// appended to the configuration.
+    pub fn start_with(name: &str, tls: bool, server: &str, extra: &str) -> Self {
         let bin = server_binary();
         let dir =
             Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}-{}", std::process::id()));
@@ -57,7 +58,7 @@ impl Server {
         let shown = dir.display();
         let mut config = format!(
             "[server]\nlisten = \"127.0.0.1:0\"\nadmin_listen = \"127.0.0.1:0\"\n\
-             metrics_listen = \"127.0.0.1:0\"\nshutdown_timeout = \"1s\"\n\
+             metrics_listen = \"127.0.0.1:0\"\nshutdown_timeout = \"1s\"\n{server}\
              [metadata]\nurl = \"sqlite://{shown}/meta.db\"\n\
              [store]\nkind = \"fs\"\nroot = \"{shown}/objects\"\n\
              [keys]\nurl_key_file = \"{shown}/url.key\"\n"

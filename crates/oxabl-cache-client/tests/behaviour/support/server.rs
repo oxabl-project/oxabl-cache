@@ -61,7 +61,7 @@ pub struct Timers {
 impl Default for Timers {
     fn default() -> Self {
         Self {
-            grace: "2s",
+            grace: "61s",
             lease: "2s",
             interval: "200ms",
             url_lifetime: "60s",

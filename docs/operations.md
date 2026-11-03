@@ -82,7 +82,7 @@ url_key_file = "/run/secrets/url-key"         # HMAC for local-disk object URLs
 claim_hash_key_file = "/run/secrets/claim-key" # keyed hashes of OIDC policy claims
 
 [gc]
-grace = "24h"
+grace = "24h"                                 # at least url_lifetime + 1s; keep hours of gap
 lease = "1h"
 interval = "10m"
 compaction_live_ratio = 0.5
