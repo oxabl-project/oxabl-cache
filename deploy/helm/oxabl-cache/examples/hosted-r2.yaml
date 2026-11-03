@@ -1,0 +1,54 @@
+# One region of the hosted service: stateless replicas, Postgres, and a Cloudflare R2 bucket
+# reached through its S3 endpoint with presigned URLs. Replace the account id and secret names.
+mode: cluster
+
+image:
+  tag: main
+
+replicaCount: 2
+publicUrl: https://cache.example.com
+
+keys:
+  existingSecret: oxabl-cache-keys
+
+metadata:
+  postgres:
+    url: postgres://oxabl_cache@postgres.internal.example.com:5432/oxabl_cache
+    passwordSecret:
+      name: oxabl-cache-pg
+      key: password
+
+store:
+  s3:
+    endpoint: https://ACCOUNT_ID.r2.cloudflarestorage.com
+    region: auto
+    bucket: oxabl-cache-na
+    prefix: ""
+    pathStyle: true
+    credentialsSecret:
+      name: oxabl-cache-r2
+
+oidc:
+  issuerAllowlist:
+    - https://token.actions.githubusercontent.com
+    - https://gitlab.com
+
+defaults:
+  retentionDays: 30
+  hardQuota: 20GiB
+  rate: 50
+  burst: 200
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - cache.example.com
+  tls:
+    - secretName: cache-example-com-tls
+      hosts:
+        - cache.example.com
+
+monitoring:
+  serviceMonitor:
+    enabled: true

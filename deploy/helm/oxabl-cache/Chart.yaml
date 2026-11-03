@@ -1,0 +1,14 @@
+apiVersion: v2
+name: oxabl-cache
+description: Self-hosted oxabl-cache server, a zero-knowledge remote compile cache
+type: application
+version: 0.1.0
+appVersion: "0.0.0"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/oxabl-project/oxabl-cache
+sources:
+  - https://github.com/oxabl-project/oxabl-cache
+keywords:
+  - oxabl
+  - cache
+  - openedge

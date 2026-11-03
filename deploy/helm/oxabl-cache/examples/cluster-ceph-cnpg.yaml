@@ -1,0 +1,67 @@
+# Two or more replicas on a CloudNativePG cluster and an in-cluster S3 store (Ceph RGW or Garage).
+# CloudNativePG creates the Secret oxabl-cache-pg-app (keys username, password) for the app
+# user; the S3 credentials Secret and the keys Secret are created by the operator.
+mode: cluster
+
+image:
+  tag: main
+
+replicaCount: 2
+publicUrl: https://cache.example.com
+
+keys:
+  existingSecret: oxabl-cache-keys
+
+metadata:
+  postgres:
+    url: postgres://app@oxabl-cache-pg-rw.oxabl-cache.svc:5432/app
+    passwordSecret:
+      name: oxabl-cache-pg-app
+      key: password
+
+store:
+  s3:
+    endpoint: https://s3.example.com
+    region: us-east-1
+    bucket: oxabl-cache
+    prefix: ""
+    pathStyle: true
+    credentialsSecret:
+      name: oxabl-cache-s3
+
+# Clients fetch and upload through presigned URLs that name the S3 endpoint, so the endpoint
+# must be reachable from CI and developer machines: expose RGW or Garage through its own
+# Ingress and use that URL here.
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - cache.example.com
+  tls:
+    - secretName: cache-example-com-tls
+      hosts:
+        - cache.example.com
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+
+networkPolicy:
+  enabled: true
+  adminFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: operations
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
