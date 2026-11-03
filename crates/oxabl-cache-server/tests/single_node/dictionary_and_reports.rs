@@ -5,6 +5,8 @@ use crate::support::fixture::{World, owner, roster_bytes, token};
 use crate::support::frames::{self, Entry};
 use crate::support::http::request;
 use crate::support::server::Options;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use ed25519_dalek::{Signer, SigningKey};
 use oxabl_cache_format as format;
 use serde_json::json;
@@ -85,7 +87,7 @@ fn a_dictionary_is_published_in_two_steps_and_only_a_ci_or_owner_key_may_point_a
 
     let mut dictionary = frames::pack(world.cache_bytes, &[2_000]);
     dictionary.segments[0].kind = format::SegmentKind::Dictionary;
-    let (_, statuses) = world.publish(&world.ci, TRUSTED, &dictionary, &[]);
+    let (dictionary_pack, statuses) = world.publish(&world.ci, TRUSTED, &dictionary, &[]);
     assert!(statuses.is_empty(), "a dictionary pack carries no entries");
     let segment = dictionary.segments[0].segment_id;
     assert_eq!(
@@ -116,8 +118,30 @@ fn a_dictionary_is_published_in_two_steps_and_only_a_ci_or_owner_key_may_point_a
     let valid = pointer(&world, 1, segment, &ci_key);
     assert_eq!(put_pointer(&world, "\"v0\"", &valid), 204);
     let stored = world.reader.json("GET", &world.path("/dictionary"), None);
-    assert_eq!((stored.status, stored.body.clone()), (200, valid));
+    assert_eq!(stored.status, 200);
     assert_eq!(stored.header("etag"), Some("\"v1\""));
+    let document = stored.json();
+    assert_eq!(
+        STANDARD
+            .decode(document["pointer"].as_str().expect("pointer"))
+            .expect("base64"),
+        valid,
+        "the pointer comes back byte for byte"
+    );
+    let location = &document["location"];
+    assert_eq!(location["pack_id"], dictionary_pack.as_str());
+    assert_eq!(location["length"], 2_000);
+    let (offset, length) = (
+        location["offset"].as_u64().expect("offset"),
+        location["length"].as_u64().expect("length"),
+    );
+    let range = format!("bytes={offset}-{}", offset + length - 1);
+    let read = world.get_object(location["url"].as_str().expect("url"), Some(&range));
+    assert_eq!(
+        (read.status, read.body),
+        (206, dictionary.contents[0].clone()),
+        "the located range is exactly the dictionary segment, readable with read scope alone"
+    );
     assert_eq!(world.info(&world.reader)["dictionary_version"], 1);
 }
 

@@ -5,12 +5,15 @@ use crate::auth::Authed;
 use crate::body::read_limited;
 use crate::error::ApiError;
 use crate::frames::parse_pointer;
-use crate::json::empty;
-use crate::routes::versioned::{binary, if_match};
+use crate::json::{empty, json_response};
+use crate::routes::versioned::if_match;
 use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Response;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
+use serde_json::json;
 use std::sync::Arc;
 
 const POINTER_BODY_BYTES: usize = 4096;
@@ -21,8 +24,24 @@ pub(crate) async fn get<B: Backend>(
     Path(cache): Path<String>,
 ) -> Result<Response, ApiError> {
     let cache = auth.cache(&cache)?;
-    let stored = app.engine.get_dictionary(&auth.caller, cache).await?;
-    Ok(binary(stored.bytes, Some(stored.version)))
+    let located = app.engine.locate_dictionary(&auth.caller, cache).await?;
+    let mut response = json_response(
+        StatusCode::OK,
+        &json!({
+            "pointer": STANDARD.encode(&located.pointer.bytes),
+            "location": {
+                "pack_id": located.pack.to_string(),
+                "url": located.url.url,
+                "expires_at": located.url.expires_at,
+                "offset": located.offset,
+                "length": located.length,
+            },
+        }),
+    );
+    if let Ok(etag) = HeaderValue::from_str(&format!("\"v{}\"", located.pointer.version)) {
+        response.headers_mut().insert(header::ETAG, etag);
+    }
+    Ok(response)
 }
 
 pub(crate) async fn put<B: Backend>(
