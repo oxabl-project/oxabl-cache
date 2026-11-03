@@ -51,7 +51,7 @@ async fn issuers_that_point_inside_are_refused_at_registration() {
         refused(&env, issuer).await;
     }
     assert_eq!(
-        env.decoy.connections(),
+        env.decoy_connections(),
         0,
         "the private listener saw no connection"
     );
@@ -96,7 +96,7 @@ async fn redirects_are_checked_like_the_first_request() {
         );
     }
     assert_eq!(
-        env.decoy.connections(),
+        env.decoy_connections(),
         0,
         "no redirect reached the private listener"
     );

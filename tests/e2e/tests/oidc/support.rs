@@ -10,7 +10,22 @@ use std::sync::Arc;
 
 pub const PUBLIC: &str = "10.99.0.10";
 pub const PRIVATE: &str = "10.0.0.5";
-pub const ADDRESSES: [&str; 2] = [PUBLIC, PRIVATE];
+pub const DECOYS: [&str; 6] = [
+    "127.0.0.1",
+    "172.16.0.1",
+    "192.168.1.1",
+    "100.64.0.1",
+    "169.254.169.254",
+    PRIVATE,
+];
+pub const ADDRESSES: [&str; 6] = [
+    PUBLIC,
+    "172.16.0.1",
+    "192.168.1.1",
+    "100.64.0.1",
+    "169.254.169.254",
+    PRIVATE,
+];
 
 pub const REPOSITORY: &str = "acme/widgets";
 pub const REPOSITORY_ID: &str = "918273645";
@@ -23,7 +38,7 @@ pub fn key(alg: Alg, kid: &str) -> Arc<SigningKey> {
 pub struct Env {
     pub dns: FakeDns,
     pub idp: Idp,
-    pub decoy: Decoy,
+    pub decoys: Vec<Decoy>,
     pub server: CacheServer,
     pub tenant: Tenant,
     _ca_dir: TestDir,
@@ -47,7 +62,11 @@ impl Env {
         dns.set("private.test", PRIVATE);
         let at = |host: &str| -> SocketAddr { format!("{host}:443").parse().expect("addr") };
         let idp = Idp::start(at(PUBLIC), &ca, &["idp.test", "rebind.test"]).await;
-        let decoy = Decoy::start(at(PRIVATE)).await;
+        let mut decoys = Vec::new();
+        for host in DECOYS {
+            decoys.push(Decoy::start(at(host)).await);
+        }
+        decoys.push(Decoy::start("[::1]:443".parse().expect("addr")).await);
         let server = CacheServer::start(&format!(
             "allowed_private_ranges = [\"{PUBLIC}/32\"]\ndns_servers = [\"{}\"]\nextra_ca_file = \"{}\"\n{extra}",
             dns.addr,
@@ -58,11 +77,16 @@ impl Env {
         Self {
             dns,
             idp,
-            decoy,
+            decoys,
             server,
             tenant,
             _ca_dir: ca_dir,
         }
+    }
+
+    /// Connections the listeners on addresses no fetch may reach have received.
+    pub fn decoy_connections(&self) -> usize {
+        self.decoys.iter().map(Decoy::connections).sum()
     }
 
     pub async fn admin(&self, method: &str, path: &str, body: Option<&Value>) -> Reply {

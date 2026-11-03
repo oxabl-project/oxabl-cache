@@ -53,7 +53,7 @@ async fn a_refetch_after_the_name_moved_inside_is_refused() {
         refetch.body
     );
     assert_eq!(
-        env.decoy.connections(),
+        env.decoy_connections(),
         0,
         "the private listener saw no connection"
     );
@@ -111,7 +111,7 @@ async fn a_first_fetch_and_a_registration_behind_a_moved_name_are_refused() {
         .register("https://rebind.test/other", "github", &[])
         .await;
     assert_eq!(registered.status, 400, "{}", registered.body);
-    assert_eq!(env.decoy.connections(), 0);
+    assert_eq!(env.decoy_connections(), 0);
     assert_eq!(
         env.idp.seen().len(),
         2,
@@ -143,7 +143,7 @@ async fn answers_that_alternate_between_check_and_connect_never_reach_the_privat
         "the private answers were refused ({accepted} accepted)"
     );
     assert_eq!(
-        env.decoy.connections(),
+        env.decoy_connections(),
         0,
         "the private listener saw no connection"
     );
