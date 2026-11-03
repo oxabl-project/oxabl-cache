@@ -4,6 +4,7 @@ mod admin;
 mod cache_info;
 mod commit;
 mod dictionary;
+mod health;
 mod lookup;
 mod metrics_page;
 mod objects;
@@ -35,6 +36,7 @@ fn wrap<B: Backend>(routes: Router<Arc<App<B>>>, app: Arc<App<B>>) -> Router {
 /// The public listener: authentication, the data plane and tenant administration.
 pub fn public_router<B: Backend>(app: Arc<App<B>>) -> Router {
     let routes = Router::new()
+        .route("/v1/health", get(health::public))
         .route("/v1/auth/oidc", post(session::oidc::<B>))
         .route("/v1/auth/session", delete(session::revoke::<B>))
         .route("/v1/caches/{cache}", get(cache_info::get::<B>))
@@ -139,7 +141,10 @@ pub fn admin_router<B: Backend>(app: Arc<App<B>>) -> Router {
 /// The metrics listener.
 pub fn metrics_router<B: Backend>(app: Arc<App<B>>) -> Router {
     wrap(
-        Router::new().route("/metrics", get(metrics_page::get::<B>)),
+        Router::new()
+            .route("/metrics", get(metrics_page::get::<B>))
+            .route("/livez", get(health::live))
+            .route("/readyz", get(health::ready::<B>)),
         app,
     )
 }

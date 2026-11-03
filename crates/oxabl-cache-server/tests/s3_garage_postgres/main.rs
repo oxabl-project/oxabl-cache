@@ -21,6 +21,8 @@ mod dictionary_and_reports;
 mod first_write_wins;
 #[path = "../single_node/gc.rs"]
 mod gc;
+#[path = "../single_node/health.rs"]
+mod health;
 #[path = "../single_node/lifecycle.rs"]
 mod lifecycle;
 #[path = "../single_node/limits.rs"]
@@ -53,6 +55,8 @@ mod database_crash;
 mod gc_leader;
 #[path = "../multi_node/nodes.rs"]
 mod nodes;
+#[path = "../multi_node/readiness.rs"]
+mod readiness;
 #[path = "../multi_node/two_nodes.rs"]
 mod two_nodes;
 

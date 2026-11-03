@@ -20,6 +20,8 @@ mod dictionary_and_reports;
 mod first_write_wins;
 #[path = "../single_node/gc.rs"]
 mod gc;
+#[path = "../single_node/health.rs"]
+mod health;
 #[path = "../single_node/lifecycle.rs"]
 mod lifecycle;
 #[path = "../single_node/limits.rs"]

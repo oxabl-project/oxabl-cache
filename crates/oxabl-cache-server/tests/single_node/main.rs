@@ -14,6 +14,7 @@ mod dictionary_and_reports;
 mod first_write_wins;
 mod fs_support;
 mod gc;
+mod health;
 mod lifecycle;
 mod limits;
 mod logs;
