@@ -8,6 +8,7 @@ mod keys;
 mod listener;
 mod scheduler;
 mod serve;
+mod store;
 mod tls;
 mod wiring;
 
@@ -48,7 +49,7 @@ async fn main() -> ExitCode {
         Command::Serve => serve::run(config).await,
         Command::Init => commands::init(&config).await,
         Command::Scrub { cache } => commands::scrub(&config, cache.as_deref()).await,
-        Command::CheckStore => commands::check_store(&config),
+        Command::CheckStore => commands::check_store(&config).await,
         Command::Unimplemented(_) | Command::Help => Ok(()),
     };
     match outcome {
