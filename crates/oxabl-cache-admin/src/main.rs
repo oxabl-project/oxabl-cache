@@ -31,7 +31,7 @@ fn run(cli: Cli) -> Result<(), Failure> {
         ),
         Command::OperatorToken(command) => commands::operator_token::run(&admin, json, command),
         Command::Usage(UsageCommand::Export { month, format }) => {
-            commands::usage::export(&admin, &month, format)
+            commands::usage::export(&admin, &month, format, json)
         }
         Command::Cache(CacheCommand::Scrub { cache }) => {
             commands::cache::scrub(&admin, json, &cache)

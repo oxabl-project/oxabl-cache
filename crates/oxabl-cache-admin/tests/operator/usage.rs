@@ -81,3 +81,49 @@ fn the_export_has_stable_columns_and_a_row_per_tenant_cache_and_metric() {
         );
     }
 }
+
+#[test]
+fn the_global_json_flag_makes_the_export_json_and_conflicts_with_csv() {
+    let server = Server::start("op-usage-json", false);
+    let acme = Tenant::create(&server, "acme");
+    assert_eq!(acme.lookup(&server, 1).status(), 200);
+    std::thread::sleep(Duration::from_millis(300));
+    let month = month_now();
+
+    let flag = run(&server, &["--json", "usage", "export", "--month", &month]);
+    assert_eq!(flag.code(), 0, "{}", flag.stderr());
+    let value = flag.json();
+    assert_eq!(value["month"], month);
+    assert!(value["usage"].as_array().expect("usage").iter().any(|row| {
+        row["tenant"] == acme.id && row["cache"] == acme.cache && row["metric"] == "requests"
+    }));
+
+    let format = run(
+        &server,
+        &["usage", "export", "--month", &month, "--format", "json"],
+    );
+    assert_eq!(value, format.json(), "--json and --format json agree");
+
+    let both = run(
+        &server,
+        &[
+            "--json", "usage", "export", "--month", &month, "--format", "json",
+        ],
+    );
+    assert_eq!(both.code(), 0, "{}", both.stderr());
+    assert_eq!(value, both.json());
+
+    let conflict = run(
+        &server,
+        &[
+            "--json", "usage", "export", "--month", &month, "--format", "csv",
+        ],
+    );
+    assert_eq!(conflict.code(), 2);
+    assert!(conflict.stdout().is_empty(), "{}", conflict.stdout());
+    assert!(
+        conflict.stderr().contains("--format csv"),
+        "{}",
+        conflict.stderr()
+    );
+}
