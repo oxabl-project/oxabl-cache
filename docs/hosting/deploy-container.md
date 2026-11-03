@@ -17,6 +17,8 @@ guides.
 - ports 8443 (public), 9091 (admin), 9090 (metrics).
 
 Tags: `main`, `sha-<commit>`, and on a release tag `vX.Y.Z`, `X.Y` and `latest`. Pin a digest in production.
+The image workflow publishes only while the repository variable `PUBLISH_IMAGE` is `true`;
+otherwise a push to `main` or a tag builds both architectures and pushes nothing.
 Every pushed image is a multi-architecture manifest (amd64 and arm64) and is signed with cosign (keyless):
 
 ```sh
