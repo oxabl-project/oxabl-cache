@@ -180,8 +180,8 @@ fn caches_users_grants_and_tokens_are_managed_with_natural_keys_and_no_secrets_i
 }
 
 #[test]
-fn oidc_answers_not_configured_until_an_identity_verifier_is_wired_in() {
-    let world = World::start("oidc-stub", Options::default());
+fn an_exchange_without_registered_issuers_is_refused() {
+    let world = World::start("oidc-none", Options::default());
     let exchange = request(
         &world.server.public,
         "POST",
@@ -193,17 +193,24 @@ fn oidc_answers_not_configured_until_an_identity_verifier_is_wired_in() {
     );
     assert_eq!(
         (exchange.status, exchange.error_code().as_str()),
-        (501, "not_configured")
+        (401, "unauthenticated")
     );
     let issuers = world.admin.json("GET", "/v1/tenant/oidc/issuers", None);
-    assert_eq!(issuers.status, 501);
+    assert_eq!(issuers.status, 200);
+    assert_eq!(issuers.json()["issuers"], json!([]));
+    let policy = world.admin.json(
+        "POST",
+        "/v1/tenant/oidc/policies",
+        Some(&json!({"name": "p", "issuer": "https://idp.example", "claims": {"sub": "x"}, "grants": []})),
+    );
+    assert_eq!(policy.status, 501, "no claim hash key is configured");
     let denied = world.reader.json("GET", "/v1/tenant/oidc/issuers", None);
     assert_eq!(denied.status, 403);
     let session = world.admin.json("DELETE", "/v1/auth/session", None);
     assert_eq!(session.status, 400, "an API token is not a session");
     let page = world.server.metrics_text();
     assert!(
-        page.contains("oxabl_cache_oidc_exchanges_total{result=\"not_configured\"} 1"),
+        page.contains("oxabl_cache_oidc_exchanges_total{result=\"rejected\"} 1"),
         "{page}"
     );
 }

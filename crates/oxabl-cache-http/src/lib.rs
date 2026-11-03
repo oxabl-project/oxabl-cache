@@ -11,7 +11,6 @@ mod ctx;
 mod envelope;
 mod error;
 mod frames;
-mod identity;
 mod json;
 mod limiter;
 pub mod log;
@@ -21,7 +20,6 @@ mod path;
 mod routes;
 
 pub use app::{App, AppEngine, Backend, TenantDefaults};
-pub use identity::NoIdentity;
 pub use metered::{MeteredMeta, MeteredStore};
 pub use metrics::Metrics;
 pub use routes::{admin_router, metrics_router, public_router};

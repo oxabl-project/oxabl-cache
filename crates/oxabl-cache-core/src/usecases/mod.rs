@@ -21,6 +21,10 @@ mod gc_sweep;
 mod lookup;
 mod node_heartbeat;
 mod object_route;
+mod oidc_exchange;
+mod oidc_issuer;
+mod oidc_policy;
+mod oidc_rules;
 mod operator_tenants;
 mod operator_token;
 mod pack_commit;
@@ -35,6 +39,7 @@ mod segment_death;
 mod session_open;
 mod session_revoke;
 mod signature_check;
+mod tenant_bootstrap;
 mod tenant_create;
 mod tenant_listing;
 mod token_create;
@@ -55,6 +60,9 @@ pub use lookup::{
     DictionaryLocation, LookupHit, LookupRequest, LookupResponse, NamespaceSet, PackLocator,
     SegmentLocation,
 };
+pub use oidc_exchange::Exchanged;
+pub use oidc_issuer::IssuerSpec;
+pub use oidc_policy::PolicySpec;
 pub use operator_token::NewOperatorToken;
 pub use pack_commit::CommitRequest;
 pub use pack_verify::VerifyOutcome;

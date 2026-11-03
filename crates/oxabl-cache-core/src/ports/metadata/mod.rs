@@ -4,6 +4,7 @@ mod accounts;
 mod admin;
 mod entries;
 mod ledger;
+mod oidc;
 mod packs;
 mod roster;
 mod segments;
@@ -12,6 +13,7 @@ pub use accounts::{AccountsTx, User};
 pub use admin::AdminTx;
 pub use entries::{EntriesTx, EvictionScope};
 pub use ledger::LedgerTx;
+pub use oidc::OidcTx;
 pub use packs::{PacksTx, RecordedCommit};
 pub use roster::RosterTx;
 pub use segments::SegmentsTx;
@@ -21,12 +23,12 @@ use std::future::Future;
 
 /// Every operation available inside one metadata transaction.
 pub trait MetaTx:
-    AccountsTx + AdminTx + RosterTx + PacksTx + SegmentsTx + EntriesTx + LedgerTx
+    AccountsTx + AdminTx + OidcTx + RosterTx + PacksTx + SegmentsTx + EntriesTx + LedgerTx
 {
 }
 
 impl<T> MetaTx for T where
-    T: AccountsTx + AdminTx + RosterTx + PacksTx + SegmentsTx + EntriesTx + LedgerTx
+    T: AccountsTx + AdminTx + OidcTx + RosterTx + PacksTx + SegmentsTx + EntriesTx + LedgerTx
 {
 }
 

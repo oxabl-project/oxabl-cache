@@ -8,6 +8,7 @@ use rusqlite::Connection;
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../schema/0001_init.sql")),
     (2, include_str!("../schema/0002_operator_tokens.sql")),
+    (3, include_str!("../schema/0003_oidc.sql")),
 ];
 
 /// Applies every migration newer than the database. A database written by a

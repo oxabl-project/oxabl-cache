@@ -1,5 +1,6 @@
 //! Secrets read from files named in the configuration, never from its text.
 
+use oxabl_cache_core::domain::claim_key::ClaimKey;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -68,4 +69,16 @@ pub(crate) fn create_if_missing(path: &Path) -> Result<bool, String> {
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
         Err(error) => Err(format!("cannot create {}: {error}", path.display())),
     }
+}
+
+/// Reads the claim-hash key: 64 lowercase hex characters.
+pub(crate) fn read_claim_key(path: &Path) -> Result<ClaimKey, String> {
+    let text = fs::read_to_string(path)
+        .map_err(|error| format!("cannot read key file {}: {error}", path.display()))?;
+    decode(text.trim()).map(ClaimKey::new).ok_or_else(|| {
+        format!(
+            "{}: the claim key is 64 lowercase hex characters",
+            path.display()
+        )
+    })
 }

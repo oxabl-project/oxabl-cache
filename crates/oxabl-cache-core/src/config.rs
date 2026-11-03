@@ -1,5 +1,6 @@
 //! Tunables of the use cases; the defaults are the documented ones.
 
+use crate::domain::claim_key::ClaimKey;
 use crate::limits::{LEASE_SECS, URL_LIFETIME_SECS};
 
 /// Behaviour settings of the cache service.
@@ -33,6 +34,8 @@ pub struct Config {
     pub default_retention_days: u32,
     /// Hard quota for new caches, in bytes.
     pub default_hard_bytes: u64,
+    /// Keys the hashes of OIDC policy claims; without it OIDC trust is not configured.
+    pub claim_key: Option<ClaimKey>,
 }
 
 impl Default for Config {
@@ -52,6 +55,7 @@ impl Default for Config {
             gc_batch: 500,
             default_retention_days: 30,
             default_hard_bytes: 20 * 1024 * 1024 * 1024,
+            claim_key: None,
         }
     }
 }

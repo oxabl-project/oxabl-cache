@@ -1964,11 +1964,17 @@ name = "oxabl-cache-e2e"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "aws-lc-rs",
+ "base64 0.22.1",
  "nix",
+ "rcgen",
  "reqwest",
+ "rustls",
  "rusty-s3",
+ "serde_json",
  "tokio",
  "tokio-postgres",
+ "tokio-rustls",
  "url",
 ]
 
@@ -2018,7 +2024,19 @@ dependencies = [
 name = "oxabl-cache-oidc"
 version = "0.0.0"
 dependencies = [
+ "aws-lc-rs",
+ "base64 0.22.1",
+ "getrandom 0.4.3",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "oxabl-cache-core",
+ "rustls",
+ "rustls-native-certs",
+ "serde_json",
+ "tokio",
+ "tokio-rustls",
+ "url",
 ]
 
 [[package]]
@@ -2036,6 +2054,7 @@ dependencies = [
  "oxabl-cache-format",
  "oxabl-cache-http",
  "oxabl-cache-meta-sqlite",
+ "oxabl-cache-oidc",
  "oxabl-cache-store-fs",
  "oxabl-cache-store-s3",
  "rcgen",

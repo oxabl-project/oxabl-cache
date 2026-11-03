@@ -128,6 +128,9 @@ impl From<Error> for ApiError {
                 down.detail = Some(detail);
                 down
             }
+            Error::NotConfigured(what) => {
+                Self::not_implemented(format!("{what} is not configured on this server"))
+            }
             Error::Internal(detail) => {
                 let mut internal = Self::new(
                     StatusCode::INTERNAL_SERVER_ERROR,

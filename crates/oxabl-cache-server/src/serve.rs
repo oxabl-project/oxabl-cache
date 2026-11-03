@@ -20,13 +20,6 @@ async fn bind(name: &str, addr: std::net::SocketAddr) -> Result<TcpListener, Str
 /// Runs the server until SIGTERM or SIGINT, then drains and flushes.
 pub(crate) async fn run(config: Config) -> Result<(), String> {
     log::set_level(config.log_level);
-    for warning in &config.warnings {
-        emit(
-            Level::Warn,
-            "config",
-            vec![("message", Value::from(*warning))],
-        );
-    }
     keys::check_permissions(&config.url_key_file, |message| {
         emit(
             Level::Warn,

@@ -20,6 +20,7 @@ oxabl-cache-core.workspace = true
 oxabl-cache-format.workspace = true
 oxabl-cache-http.workspace = true
 oxabl-cache-meta-sqlite.workspace = true
+oxabl-cache-oidc.workspace = true
 oxabl-cache-store-fs.workspace = true
 oxabl-cache-store-s3.workspace = true
 axum.workspace = true
