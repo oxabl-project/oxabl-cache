@@ -117,6 +117,7 @@ pub(crate) fn apply_commit(tx: &mut dyn MetaTx, input: CommitInput) -> Result<Co
 
     let mut credited: HashSet<SegmentId> = HashSet::new();
     let mut inserted: HashSet<SegmentId> = HashSet::new();
+    let mut fresh: Vec<(usize, Segment, bool)> = Vec::new();
     for (index, spec) in input.segments.iter().enumerate() {
         if !usable(&spec.id) {
             continue;
@@ -137,19 +138,31 @@ pub(crate) fn apply_commit(tx: &mut dyn MetaTx, input: CommitInput) -> Result<Co
             created_at: input.now,
             dead_since: (!candidate).then_some(input.now),
         };
-        if !tx.insert_segment(&segment)? {
+        fresh.push((index, segment, candidate));
+    }
+    let rows: Vec<Segment> = fresh
+        .iter()
+        .map(|(_, segment, _)| segment.clone())
+        .collect();
+    let results = tx.insert_segments(&rows)?;
+    if results.len() != rows.len() {
+        return Err(Error::internal("a segment batch was answered in part"));
+    }
+    for ((index, segment, candidate), new) in fresh.into_iter().zip(results) {
+        if !new {
             for position in naming.get(&index).into_iter().flatten() {
                 statuses[*position] = Some(EntryStatus::Invalid);
             }
             continue;
         }
-        inserted.insert(spec.id);
+        inserted.insert(segment.id);
         if candidate {
-            credited.insert(spec.id);
+            credited.insert(segment.id);
         }
     }
 
     let today = day_of(input.now);
+    let mut contenders: Vec<(usize, Entry)> = Vec::new();
     for (position, entry) in input.entries.iter().enumerate() {
         if statuses[position].is_some() {
             continue;
@@ -159,22 +172,32 @@ pub(crate) fn apply_commit(tx: &mut dyn MetaTx, input: CommitInput) -> Result<Co
             statuses[position] = Some(EntryStatus::Invalid);
             continue;
         }
-        let row = Entry {
-            cache: input.cache,
-            namespace: input.namespace.key(),
-            lookup_id: entry.lookup_id,
-            segment_id: spec.id,
-            dict_id: entry.dict_id,
-            epoch: entry.epoch,
-            record: entry.record.clone(),
-            created_at: input.now,
-        };
-        if tx.insert_entry(&row, today)? {
+        contenders.push((
+            position,
+            Entry {
+                cache: input.cache,
+                namespace: input.namespace.key(),
+                lookup_id: entry.lookup_id,
+                segment_id: spec.id,
+                dict_id: entry.dict_id,
+                epoch: entry.epoch,
+                record: entry.record.clone(),
+                created_at: input.now,
+            },
+        ));
+    }
+    let rows: Vec<Entry> = contenders.iter().map(|(_, row)| row.clone()).collect();
+    let results = tx.insert_entries(&rows, today)?;
+    if results.len() != rows.len() {
+        return Err(Error::internal("an entry batch was answered in part"));
+    }
+    for ((position, row), won) in contenders.into_iter().zip(results) {
+        if won {
             statuses[position] = Some(EntryStatus::Committed);
         } else {
             statuses[position] = Some(EntryStatus::Exists);
-            tx.kill_segment(&input.cache, &spec.id, input.now)?;
-            credited.remove(&spec.id);
+            tx.kill_segment(&input.cache, &row.segment_id, input.now)?;
+            credited.remove(&row.segment_id);
         }
     }
 

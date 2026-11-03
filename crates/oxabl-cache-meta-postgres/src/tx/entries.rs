@@ -6,6 +6,7 @@ use oxabl_cache_core::domain::entry::{Entry, EntryHit, EntryRef};
 use oxabl_cache_core::domain::namespace::NamespaceKey;
 use oxabl_cache_core::ids::{CacheId, LookupId, PackId, SegmentId};
 use oxabl_cache_core::ports::metadata::{EntriesTx, EvictionScope};
+use std::collections::HashSet;
 use tokio_postgres::Row;
 
 const TRUSTED: [u8; 16] = [0; 16];
@@ -70,6 +71,58 @@ impl EntriesTx for PgTx<'_> {
             )?;
         }
         Ok(changed == 1)
+    }
+
+    fn insert_entries(&mut self, entries: &[Entry], access_day: i64) -> Result<Vec<bool>> {
+        if entries.is_empty() {
+            return Ok(Vec::new());
+        }
+        let bytes = |pick: fn(&Entry) -> &[u8]| byte_array(entries.iter().map(pick));
+        let cache = bytes(|e| e.cache.as_bytes().as_slice());
+        let namespace = bytes(|e| e.namespace.as_slice());
+        let lookup = bytes(|e| e.lookup_id.as_bytes().as_slice());
+        let segment = bytes(|e| e.segment_id.as_bytes().as_slice());
+        let dict: Vec<Option<Vec<u8>>> = entries
+            .iter()
+            .map(|e| e.dict_id.map(|id| id.as_bytes().to_vec()))
+            .collect();
+        let epoch: Vec<i64> = entries.iter().map(|e| i64::from(e.epoch)).collect();
+        let record = bytes(|e| e.record.as_slice());
+        let created: Vec<i64> = entries.iter().map(|e| e.created_at).collect();
+        let won: HashSet<([u8; 16], [u8; 32])> = self
+            .query(
+                "WITH wanted AS (
+                   SELECT * FROM unnest($1::bytea[], $2::bytea[], $3::bytea[], $4::bytea[],
+                                        $5::bytea[], $6::bigint[], $7::bytea[], $8::bigint[])
+                        WITH ORDINALITY AS t (cache_id, ns, lookup_id, segment_id, dict_id,
+                                              epoch, record, created_at, position)
+                 ), inserted AS (
+                   INSERT INTO entries
+                     (cache_id, ns, lookup_id, segment_id, dict_id, epoch, record, created_at)
+                   SELECT cache_id, ns, lookup_id, segment_id, dict_id, epoch, record, created_at
+                   FROM wanted ORDER BY position
+                   ON CONFLICT (cache_id, ns, lookup_id) DO NOTHING
+                   RETURNING cache_id, ns, lookup_id
+                 ), touched AS (
+                   INSERT INTO entry_access (cache_id, ns, lookup_id, access_day)
+                   SELECT cache_id, ns, lookup_id, $9 FROM inserted
+                 )
+                 SELECT ns, lookup_id FROM inserted",
+                args![
+                    cache, namespace, lookup, segment, dict, epoch, record, created, access_day
+                ],
+            )?
+            .iter()
+            .map(|row| Ok((row.blob(0)?, row.blob(1)?)))
+            .collect::<Result<_>>()?;
+        let mut seen = HashSet::new();
+        Ok(entries
+            .iter()
+            .map(|entry| {
+                let key = (entry.namespace, *entry.lookup_id.as_bytes());
+                won.contains(&key) && seen.insert(key)
+            })
+            .collect())
     }
 
     fn lookup_entries(

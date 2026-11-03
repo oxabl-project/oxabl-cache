@@ -86,6 +86,43 @@ impl SegmentsTx for PgTx<'_> {
         Ok(changed == 1)
     }
 
+    fn insert_segments(&mut self, segments: &[Segment]) -> Result<Vec<bool>> {
+        if segments.is_empty() {
+            return Ok(Vec::new());
+        }
+        let bytes = |pick: fn(&Segment) -> &[u8]| byte_array(segments.iter().map(pick));
+        let cache = bytes(|s| s.cache.as_bytes().as_slice());
+        let id = bytes(|s| s.id.as_bytes().as_slice());
+        let pack = bytes(|s| s.pack.as_bytes().as_slice());
+        let offset: Vec<i64> = segments.iter().map(|s| int(s.offset)).collect();
+        let length: Vec<i64> = segments.iter().map(|s| i64::from(s.length)).collect();
+        let kind: Vec<i64> = segments.iter().map(|s| kind_code(s.kind)).collect();
+        let created: Vec<i64> = segments.iter().map(|s| s.created_at).collect();
+        let dead: Vec<Option<i64>> = segments.iter().map(|s| s.dead_since).collect();
+        let inserted: HashSet<SegmentId> = self
+            .query(
+                &format!(
+                    "INSERT INTO segments ({SEGMENT_COLUMNS})
+                     SELECT cache_id, segment_id, pack_id, byte_offset, byte_length, kind,
+                            created_at, dead_since
+                     FROM unnest($1::bytea[], $2::bytea[], $3::bytea[], $4::bigint[],
+                                 $5::bigint[], $6::bigint[], $7::bigint[], $8::bigint[])
+                          AS t (cache_id, segment_id, pack_id, byte_offset, byte_length, kind,
+                                created_at, dead_since)
+                     ON CONFLICT (cache_id, segment_id) DO NOTHING
+                     RETURNING segment_id"
+                ),
+                args![cache, id, pack, offset, length, kind, created, dead],
+            )?
+            .iter()
+            .map(|row| Ok(SegmentId::from_bytes(row.blob(0)?)))
+            .collect::<Result<_>>()?;
+        Ok(segments
+            .iter()
+            .map(|segment| inserted.contains(&segment.id))
+            .collect())
+    }
+
     fn kill_segment(
         &mut self,
         cache: &CacheId,
