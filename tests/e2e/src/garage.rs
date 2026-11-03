@@ -99,6 +99,30 @@ impl Garage {
         })
     }
 
+    /// Creates a bucket and a second key that may only read it.
+    pub async fn new_read_only_bucket(&self) -> Result<S3Bucket> {
+        let bucket = self.new_bucket().await?;
+        let key = garage_cli(
+            &self.config,
+            &["key", "create", &format!("e2e-ro-{}", random::hex(4))],
+        )?;
+        let (access_key, secret_key) = (field(&key, "Key ID")?, field(&key, "Secret key")?);
+        let allow = [
+            "bucket",
+            "allow",
+            "--read",
+            &bucket.bucket,
+            "--key",
+            &access_key,
+        ];
+        garage_cli(&self.config, &allow)?;
+        Ok(S3Bucket {
+            access_key,
+            secret_key,
+            ..bucket
+        })
+    }
+
     /// Creates a bucket that only this call's caller knows about.
     pub async fn new_bucket(&self) -> Result<S3Bucket> {
         let name = format!("e2e-{}", random::hex(8));

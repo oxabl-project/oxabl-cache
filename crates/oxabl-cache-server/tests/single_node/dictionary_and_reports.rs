@@ -150,10 +150,8 @@ fn a_reported_corrupt_segment_is_confirmed_by_the_server_and_only_its_entries_ar
         (1, 1),
         "an intact segment is not removed on a client's word"
     );
-    let mut object = std::fs::read(world.object_file(&pack_id)).expect("object");
     let flipped = usize::try_from(pack.segments[1].offset).expect("offset") + 100;
-    object[flipped] ^= 0xff;
-    std::fs::write(world.object_file(&pack_id), object).expect("tamper");
+    world.flip_stored_bit(&pack_id, flipped, 0xff);
     assert_eq!(report(1).status, 202);
     assert_eq!(
         (hits(&world, a), hits(&world, b)),
@@ -176,10 +174,8 @@ fn a_reported_corrupt_segment_is_confirmed_by_the_server_and_only_its_entries_ar
     );
     assert_eq!(malformed.status, 400);
 
-    let mut object = std::fs::read(world.object_file(&pack_id)).expect("object");
     let flipped = usize::try_from(pack.segments[0].offset).expect("offset") + 7;
-    object[flipped] ^= 0xff;
-    std::fs::write(world.object_file(&pack_id), object).expect("tamper");
+    world.flip_stored_bit(&pack_id, flipped, 0xff);
     let scrub = world.server.admin_call(
         "POST",
         &format!("/admin/v1/caches/{}/scrub", world.cache),

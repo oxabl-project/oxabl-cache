@@ -14,21 +14,16 @@ fn an_uncommitted_pack_is_swept_after_its_lease_and_its_reservation_is_released(
     let world = World::start("lease-sweep", Options::default());
     let pack = frames::pack(world.cache_bytes, &[4_000]);
     let slot = world.reserve(&world.ci, "trusted", pack.bytes.len()).json()["packs"][0].clone();
-    assert_eq!(
-        world
-            .put_object(slot["url"].as_str().expect("url"), &pack.bytes)
-            .status,
-        200
-    );
+    assert_eq!(world.put_slot(&slot, &pack.bytes).status, 200);
     let pack_id = slot["pack_id"].as_str().expect("id").to_owned();
-    assert!(world.object_file(&pack_id).exists());
+    assert!(world.object_exists(&pack_id));
     assert_eq!(
         world.info(&world.ci)["quota"]["pending_bytes"],
         pack.bytes.len()
     );
 
     assert!(
-        wait_until(WAIT, || !world.object_file(&pack_id).exists()),
+        wait_until(WAIT, || !world.object_exists(&pack_id)),
         "the object is deleted once the lease has expired"
     );
     assert_eq!(world.info(&world.ci)["quota"]["pending_bytes"], 0);
@@ -96,10 +91,10 @@ fn compaction_moves_live_segments_and_lookups_keep_returning_the_same_bytes() {
         assert_eq!(world.get_object(&url, Some(&range)).body, first.contents[n]);
     }
     assert!(
-        wait_until(WAIT, || !world.object_file(&old_pack).exists()),
+        wait_until(WAIT, || !world.object_exists(&old_pack)),
         "the emptied pack is deleted after the grace"
     );
-    assert!(world.object_file(&pack).exists());
+    assert!(world.object_exists(&pack));
     assert_eq!(
         world.info(&world.reader)["quota"]["live_bytes"],
         5 * 1_100_000
