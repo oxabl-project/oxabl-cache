@@ -3,6 +3,17 @@
 One binary, `oxabl-cache-server`, runs every deployment shape. The operator never holds
 a customer key; everything below works on ciphertext and account data.
 
+Step-by-step guides:
+- [Container and systemd](hosting/deploy-container.md): one VM, or two nodes on
+  Postgres and S3.
+- [Kubernetes](hosting/deploy-kubernetes.md): the Helm chart.
+- [Hosted](hosting/deploy-hosted.md): Cloudflare R2 and Hetzner, with OpenTofu.
+
+The image (`ghcr.io/oxabl-project/oxabl-cache-server`) is built and smoke-tested on
+every pull request. It is pushed, as a multi-arch manifest signed with cosign
+keyless, from `main` and `v*` tags, but only while the repository variable
+`PUBLISH_IMAGE` is `true`. Forks and fresh clones therefore never try to publish.
+
 ## Deployment shapes
 
 | Shape | Metadata | Bytes | Nodes | Use |
@@ -57,6 +68,8 @@ url = "sqlite:///var/lib/oxabl-cache/meta.db"
 # password_file = "/run/secrets/db-password"
 # ca_file = "/etc/oxabl-cache/db-ca.pem"             # private CA; default: web roots
 # max_connections = 16
+# statement_timeout = "120s"                       # positive, at most 1h
+# idle_in_transaction_timeout = "60s"              # positive, at most 1h
 
 [store]
 kind = "fs"                                   # or "s3"
@@ -74,6 +87,7 @@ lease = "1h"
 interval = "10m"
 compaction_live_ratio = 0.5
 orphan_scan = "7d"
+batch = 500                                   # objects or rows per teardown step
 
 [defaults]
 retention_days = 30
@@ -103,8 +117,12 @@ format = "json"
   without `sslmode`, or with `prefer`, still requires it, so the default fails closed.
   The server trusts the web roots, or only `ca_file` when it is set.
 - `max_connections` sizes the server's own pool (default 16).
-- Fixed per connection: statement timeout 120 s, idle-in-transaction timeout 60 s,
-  TCP keepalives 30 s.
+- `statement_timeout` (default 120 s) and `idle_in_transaction_timeout` (default
+  60 s) are durations, positive and at most 1 h, and apply to Postgres only (SQLite
+  refuses them like any other Postgres key). A statement or an idle transaction past
+  its bound ends with 503 for that request, and the server recovers on its own. The
+  idle-in-transaction bound is also how long a frozen former GC leader can delay a
+  takeover (architecture.md, "Fencing"). TCP keepalives are 30 s.
 - The database is opened first, so an unreachable database stops startup before
   anything else. Migrations run at startup in one transaction under an advisory lock
   (architecture.md, "The port and its transactions").
@@ -137,9 +155,18 @@ Subcommands:
   line. On SIGTERM or SIGINT it stops accepting, drains requests for up to
   `server.shutdown_timeout`, stops background jobs, flushes access days and usage,
   and exits 0.
-- The others: `migrate --from a.toml --to b.toml`, `backup --to <file>` (SQLite
-  online backup), `scrub [--cache c_…]`, `check-store` (run the S3 probe and print
-  the capabilities).
+- `backup --to <file>` (SQLite only) copies the metadata while the server keeps
+  serving. It opens the database read-only on a second connection, runs
+  `VACUUM INTO` a staging file created with mode 0600, then `PRAGMA
+  integrity_check`. It then fsyncs and renames the file, and fsyncs the directory.
+  An existing target is refused. On Postgres it refuses, naming base backups and
+  WAL archiving instead.
+- `migrate --from a.toml --to b.toml` moves a single node to Postgres and S3
+  (architecture.md, "Growth"). The metadata copy, verified table by table with a row
+  count and digest, is built. The config-file form and pack copying are in progress;
+  the current build takes database URLs and copies metadata only.
+- `scrub [--cache c_…]` prints one JSON line per cache.
+- `check-store` runs the S3 probe and prints the capabilities.
 
 ## Backup and restore
 
@@ -147,8 +174,10 @@ Subcommands:
   and the entry index. Packs are reproducible: CI rebuilds them, at the cost of a
   cold cache.
 - **Postgres:** base backups plus WAL archiving to a bucket (or the provider's PITR),
-  restore-tested monthly. **SQLite:** `oxabl-cache-server backup` hourly, copied off the
-  host.
+  restore-tested monthly. **SQLite:** `oxabl-cache-server backup --to <file>`
+  hourly, copied off the host. To restore, stop the server, put the copy in place of
+  `meta.db`, and start it. Every pack committed before the backup began is there
+  whole. Later ones are orphans, which the scan removes.
 - **Packs:** provider durability for S3. Local packs are immutable, so filesystem
   snapshots or `rsync` without `--delete` are consistent and incremental.
 - **Restore semantics.** A database older than the bucket leaves orphan packs, which
@@ -163,6 +192,19 @@ Subcommands:
 
 ## Observability
 
+Probes, all on the metrics listener (never on the public one):
+- `GET /livez` answers 200 while the process is up.
+- `GET /readyz` checks the metadata store (live node count) and the object store (a
+  `HEAD` of a random key), in parallel, each within 2 s. It answers 200, or 503
+  `unavailable` naming what failed, with `Retry-After`. The local-disk store's
+  `HEAD` of a missing key succeeds even when the root directory is gone, so
+  `/readyz` cannot see an unmounted volume.
+
+`GET /v1/health` on the public listener is process-only (204, no credential, no
+dependency; protocol.md "Health"). It is for load balancers, not for readiness.
+`GET /admin/v1/health` uses the same probe as `/readyz` and also reports the GC
+leader.
+
 Prometheus metrics on `metrics_listen`:
 
 | Metric | Labels |
@@ -173,13 +215,15 @@ Prometheus metrics on `metrics_listen`:
 | `oxabl_cache_packs`, `oxabl_cache_pack_bytes` | `state` |
 | `oxabl_cache_store_request_seconds`, `oxabl_cache_store_errors_total` | `op` |
 | `oxabl_cache_metadata_query_seconds` | `op` |
+| `oxabl_cache_gc_fenced_total` (GC transactions refused because another node took over) | |
 | `oxabl_cache_gc_leader`, `oxabl_cache_gc_last_run_timestamp`, `oxabl_cache_gc_swept_packs_total`, `oxabl_cache_gc_compacted_bytes_total` | |
 | `oxabl_cache_reports_total` | `outcome` = confirmed, unconfirmed |
 | `oxabl_cache_oidc_exchanges_total` | `result` |
 
 Tenant and cache ids are not metric labels; per-tenant figures live in the usage
-ledger. Suggested alerts: any confirmed report; no GC leader for 30 min; store error
-rate above 1%; pending packs older than twice the lease; p99 lookup above 1 s.
+ledger. Suggested alerts: any confirmed report; no GC leader for 30 min; a rising
+`oxabl_cache_gc_fenced_total` (two nodes both believed they led, so check the
+database connection and the leader's node); store error rate above 1%; pending packs older than twice the lease; p99 lookup above 1 s.
 
 Logs are JSON lines on **stderr** (stdout belongs to the ready line and to `init`'s
 token). Fields: `ts` (unix ms), `level`, `event`, `request_id`, `method`, `route`
@@ -199,6 +243,7 @@ in the region whose admin endpoint created it.
 ```
 oxabl-cache-admin tenant create acme --hard-quota 20GiB --egress 500GiB
 oxabl-cache-admin tenant list | show <t> | suspend <t> | resume <t> | delete <t>
+oxabl-cache-admin operator-token create | list | revoke <id>
 oxabl-cache-admin tenant quota <t> --hard-quota 50GiB --rate 100 --egress none
 oxabl-cache-admin tenant bootstrap-admin <t> --issuer https://idp.example --subject <sub>
 oxabl-cache-admin token create --tenant <t> --scopes tenant:admin --expires 30d
@@ -226,7 +271,13 @@ Settings and conventions:
 - Exit codes: 0 success; 1 the server refused (`code: message` from the envelope);
   2 usage or configuration error; 3 server unreachable (connect, TLS or transport).
 
-Operator token revocation, `migrate` and `backup` have no CLI yet.
+- `tenant delete` tombstones the tenant and all its caches at once (protocol.md).
+  Its credentials stop working, and the GC teardown removes its data after the
+  grace. There is no operator `cache delete`: deleting a cache belongs to the
+  tenant's own API.
+- `operator-token revoke` refuses to revoke the last valid operator token (409
+  `last_operator_token`). Mint a second token first, because `init` never mints
+  again once a token exists.
 
 Customers then manage their own caches, tokens, users, grants and OIDC policies
 through the tenant API (protocol.md) or the `oxabl-cache` CLI.

@@ -129,9 +129,9 @@ Outputs give `public_ipv4` and the next steps.
    policies themselves (protocol.md). A region is its own deployment, so there is no region flag: the helper
    points at this node's admin listener (`OXABL_CACHE_ADMIN_SERVER`) and reads the token from
    `/etc/oxabl-cache/operator-token`.
-7. **Backups.** The metadata is what matters; packs are reproducible. `oxabl-cache-server backup` has no
-   implementation yet, so for the prototype set `server_backups = true` (adds 20% to the server) or snapshot
-   the volume from the Hetzner console before risky changes. Production uses Postgres base backups and WAL
+7. **Backups.** The metadata is what matters; packs are reproducible. On the single-node prototype, run
+   `oxabl-cache-server backup --to <file>` on a timer and copy the file off the server; `server_backups = true`
+   (adds 20% to the server) or a volume snapshot from the Hetzner console before risky changes also work. Production uses Postgres base backups and WAL
    archiving (operations.md, "Backup and restore").
 
 ## A production region

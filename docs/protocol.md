@@ -36,21 +36,21 @@ Every non-2xx response, binary endpoints included, is JSON:
 ```
 
 A 409 also carries `error.reason`, which names the conflict: `pack_closed`,
-`pack_changed`, `pack_incomplete` or `exists`. Clients act on `reason`, never on
+`pack_changed`, `pack_incomplete`, `exists` or `last_operator_token`. Clients act on `reason`, never on
 `message`.
 
 | Status | `code` | Retry |
 | --- | --- | --- |
 | 400 | `bad_request`, `unsupported_version`. Also returned for a missing `If-Match` where one is required (roster and dictionary PUT), and for a binary endpoint called without `content-type: application/vnd.oxabl-cache.v1` | no |
-| 401 | `unauthenticated` (missing, expired or revoked credential) | after re-authenticating |
+| 401 | `unauthenticated` (missing, expired or revoked credential, or a token or session of a deleted tenant) | after re-authenticating |
 | 403 | `forbidden` (scope; also a bad or expired object-URL signature, with one generic message), `tenant_suspended` | no |
-| 404 | `not_found` (also for another tenant's cache) | no |
+| 404 | `not_found` (also for another tenant's cache, and for a deleted cache or tenant) | no |
 | 409 | `conflict` (natural-key clash, or a pack conflict named in `reason`) | no |
 | 412 | `precondition_failed` (`If-Match` on roster or dictionary) | after re-reading |
 | 413 | `too_large` | no |
 | 416 | `bad_request` (a `Range` outside the object, an end past the last byte, or several ranges) | no |
 | 429 | `rate_limited`, with `Retry-After` | yes |
-| 501 | `not_configured`: a feature this deployment has not configured, such as `POST /v1/auth/oidc` with no identity verifier, or an OIDC issuer or policy route | no |
+| 501 | `not_configured`: creating a workload policy on a server without `[keys] claim_hash_key_file` | no |
 | 503 | `unavailable` (metadata or store down), with `Retry-After` | yes |
 | 500 | `internal` | yes, with backoff |
 
@@ -71,6 +71,15 @@ path as a miss.
 | JSON body; roster | 1 MiB; 1 MiB and 1,000 members |
 | Presigned URL lifetime; pending pack lease | 15 min; 1 h |
 | Rate per tenant (default) | 50 requests/s sustained, burst 200, on `/v1` API routes. Object routes are excluded; their signed URLs are the limit. Unauthenticated requests are outside it (no tenant is known yet); a front proxy or the platform limits them. |
+
+## Health
+
+`GET /v1/health` on the public listener answers 204 with no body. It reads no
+credential (any `Authorization` header is ignored), sits outside the tenant rate
+limit, and touches no dependency: it says only that the process serves HTTP. An
+unauthenticated, unlimited route that called the database or the store would be an
+amplifier. Readiness, which does check the database and the store, lives on the
+metrics listener (`/readyz`; operations.md, "Observability").
 
 ## Authentication
 
@@ -148,8 +157,26 @@ verify the signature against their own pinned keys.
 
 ### `GET|PUT /v1/caches/{cache}/dictionary`
 
-The `OXDP` pointer. PUT needs `write:trusted` and `If-Match: "v<current>"`, where
-version 0 means no pointer yet (GET answers 404). The pointer's rules:
+PUT takes the raw `OXDP` pointer. It needs `write:trusted` and
+`If-Match: "v<current>"`, where version 0 means no pointer yet.
+
+GET needs `read` (any read principal) and answers `200 application/json` with
+`ETag: "v<pointer version>"`:
+
+```json
+{"pointer": "<standard base64 of the OXDP bytes>",
+ "location": {"pack_id": "<32 hex>", "url": "<presigned GET URL of the pack>",
+              "expires_at": 1793000900, "offset": 24, "length": 2000}}
+```
+
+`offset` and `length` are the dictionary segment's absolute range in the pack, as in
+`OXLR`'s dictionaries list, and the URL serves a ranged GET like any pack URL. GET
+answers 404 while there is no pointer, or when the pointer's segment is no longer
+live. Clients trust neither field. They verify the pointer (signature by a `ci` or
+`owner` key of the current roster, epoch equal to the roster's epoch), and then the
+segment's BLAKE3 against the pointer's `dict_segment_id`.
+
+The pointer's rules on PUT:
 - its version must be `current + 1`;
 - its epoch must equal the cache's current epoch, which is the current roster's
   epoch (clients check the same);
@@ -191,9 +218,9 @@ Needs `write:trusted` or `write:personal`, matching `namespace`.
 
 When the cache info reports `store.checksum_sha256: true`, `sha256` is **required**
 for every pack, and the server signs it into the PUT URL, so the store refuses
-different bytes. Today the server still accepts a reservation without it and then
-signs no checksum header; the next server change refuses such a reservation with
-400. When the capability is false, `sha256` is ignored. The response, in request
+different bytes. A request in which any pack lacks `sha256` is refused whole, with 400
+`bad_request` ("sha256 is required: the store verifies checksums"), and nothing is
+reserved. When the capability is false, `sha256` is ignored. The response, in request
 order:
 
 ```json
@@ -284,7 +311,8 @@ size.
 
 | Route | Purpose |
 | --- | --- |
-| `GET, POST /v1/tenant/caches`; `DELETE /v1/tenant/caches/{cache}` | Create (display name, retention days, quota, at least one owner public key) or delete a cache. Deletion is asynchronous: entries go at once, bytes after the grace. |
+| `GET, POST /v1/tenant/caches` | List, or create (display name, retention days, quota, at least one owner public key). |
+| `DELETE /v1/tenant/caches/{cache}` | 202 with no body. The cache is tombstoned at once: from then on every data route for it, including object URLs already issued, answers 404, and a second DELETE answers 404. Its bytes and rows are removed by the GC teardown after the grace (architecture.md). The name stays taken until the teardown finishes. Usage ledger rows remain. |
 | `GET, PUT /v1/tenant/caches/{cache}/owner-keys` | The owner public keys the server uses to check roster signatures. |
 | `GET, POST /v1/tenant/tokens`; `DELETE /v1/tenant/tokens/{id}` | The secret is returned once on creation. |
 | `GET, POST /v1/tenant/users`; `DELETE /v1/tenant/users/{id}` | Human principals, keyed by issuer and subject. Deleting a user revokes their sessions. |
@@ -311,13 +339,16 @@ A separate listener (default `127.0.0.1:9091`) with operator tokens:
 
 | Route | Purpose |
 | --- | --- |
-| `GET, POST /admin/v1/tenants`; `PATCH, DELETE /admin/v1/tenants/{t}` | Create, suspend or resume, delete. |
+| `GET, POST /admin/v1/tenants`; `PATCH /admin/v1/tenants/{t}` | List, create, suspend or resume. |
+| `DELETE /admin/v1/tenants/{t}` | 202 with no body. The tenant and all its caches are tombstoned in one transaction. From then on its tokens and sessions get 401, it is neither listed nor patchable, and a second DELETE gets 404. The GC teardown removes its caches' bytes and rows, then its own rows (policies, issuers, tokens, sessions, grants, users), after the grace. The name is freed once the teardown finishes. Usage ledger rows remain. |
+| `GET, POST /admin/v1/operator-tokens` | List operator tokens, without secrets (with `revoked_at`); or create one (`{"name": "…", "expires_in_days": n}`), returning the secret once. |
+| `DELETE /admin/v1/operator-tokens/{id}` | Revoke (204); the token gets 401 on its next call. Revoking the last token that is still valid is refused with 409 `reason: last_operator_token`, because `init` will not mint again once a token exists: mint a second token first. |
 | `PUT /admin/v1/tenants/{t}/quota` | Live-byte quotas (soft and hard), monthly egress, rate. |
 | `POST /admin/v1/tenants/{t}/admins` | `{"issuer": "https://…", "subject": "…"}` makes that OIDC subject the tenant's administrator, with a tenant-wide `tenant:admin` grant. 201 `{"id": …}` when new, 200 with the same id when it already is, 409 if that subject exists with another role. An issuer not yet registered for the tenant is vetted (SSRF guard, operator allowlist; 400 if refused) and registered as `custom` with `sub` as its id claim. Operator tokens only; a tenant token gets 401. |
 | `POST /admin/v1/tenants/{t}/tokens` | Create a `tenant:admin` token for the tenant; the secret is returned once (`oxabl-cache-admin tenant bootstrap-admin` and `token create --tenant`). |
 | `GET /admin/v1/usage?month=2026-10&format=csv` | One row per tenant, cache and metric: `month,tenant,cache,metric,value`. |
 | `POST /admin/v1/caches/{c}/scrub` | Re-verify every pack of a cache now. |
-| `GET /admin/v1/health` | Store, metadata and GC leader status. |
+| `GET /admin/v1/health` | Store, metadata and GC leader status, with the same 2 s probe as `/readyz`. |
 
 ## Byte formats
 

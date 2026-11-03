@@ -56,6 +56,10 @@ impl Config {
     pub fn with_concurrency(self, connections: usize) -> Config;
     pub fn with_zstd_level(self, level: i32) -> Config;
     pub fn with_max_plain_bytes(self, bytes: u64) -> Config;
+    /// Replaces `$XDG_STATE_HOME/oxabl-cache` (per-cache state and stored sessions).
+    pub fn with_state_dir(self, dir: std::path::PathBuf) -> Config;
+    /// Supplies the passphrase of an identity file; `None` from the callback is an error.
+    pub fn with_passphrase(self, ask: impl Fn() -> Option<SecretString> + Send + Sync + 'static) -> Config;
 }
 
 pub enum Mode { Ci, Developer, ReadOnly }
@@ -161,17 +165,57 @@ pub enum StoreOutcome {
 pub enum StoreFailure { Rejected, TooLarge, Unreadable, QuotaExceeded, Unavailable }
 ```
 
+`FetchOptions::new(stage)` gives `Durability::PerFile` and a 30 s idle timeout.
+
 `OpenError` covers:
 
-- an invalid config (`ConfigError`, which includes an attempted override of a trust
-  field);
-- an unreachable server, or failed authentication;
+- an invalid config (`ConfigError`). This includes `TrustOverride` (an attempted
+  override of a trust field), `Invalid` (for example a malformed `owner_keys` entry)
+  and `Environment` (for example an unknown `OXABL_CACHE_MODE`);
+- no usable credential (`NoCredentials`): nothing configured, or a stored session
+  that is missing or expired;
+- an unreachable server, or failed authentication. An ID-token source that is
+  configured but fails (issuer unreachable, wrong audience, exchange refused) is an
+  error; it does not fall through to the stored session;
 - a roster failure: a bad signature, no pinned owner signature, or a rollback below
   the high-water mark or `min_roster_version`;
 - an identity missing from the roster.
 
 oxabl reports it and builds without the cache. A configuration error is shown as an
 error, a transient one as a warning.
+
+`uploader()` fails with `CacheError::NotAWriter` when the mode does not write, or when
+a `ci`-mode identity is not a `ci` member of the roster. A `developer` writes its own
+personal namespace.
+
+### Transport and bounds
+
+- reqwest with rustls, TLS 1.3 minimum. Redirects are never followed. Connect
+  timeout 10 s, read timeout 60 s per chunk, no total timeout (the idle timeout is
+  what ends a stalled fetch).
+- The server URL must be `https`, except `http` on a loopback address.
+- Object URLs never carry the bearer token. A 403 on an object read renews that
+  pack's URL once, through `urls`.
+- A PUT forwards only the headers the server signed (`if-none-match`,
+  `content-md5`, `x-amz-*`).
+
+| Bound | Value |
+| --- | --- |
+| Connections | 32 (configurable 1 to 128) |
+| Sealed bytes in flight for fetch | 256 MiB |
+| Plaintext held for sealing | 256 MiB |
+| Sealed bytes queued or uploading | 256 MiB |
+| CPU workers | available parallelism |
+| Packs in flight | 8 |
+| Sets queued in `put` | 10,000 |
+| Lookups | at most 10,000 ids each, two in flight |
+| Range coalescing | gaps of at most 1 MiB, at most 8 MiB per request |
+| Corruption reports | at most 10 per handle, once per segment id, in the background (the server allows 10 a minute) |
+| Roster refetch | at most once per `fetch` call, shared by all its chunks |
+
+Dictionaries are cached per handle. These bounds are the design. testing.md's
+`RLIMIT_AS` scenarios are what must prove the client's peak memory actually stays
+under them.
 
 ## Fetch
 
@@ -182,9 +226,10 @@ error, a transient one as a warning.
    - the signature transcript, and that the signer is accepted for the namespace
      (see "Modes and trust");
    - the roster version. A record naming a roster version above the client's current
-     roster is `RosterVersionAhead`: a miss for now. The client then refetches the
-     roster once (verified as at open), and retries the lookup of those keys once
-     with the newer roster. A record that is still ahead after that stays a miss;
+     roster is `RosterVersionAhead`, a miss for now. The client then refetches the
+     roster, at most once per `fetch` call (verified as at open), and retries the
+     lookup of those keys once with the newer roster. A record that is still ahead
+     after that is a miss (`Untrusted`);
    - for `personal` records, that the reading member is listed in the current roster;
    - the path rules: no duplicates within the set, and the total path bytes within
      the limit;
@@ -202,7 +247,9 @@ error, a transient one as a warning.
 4. Group segments by pack and coalesce ranges with gaps of 1 MiB or less, splitting
    reads above 8 MiB. Run them with 32 concurrent connections (configurable up to
    128) and at most 256 MiB in flight.
-5. Per segment, on a CPU worker pool:
+5. A range is read as a stream. Each segment goes to a CPU worker as soon as its last
+   byte has arrived, so outcomes appear while the rest of the range is still coming.
+   Per segment, on that worker:
    - check `BLAKE3(bytes)` against the signed segment id. On a mismatch, send
      `reports` in the background and miss;
    - check the header, decrypt the chunks in order, and strip the padding;
@@ -214,7 +261,7 @@ error, a transient one as a warning.
    `urls`.
 
 Outcomes arrive in completion order, not request order. The idle timeout restarts on
-every received byte and every outcome. When it fires, every key still pending yields
+every received byte, every outcome and every durability flush. When it fires, every key still pending yields
 `Miss { reason: Timeout }` and the stream ends. A cold fetch on a slow link therefore
 keeps going as long as bytes flow. Whatever was installed stays installed. Dropping a
 `Fetch` stops the work, removes its temp files, and leaves completed installs alone.
@@ -226,13 +273,28 @@ A final path never holds a partial or unverified file.
 - `stage` is opened as a directory handle. Every component is created and walked
   beneath it with `openat` and `O_NOFOLLOW` (`cap-std`). Symlinks, `..` and absolute
   paths cannot escape it, whatever a record says.
-- Each file is written to `.<name>.oxc-<random>.tmp` in its target directory. Only
-  after **every** file of the set has passed every check is each temp file renamed
-  over its final path.
-- With `Durability::PerFile`, each temp file is fsynced before its rename and each
-  parent directory once after. With `Durability::Caller`, nothing is fsynced; the
-  caller's `syncfs` covers it (architecture.md, "Performance budget").
-- On any failure, temp files are removed and the outcome is a miss. Files already at
+- `Durability::PerFile` (the default): every file is durable before it gets its final
+  name. Durability is batched, in this order:
+  1. Each verified segment is opened into `.<name>.oxc-<random>.tmp` files beside
+     its targets. Nothing has a final name yet.
+  2. The complete, verified set goes to a committer. A batch is flushed at 128 sets,
+     32 MiB or 20 ms after its first set, and always at the end of a lookup chunk.
+  3. Per batch, one `syncfs` on the stage's file system. If `syncfs` or the device
+     lookup fails, every temp file is fsynced instead. A temp file on another device
+     than the stage root is fsynced individually, even when `syncfs` worked.
+  4. Every set's temp files are renamed over their final paths (atomic per file).
+  5. Every touched directory is fsynced, once per batch.
+  6. Only then are the batch's `Installed` outcomes emitted.
+
+  `syncfs` flushes everything dirty on that file system, other processes' writes
+  included, so its cost depends on the machine. Batching keeps it to one call per
+  batch rather than one fsync per file.
+- `Durability::Caller` skips steps 3 and 5 and emits `Installed` straight after the
+  rename. Final names in the stage may then hold bytes that are not yet durable. The
+  caller's one `syncfs` before promotion covers that (architecture.md, "Performance
+  budget"); it is that mode's contract.
+- On any failure, temp files are removed and the outcome is a miss
+  (`Install(kind)` at the durability or rename steps). Files already at
   final paths are untouched.
 - Renames are atomic per file. If the process dies between two renames of one set,
   each final file is either the old or the new verified version. oxabl records a unit
@@ -261,9 +323,12 @@ A final path never holds a partial or unverified file.
    pack. A pack is closed at 16 MiB or 2,000 segments, and a
    segment over 16 MiB gets its own pack. The client uses a published dictionary only
    if its `OXDP` pointer verifies: signed by a `ci` or `owner` key of the current
-   roster, with an epoch equal to the roster's epoch. Otherwise it compresses without
-   a dictionary.
-3. Each closed pack goes through `uploads` (with a `client_ref`), `PUT`, then
+   roster, with an epoch equal to the roster's epoch. The writer finds both through
+   `GET …/dictionary` (protocol.md), which returns the pointer and the dictionary
+   segment's location. It then checks the fetched segment's BLAKE3 against the
+   pointer's `dict_segment_id`. Otherwise it compresses without a dictionary.
+3. Each closed pack goes through `uploads` (with a `client_ref`, kept across retries,
+   and a fresh one after a 409), `PUT`, then
    `commit`, with up to 8 packs in flight. Records are signed with the member's key.
    Uploads therefore overlap compiling.
 4. A failed PUT is retried 3 times with backoff, with the same `client_ref`. After
@@ -274,8 +339,9 @@ A final path never holds a partial or unverified file.
    byte-identical body; it is never re-sealed, re-signed or reordered. The recorded
    `OXCA` that comes back is mapped per key as usual. On a retry, `409 pack_closed`
    or `409 pack_changed` maps every key of the pack to `Failed(Unavailable)` and
-   is logged with the pack id. On a first attempt, either one is a client bug, and is
-   logged and reported the same way.
+   is logged with the pack id and the `reason`. On a first attempt, either one is a
+   client bug, and is logged and reported the same way. A 409 on commit is never
+   retried.
 6. `quota_exceeded` stops further uploads for the session. A `put` after the mode or
    the quota stopped writing is reported as a failure, never an error.
 
@@ -307,6 +373,10 @@ owner_keys = ["ed25519:Jx1…"]
 min_roster_version = 12
 ```
 
+Each `owner_keys` entry has exactly one spelling: `ed25519:` followed by the 32-byte
+key in standard base64 without padding. Padding, the URL-safe alphabet, whitespace,
+a missing prefix, or non-zero trailing bits are `ConfigError::Invalid`.
+
 - `Config::from_repo(root)` reads exactly these five keys. Unknown keys are an
   error, and so is a file that is not a regular file inside `root`.
 - `tenant`, `cache`, `owner_keys` and `min_roster_version` can never be overridden.
@@ -327,10 +397,11 @@ Mode, credentials and identity come from the environment or from the caller's fl
 
 | Variable | Meaning |
 | --- | --- |
-| `OXABL_CACHE_MODE` | `ci`, `developer` or `read-only` |
+| `OXABL_CACHE_MODE` | `ci`, `developer` or `read-only`; any other value is `ConfigError::Environment` |
 | `OXABL_CACHE_TOKEN` | API token. It takes precedence over OIDC and login. |
 | `OXABL_CACHE_IDENTITY` | The member identity string (CI) |
-| `OXABL_CACHE_IDENTITY_FILE` | Path to an identity file; default `~/.config/oxabl-cache/identity`. The file holds the identity string age-encrypted to a passphrase (scrypt); plaintext identity files are not read |
+| `OXABL_CACHE_IDENTITY_FILE` | Path to an identity file; default `$XDG_CONFIG_HOME/oxabl-cache/identity` (or `~/.config/…`). The file holds the identity string age-encrypted to a passphrase (scrypt); plaintext identity files are not read |
+| `OXABL_CACHE_IDENTITY_PASSPHRASE` | The identity file's passphrase, used only when no `with_passphrase` callback is set |
 | `OXABL_CACHE_SERVER` | Server URL override |
 | `OXABL_CACHE_ID_TOKEN` | A GitLab CI ID token from the job's `id_tokens` |
 
@@ -344,6 +415,17 @@ Mode, credentials and identity come from the environment or from the caller's fl
    with `aud: oxabl-cache:<tenant>`.
 4. The stored `oxabl-cache login` session.
 
+`IdentitySource::Auto` tries `OXABL_CACHE_IDENTITY`, then the file named by
+`OXABL_CACHE_IDENTITY_FILE`, then the default identity file. The passphrase comes
+from the `with_passphrase` callback, or else from `OXABL_CACHE_IDENTITY_PASSPHRASE`.
+Unlocking (scrypt) runs on a blocking thread.
+
+The stored login session is `$XDG_STATE_HOME/oxabl-cache/session/<tenant id>`
+(default state directory `~/.local/state`). It is a JSON file
+`{"token": "oxs_…", "expires_at": <unix seconds>}`, a regular file of at most 16 KiB,
+and must have mode 0600: any group or other permission bit is an error, not ignored.
+`oxabl-cache login` writes it.
+
 Before sending any ID token, the client decodes its payload and refuses to send it
 (`OpenError`) unless `aud` is exactly `oxabl-cache:<tenant>`. A token minted for
 another audience therefore never reaches the server. Gitea Actions uses a scoped
@@ -351,7 +433,9 @@ token (`OXABL_CACHE_TOKEN`). OIDC works with any issuer that publishes discovery
 JWKS documents, once the tenant registers it.
 
 Local state (`$XDG_STATE_HOME/oxabl-cache/<cache>/`) holds the roster high-water
-mark and the last verified roster. The root key lives only in memory and is zeroed on
+mark (`roster-high-water`, raised under `flock`) and the last verified roster. An
+unreadable or malformed high-water file is an error, never treated as zero. A failed
+state write is only logged. The root key lives only in memory and is zeroed on
 drop.
 
 ## Command line (`oxabl-cache`)

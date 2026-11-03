@@ -228,7 +228,14 @@ subset. The black-box suite runs in full against both.
 - `transact_in(scope, f)` runs `f` as one write transaction in a `TxScope`.
 - `transact(f)` is `transact_in(TxScope::Global, f)`.
 
-The closure is synchronous, and the object store is never called inside it. Every
+The closure is synchronous, and the object store is never called inside it. Its
+transaction handle, `MetaTx`, is the sum of narrow port traits, one per
+responsibility:
+- `PacksTx`, `PackSelectionTx`, `PackAccountingTx` and `ScrubQueueTx`;
+- `TenantsTx`, `CachesTx`, `UsersTx`, `GrantsTx` and `CredentialsTx`;
+- `OperatorTokensTx`, `OidcTx`, `AdminTx`, `FenceTx` and `TeardownTx`.
+
+Both adapters mirror that split file by file. Every
 use case picks the narrowest scope that covers what it writes:
 
 | Scope | Use cases |
@@ -289,7 +296,20 @@ the binary is refused.
 Growth from one node to many is `oxabl-cache-server migrate --from a.toml --to b.toml`.
 It runs offline and copies metadata (SQLite to Postgres) and packs (disk to S3),
 re-hashing every segment against its id from the pack footer and comparing row counts
-per table. It refuses to finish on any difference. The schema uses no SQLite-only
+per table. It refuses to finish on any difference.
+
+The metadata half is built:
+- It refuses a source whose schema version differs from the release's, a source
+  table the release does not know, and a target with any row in a migrated table.
+- It copies in 1,000-row batches in one SERIALIZABLE Postgres transaction, under the
+  migration lock.
+- It then re-reads every table from Postgres and compares the row count and an
+  order-independent BLAKE3 digest with the source. It commits only if every table
+  matches, and prints one JSON line per table.
+- The source is opened read-only.
+
+**Not built yet:** the documented config-file form (`--from a.toml --to b.toml`; the
+current build takes URLs), and pack copying with its hash check. Both are in progress. The schema uses no SQLite-only
 types (ids are bytes or text, times are integer seconds), so nothing is converted.
 During the window, builds see misses, never errors. The path has its own black-box
 test. ADR: [0003](adr/0003-metadata-sqlite-and-postgres.md).
@@ -305,7 +325,8 @@ and `token_grants`, `sessions` and `session_grants`, `oidc_issuers` and
 `dictionary_pointers`, `packs`, `segments`, `entries`, `entry_access`,
 `usage_ledger`, `ledger_nodes`, `ledger_days`, `nodes`, `scrub_queue`,
 `operator_tokens` (operator credentials for the admin listener, stored as SHA-256
-hashes with expiry and revocation). The schema
+hashes with expiry and revocation), and `gc_leader` (the fencing epoch).
+`tenants` and `caches` carry `deleted_at`, the tombstone. The schema
 enforces the invariants as well as the code:
 - `UNIQUE (cache_id, segment_id)` on entries (invariant 4);
 - foreign keys from entries to segments (their own segment and the dictionary),
@@ -449,14 +470,27 @@ included. The GC loop checks leadership before every tick and runs jobs only whi
 it leads; `oxabl_cache_gc_leader` reports it. A node that cannot reach the database is
 never the leader. With SQLite, the single process is always the leader.
 
-**Fencing is not strict yet.** A partitioned leader keeps collecting until its next
-poll fails, and its database session may outlive the partition by the keepalive
-time (30 s). GC transactions are scoped and re-validate under their locks:
-compaction relocates only live segments still in the source pack, and the sweep
-re-reads before deleting. So two leaders race harmlessly in every case the code
-handles, but no test proves it. **The next server change adds a leader epoch,**
-raised on each acquisition and checked inside every GC transaction. A transaction
-from a deposed leader then aborts instead of relying on re-validation.
+**Fencing.** A deposed leader may still have a GC pass in flight, for example one
+that started before a network partition, whose database session outlives the
+partition. Every GC write transaction is therefore fenced:
+- The table `gc_leader (id = 1, epoch)` holds the current leader's epoch. A node
+  that takes the advisory lock raises it (`UPDATE … RETURNING`) and remembers the
+  value.
+- Every GC write transaction first requires its epoch. That covers retention,
+  eviction, mark, the three writes of compaction, the two of the sweep, queued and
+  weekly scrubs, ledger close and snapshot, and teardown. On Postgres the check is
+  `SELECT epoch … FOR SHARE` under the transaction's scope locks.
+- So a takeover's `UPDATE` waits for older transactions already in flight, and every
+  later one sees the new epoch and fails with `Fenced`.
+- On `Fenced`, the node drops leadership at once, abandons the rest of the tick, and
+  counts `oxabl_cache_gc_fenced_total`.
+- With SQLite, the single process takes the epoch at start-up in the same way.
+
+The cost of strictness: a frozen former leader's open transaction can delay a
+takeover until the database's idle-in-transaction timeout ends it (60 s by
+default). The orphan scan checks the epoch before each object delete, which is not
+atomic with the delete. The admin or CLI `scrub` is not a leader job and is not
+fenced.
 
 - **Retention.** An entry whose `access_day` is older than the cache's retention
   (default 30 days) is deleted. Lookup hits set `entry_access.access_day` at most
@@ -508,6 +542,27 @@ from a deposed leader then aborts instead of relying on re-validation.
   being committed against it. The grace (24 h) is far longer than a URL's
   lifetime (15 min), so a reader that resolved a location just before compaction or
   eviction still finds the bytes where its URL points.
+- **Teardown** (after the sweep, each pass). A deleted cache or tenant is first a
+  tombstone: `deleted_at` is set on `caches` or `tenants`, and deleting a tenant
+  tombstones all its caches in the same transaction. From the tombstone, the cache is
+  invisible to every data route and to compaction and usage snapshots. A deleted
+  tenant's tokens and sessions stop working, and names stay taken. Once a
+  tombstone is older than `gc.grace`, each pass:
+  1. lists the cache's prefix and deletes one batch of objects (`gc.batch`, default
+     500);
+  2. when no object is left, deletes one batch of rows in foreign-key order
+     (`entry_access`, entries, the dictionary pointer, segments, packs, the scrub
+     queue, roster rows, owner keys, and the cache's grants and credential and
+     policy grants), and finally the cache row;
+  3. for a tombstoned tenant without caches, deletes its policies, issuers, tokens,
+     sessions, grants, users and its own row.
+
+  Usage ledger rows stay. Every step is fenced and resumable, because the only state
+  is "tombstone plus whatever rows remain". The grace must stay longer than
+  `server.url_lifetime` (24 h against 15 min by default). Otherwise an S3 PUT URL
+  issued before the tombstone could create an object after the teardown, which the
+  orphan scan can no longer see, because that cache no longer exists. The config does
+  not enforce this yet.
 - **Orphans.** Weekly, the sweeper lists the cache prefix and deletes objects that
   have no pack row and are older than twice the lease. This covers a lost database
   and a crash between deleting an object and deleting its row.
@@ -557,7 +612,7 @@ from a deposed leader then aborts instead of relying on re-validation.
 | Bit rot at rest | The client detects it and reports it; the server confirms and removes the entries. Compaction re-verifies everything it copies. A local-disk scrub re-hashes every pack weekly. |
 | Wrong artifact | The signed record binds the compile key (through the lookup id), epoch, namespace kind, segment id and sizes. The segment id binds every byte. Any mismatch is a miss. |
 | A writer claims another namespace's segment | Segment ids are unique per cache; such a commit is `invalid` (invariant 3). |
-| A live pack rewritten after commit | PUT URLs exist only before the commit; `If-None-Match` where supported; the ETag is recorded at commit and checked by repeats, scrub and compaction. |
+| A live pack rewritten after commit | PUT URLs exist only before the commit. `If-None-Match` is used where supported. Where the store verifies checksums, the PUT URL carries the pack's SHA-256, so a replayed URL with different bytes is refused (on Garage, for example, which has no `If-None-Match`). The ETag is recorded at commit and checked by repeats, scrub and compaction. |
 | Lost or rolled-back database | The orphan sweep reclaims bytes. Entries naming missing packs produce misses and reports, which delete them. Never a wrong hit. |
 
 ## Scaling

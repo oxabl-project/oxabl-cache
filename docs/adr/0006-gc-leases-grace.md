@@ -19,6 +19,13 @@ Status: accepted
 - Packs under 50% live are compacted by copying verified segments to a new pack and
   moving locations in one transaction. Records never change.
 - A weekly orphan scan removes objects without rows.
+- Deleting a cache or tenant tombstones it at once. After the grace, the teardown
+  removes its objects and then its rows, in batches (`gc.batch`), resumably.
+- One node runs GC: on Postgres, the holder of a session-level advisory lock. Taking
+  the lock raises `gc_leader.epoch`. Every GC write transaction first checks that
+  epoch (`FOR SHARE` on Postgres), so a takeover waits for older in-flight GC
+  transactions, and later transactions of a deposed leader fail as `Fenced` instead
+  of acting.
 - Quota eviction and admission use live bytes (segments that entries still name),
   so deleting entries always reaches the eviction target. Stored bytes (pending, live
   and in grace) are billed and capped at 3x the hard quota as an abuse guard.
@@ -31,4 +38,6 @@ Status: accepted
 
 ## Consequences
 
-Storage lags deletions by the grace period. GC runs on one elected node.
+Storage lags deletions by the grace period. GC runs on one elected, fenced node. A
+frozen former leader's open transaction can delay a takeover until the database's
+idle-in-transaction timeout ends it.

@@ -56,8 +56,10 @@ docker run -d --name oxabl-cache --restart unless-stopped \
 - The named volume takes its ownership from the image. For a bind mount, `chown 65532:65532` the directory.
 - The server refuses a secret written inline in the config and refuses a non-loopback bind without TLS or
   `terminated_upstream`; both are checked by `deploy/container/smoke.sh`.
-- There is no `HEALTHCHECK`: the image has no shell or `curl`. Check with the metrics port
-  (`curl -f http://127.0.0.1:9090/metrics`) or the admin route
+- There is no `HEALTHCHECK`: the image has no shell or `curl`. Check from the host
+  with the readiness probe on the metrics port
+  (`curl -f http://127.0.0.1:9090/readyz`: database and store), `/livez` (process
+  up), or the admin route
   (`curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9091/admin/v1/health`).
 - Stop with `docker stop`: SIGTERM drains requests for up to `server.shutdown_timeout`, flushes usage and exits 0.
 
@@ -149,9 +151,10 @@ one node holds the garbage-collection lease.
 ## Backups and upgrades
 
 - **What matters** is the metadata (SQLite file). Packs are reproducible, and CI rebuilds them at the cost of a
-  cold cache. `oxabl-cache-server backup` has no implementation yet, so
-  until it is, snapshot the volume while the server is stopped, or use filesystem snapshots (WAL mode makes a
-  crash-consistent snapshot recoverable).
+  cold cache. `oxabl-cache-server backup --to <file>` copies the SQLite metadata
+  while the server runs (operations.md, "Backup and restore"); run it on a timer and
+  copy the file off the host. Volume or filesystem snapshots also work (WAL mode makes
+  a crash-consistent snapshot recoverable).
 - **Packs on local disk** are immutable: `rsync` without `--delete` or a filesystem snapshot is consistent.
 - **Upgrades** replace the image tag (or the binary) and restart. Migrations are additive and run at startup.
 - **Verify a node** with `oxabl-cache-server scrub` (re-verifies stored packs) and, on an S3 store,

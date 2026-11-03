@@ -104,9 +104,12 @@ oxabl-cache-admin --server http://127.0.0.1:9091 --token-file token tenant creat
 | `NetworkPolicy` | Optional (`networkPolicy.enabled`). The public port accepts `publicFrom` (any source when empty); the admin and metrics ports accept only the sources you list. |
 | `PersistentVolumeClaim` | Single-node only; annotated `helm.sh/resource-policy: keep`, so `helm uninstall` leaves the data. |
 
-Probes use the metrics listener (`GET /metrics` on port 9090). The server opens its database first and binds the
-listeners only afterwards, so a pod that answers is one that reached its database. Probes do not use the public listener (it has no unauthenticated route) or the admin health route (it needs the
-operator token).
+Probes use the metrics listener. The chart currently probes `GET /metrics` on port 9090. The server opens its
+database before it binds the listeners, so a pod that answers is one that reached its database at start. The
+dedicated probes, `GET /livez` (process up) and `GET /readyz` (database and store reachable, 2 s bound; operations.md,
+"Observability"), live on the same port and are the better targets: `readyz` also notices a database that goes away
+later. Probes never use the public listener (its `/v1/health` is process-only, for load balancers) or the admin
+health route (it needs the operator token).
 
 ## Operating it
 

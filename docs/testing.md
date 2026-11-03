@@ -53,6 +53,17 @@ and the storage attacks below use it, so it also checks the spec.
   - The Postgres cluster is killed mid-commit and restarted. The commit gets 503,
     no partial rows remain, and the retry commits everything without a server
     restart.
+  - **GC fencing.** Leader A runs behind the fault proxy with slowed replies and is
+    caught inside a GC pass, then `SIGSTOP`ped. Its lock session is terminated, and
+    rival B takes over. B is configured never to delete anything in the test window.
+    After A is resumed, A's `oxabl_cache_gc_fenced_total` rises, A no longer leads,
+    and the expired pack A would have swept is still in `packs` and in the bucket.
+  - **Readiness.** `/readyz` answers 503 while Postgres is stopped and 200 after it
+    restarts, while `/livez` and `/v1/health` stay up.
+  - **Postgres timeouts.** With `statement_timeout = "1s"`, a request blocked on a
+    table lock answers 503 well before the lock is released. With
+    `idle_in_transaction_timeout = "1s"` and a delayed reply, the session is ended and
+    the request answers 503. The server recovers in both cases.
 - **S3: Garage** (nixpkgs `garage`, 1.3.1) is the primary store, run as a child
   process from the repo's devshell (`nix develop`). There is one single-node
   instance per test binary, with each test on its own bucket and random ports.
@@ -80,9 +91,11 @@ and the storage attacks below use it, so it also checks the spec.
 - **Fault proxy.** A small TCP proxy that the harness puts in front of Postgres or
   the store can delay, cut or drop a chosen reply. It fakes the network, never the
   program under test.
-- **Fake clock.** Day-boundary tests run the server under `libfaketime` with an
-  accelerated clock. This fakes the environment's time; the server has no clock
-  hook.
+- **Fake clock.** Day-boundary tests run the server under `libfaketime` (from the
+  devshell) with an accelerated clock. Rate-limit tests run it under a **frozen**
+  clock set to the present instant, so the token bucket cannot refill during the
+  test and S3 signatures stay inside the store's skew window. This fakes the
+  environment's time; the server has no clock hook.
 - **No Docker.** Every dependency is a child process in its own process group, with
   `PR_SET_PDEATHSIG`, killed on drop. The harness never lists, stops or creates
   containers, so it cannot touch anyone else's.
@@ -144,7 +157,12 @@ Each test names the behaviour it protects.
 | Tenancy | Tenant B's token on tenant A's cache gets 404. |
 | Usage | `usage export` equals the counts the test drove (bytes, ids, hits, commits). |
 | Ledger across roll-up | Two server nodes share one Postgres through the fault proxy, under an accelerated fake clock. The proxy drops the reply to one of node A's flush commits just before midnight, so node A retries after the 01:00 roll-up. Node B is `SIGSTOP`ped across the roll-up with counters in memory, then resumed. The monthly export equals the driven counts minus exactly node B's late counters (also reported by `oxabl_cache_ledger_late_dropped_total`), and nothing is counted twice. A third node restarts mid-test: its new process draws a new `node_id`, and its first flush after the restart is counted, not ignored. The fault proxy fails one of node A's flushes outright. Node A sends nothing newer until that flush succeeds, and `oxabl_cache_ledger_ignored_flushes_total` counts only replies that were dropped after the write. |
-| Migration | `fs + sqlite` is migrated to `s3 + postgres`; every entry still installs. A migration with one corrupted pack refuses to finish. |
+| Migration | A populated SQLite database (two tenants, three caches, tokens, usage ledger) is migrated to Postgres. The printed per-table counts and digests match the source, and the source file is unchanged. A second run is refused as "not empty" and leaves the target as it was. The server switched to Postgres serves every lookup (old tokens, the operator token, quotas, object bytes) and takes new writes. A source with an unknown table, a missing file, or a wrong target is refused before the target is touched. **Not covered yet:** the config-file form, pack copying from disk to S3, and refusing to finish on a corrupted pack. |
+| Backup | A writer commits packs continuously while `backup` runs. The copy is restored over `meta.db` and the server restarted. Every pack committed before the backup began is fully present and none is half present, the counters equal the restored packs, scrub finds nothing, and new writes work. The copy has mode 0600, no staging file is left, and a second backup to the same path is refused. |
+| Deletion and teardown | Deleting a cache gives 404 at once on lookup, info, reservation, a repeated delete, and an old object URL, while its bytes and rows are still present. After the grace, its objects and rows are gone and its name is free, while a sibling cache and another tenant are unchanged and the usage ledger keeps its rows. Deleting a tenant gives 401 for its tokens at once, and empties every table for it after the grace. A server `SIGKILL`ed twice during a teardown with `gc.batch = 2` completes it after restarting. Runs on every backend. |
+| Health | `/livez` and `/readyz` answer on the metrics listener only. `/v1/health` answers 204 with no body, with or without garbage credentials, and stays 204 after the tenant's burst is exhausted. |
+| Operator tokens | A second token is minted, the first is revoked with it, and the first is refused at once (CLI and raw HTTP). The list shows `revoked_at`. Revoking the last valid token gets 409 `last_operator_token`. A tenant token is not an operator token. Runs on SQLite and Postgres. |
+| Client durability | 300 keys fetched with `Durability::PerFile` under throttling: every `Installed` file exists complete and byte-identical when its outcome arrives. A driver `fetch` `SIGKILL`ed at a random point (4 rounds, fresh stage each) leaves only temp names, or files byte-identical to what was stored. That `syncfs` ran before the renames is not observable black-box; neither is a power cut. |
 | Restore | A database snapshot older, then newer, than the bucket gives only misses, and reports clear the stale entries. |
 
 ## Adversarial tests
@@ -186,9 +204,10 @@ producer stored, the outcome is a miss, and no temp file remains.
   for other developers.
 - **PUT after commit.** After a pack's first commit, a `client_ref` retry returns
   `committed` with no URL. A replay of the original PUT URL is refused where the store
-  supports `If-None-Match`, and refused by the local route. Where the store lacks it,
-  the overwrite is caught: the next commit retry gets `pack_changed`, and scrub and
-  compaction report the ETag change.
+  supports `If-None-Match`, by the store's checksum where the URL carries the pack's
+  SHA-256 (Garage), and by the local route. Where a store has neither, the overwrite
+  is caught instead: the next commit retry gets `pack_changed`, and scrub and
+  compaction report the ETag change (covered by the tamper scenarios).
 - **Commit retries.** The fault proxy drops the reply to a commit, and the client
   retries. The retry returns byte-identical `OXCA` statuses in each of three states:
   - after the commit's entries were purged and their segments died;
