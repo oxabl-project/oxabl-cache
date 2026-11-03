@@ -1,0 +1,26 @@
+# Single-node container: SQLite and the object store on the /var/lib/oxabl-cache volume.
+# TLS terminates in a proxy in front of the container (see docs/hosting/deploy-container.md).
+
+[server]
+listen = "0.0.0.0:8443"
+admin_listen = "0.0.0.0:9091"
+metrics_listen = "0.0.0.0:9090"
+public_url = "https://cache.example.com"
+
+[tls]
+terminated_upstream = true
+
+[metadata]
+url = "sqlite:///var/lib/oxabl-cache/meta.db"
+
+[store]
+kind = "fs"
+root = "/var/lib/oxabl-cache/objects"
+
+[keys]
+url_key_file = "/var/lib/oxabl-cache/keys/url-key"
+claim_hash_key_file = "/var/lib/oxabl-cache/keys/claim-key"
+
+[log]
+level = "info"
+format = "json"

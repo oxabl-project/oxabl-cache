@@ -1,0 +1,33 @@
+# Static musl build of the server and admin binaries on a distroless base.
+# Build from the repository root:
+#   docker build -f deploy/container/Containerfile -t oxabl-cache-server .
+
+ARG RUST_IMAGE=docker.io/library/rust:1.99-alpine@sha256:7e9e2d068a107a2adafd19930011178d14a78326053cd4c3a9f7ad3fd049557d
+ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329
+
+FROM ${RUST_IMAGE} AS build
+RUN apk add --no-cache build-base cmake perl
+WORKDIR /src
+COPY . .
+ENV CARGO_PROFILE_RELEASE_STRIP=symbols \
+    CARGO_PROFILE_RELEASE_LTO=thin \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+    CARGO_INCREMENTAL=0 \
+    RUSTFLAGS="-C target-feature=+crt-static --remap-path-prefix=/src=/build --remap-path-prefix=/usr/local/cargo=/cargo"
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    triple="$(rustc -vV | sed -n 's/^host: //p')" \
+    && cargo build --release --locked --target "$triple" -p oxabl-cache-server -p oxabl-cache-admin \
+    && install -D -m 0555 -t /out/usr/local/bin \
+        "target/$triple/release/oxabl-cache-server" "target/$triple/release/oxabl-cache-admin" \
+    && install -d -m 0750 /out/var/lib/oxabl-cache /out/etc/oxabl-cache
+
+FROM ${RUNTIME_IMAGE}
+COPY --from=build /out/usr/local/bin/ /usr/local/bin/
+COPY --from=build --chown=65532:65532 /out/var/lib/oxabl-cache /var/lib/oxabl-cache
+COPY --from=build /out/etc/oxabl-cache /etc/oxabl-cache
+VOLUME /var/lib/oxabl-cache
+USER 65532:65532
+EXPOSE 8443 9090 9091
+ENTRYPOINT ["/usr/local/bin/oxabl-cache-server"]
+CMD ["serve"]
