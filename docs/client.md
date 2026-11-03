@@ -440,7 +440,9 @@ drop.
 
 ## Command line (`oxabl-cache`)
 
-The `oxabl-cache` binary (crate `oxabl-cache-cli`) is built on the same public API:
+The `oxabl-cache` binary (crate `oxabl-cache-cli`) is built on the same public API. It is
+not implemented yet: every invocation, `--help` included, prints one line saying so and
+exits 1. The commands below are the design:
 
 | Command | Purpose |
 | --- | --- |
