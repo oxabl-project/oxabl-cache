@@ -1,6 +1,9 @@
-//! `migrate`: copy the metadata of a SQLite database into an empty Postgres one.
+//! `migrate`: move a SQLite deployment onto Postgres, packs included.
 
 use crate::cli::Migration;
+use crate::config::{Config, Metadata};
+use crate::migrate_packs::{self, Moved};
+use crate::{meta, store};
 use oxabl_cache_core::ports::migration::{MIGRATED_TABLES, TableDigest, UNMIGRATED_TABLES};
 use oxabl_cache_meta_postgres::{PostgresImport, PostgresOptions};
 use oxabl_cache_meta_sqlite::SqliteExport;
@@ -10,34 +13,43 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 const BATCH_ROWS: usize = 1_000;
+const PLACEHOLDER_URL: &str = "http://localhost";
 
 /// The copy holds one transaction open while it reads a whole source database.
 const LONG_RUNNING: Duration = Duration::from_secs(3600);
 
-fn options(migration: &Migration) -> Result<PostgresOptions, String> {
-    let url = migration.to.as_str();
-    if !(url.starts_with("postgres://") || url.starts_with("postgresql://")) {
-        return Err(format!("--to `{url}` is not a postgres:// URL"));
-    }
-    let mut options = PostgresOptions::new(url);
-    options.ca_file.clone_from(&migration.ca_file);
-    options.statement_timeout = LONG_RUNNING;
-    options.idle_in_transaction_timeout = LONG_RUNNING;
-    if let Some(path) = &migration.password_file {
-        let text = std::fs::read_to_string(path)
-            .map_err(|error| format!("cannot read password file {}: {error}", path.display()))?;
-        options.password = Some(text.trim_end_matches(['\n', '\r']).to_owned());
-    }
-    Ok(options)
+/// Source and target configurations, checked for what `migrate` moves between.
+struct Deployments {
+    source: Config,
+    sqlite: PathBuf,
+    target: Config,
+    options: PostgresOptions,
 }
 
-fn source(migration: &Migration) -> Result<PathBuf, String> {
-    migration
-        .from
-        .strip_prefix("sqlite://")
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
-        .ok_or_else(|| format!("--from `{}` is not a sqlite://<path> URL", migration.from))
+fn load(migration: &Migration) -> Result<Deployments, String> {
+    let source = Config::load_file(&migration.from)?;
+    let target = Config::load_file(&migration.to)?;
+    let Metadata::Sqlite(sqlite) = &source.metadata else {
+        return Err(format!(
+            "--from {} does not use SQLite metadata",
+            migration.from.display()
+        ));
+    };
+    let sqlite = sqlite.clone();
+    let Some(mut options) = meta::postgres_options(&target.metadata)? else {
+        return Err(format!(
+            "--to {} does not use Postgres metadata",
+            migration.to.display()
+        ));
+    };
+    options.statement_timeout = LONG_RUNNING;
+    options.idle_in_transaction_timeout = LONG_RUNNING;
+    Ok(Deployments {
+        source,
+        sqlite,
+        target,
+        options,
+    })
 }
 
 fn lock(export: &Mutex<SqliteExport>) -> MutexGuard<'_, SqliteExport> {
@@ -63,20 +75,40 @@ fn check_tables(tables: &[String]) -> Result<(), String> {
     }
 }
 
-/// Copies every table in one Postgres transaction, then checks the row counts and a
-/// content digest of every table against the source before committing. The source is
-/// opened read-only.
+/// Verifies every committed pack in the source store and writes it to the target store, then
+/// copies every table in one Postgres transaction. Each table's row count and content digest
+/// are checked against the source before the commit, and the commit is the last step: a pack
+/// that fails verification leaves the target without a metadata row. The source is opened
+/// read-only.
 pub(crate) async fn run(migration: &Migration) -> Result<(), String> {
-    let path = source(migration)?;
-    let options = options(migration)?;
+    let Deployments {
+        source,
+        sqlite,
+        target,
+        options,
+    } = load(migration)?;
     if oxabl_cache_meta_sqlite::SCHEMA_VERSION != oxabl_cache_meta_postgres::SCHEMA_VERSION {
         return Err("the two adapters write different schema versions".to_owned());
     }
     let export = Arc::new(Mutex::new(
-        SqliteExport::open(&path).map_err(|error| error.to_string())?,
+        SqliteExport::open(&sqlite).map_err(|error| error.to_string())?,
     ));
     let tables = lock(&export).tables().map_err(|error| error.to_string())?;
     check_tables(&tables)?;
+    PostgresImport::begin(&options)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let packs = migrate_packs::live_packs(&lock(&export))?;
+    let source_store = store::open_for_reading(&source)?;
+    let in_place = store::same_store(&source.store, &target.store);
+    let target_store = if in_place {
+        None
+    } else {
+        Some(store::open(&target, PLACEHOLDER_URL).await?.0)
+    };
+    let moved = migrate_packs::move_packs(&packs, &source_store, target_store.as_ref()).await?;
+
     let import = PostgresImport::begin(&options)
         .await
         .map_err(|error| error.to_string())?;
@@ -134,5 +166,10 @@ pub(crate) async fn run(migration: &Migration) -> Result<(), String> {
             json!({"table": table, "rows": digest.rows, "digest": digest.hex()})
         );
     }
+    let Moved { packs, bytes } = moved;
+    println!(
+        "{}",
+        json!({"packs": packs, "bytes": bytes, "copied": !in_place})
+    );
     Ok(())
 }

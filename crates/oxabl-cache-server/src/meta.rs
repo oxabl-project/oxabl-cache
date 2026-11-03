@@ -37,7 +37,7 @@ impl MetadataStore for AnyMeta {
     }
 }
 
-fn postgres_options(metadata: &Metadata) -> Result<Option<PostgresOptions>, String> {
+pub(crate) fn postgres_options(metadata: &Metadata) -> Result<Option<PostgresOptions>, String> {
     let Metadata::Postgres {
         url,
         password_file,

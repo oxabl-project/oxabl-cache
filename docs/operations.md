@@ -162,9 +162,14 @@ Subcommands:
   An existing target is refused. On Postgres it refuses, naming base backups and
   WAL archiving instead.
 - `migrate --from a.toml --to b.toml` moves a single node to Postgres and S3
-  (architecture.md, "Growth"). The metadata copy, verified table by table with a row
-  count and digest, is built. The config-file form and pack copying are in progress;
-  the current build takes database URLs and copies metadata only.
+  (architecture.md, "Growth"). `a.toml` is the SQLite deployment, `b.toml` the empty
+  Postgres one, each a full server configuration read without the environment
+  overlay. Stop the server first. Every committed pack is verified against its
+  segment ids and footer and copied to the target store, then the metadata is copied
+  and checked table by table with a row count and digest; the metadata commits last.
+  A damaged or missing pack refuses the migration, naming it, and leaves the target
+  without a metadata row. Packs written to a target store before a refusal are
+  orphans, which the orphan scan removes.
 - `scrub [--cache c_…]` prints one JSON line per cache.
 - `check-store` runs the S3 probe and prints the capabilities.
 

@@ -38,6 +38,34 @@ pub(crate) async fn open(
     }
 }
 
+/// Opens the store of `config` for reading only: nothing is created, removed or written.
+pub(crate) fn open_for_reading(config: &Config) -> std::result::Result<AnyStore, String> {
+    let opened = match &config.store {
+        StoreConfig::Fs { root } => {
+            let url_keys = keys::read_url_keys(&config.url_key_file)?;
+            FsStore::open_existing(root.clone(), "http://localhost", url_keys).map(AnyStore::Fs)
+        }
+        StoreConfig::S3(s3) => S3Store::open_unprobed(s3).map(AnyStore::S3),
+    };
+    opened.map_err(|error| format!("cannot open the object store: {error}"))
+}
+
+/// Whether two configurations name the same directory or the same bucket and prefix.
+pub(crate) fn same_store(a: &StoreConfig, b: &StoreConfig) -> bool {
+    match (a, b) {
+        (StoreConfig::Fs { root: a }, StoreConfig::Fs { root: b }) => {
+            match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+                (Ok(a), Ok(b)) => a == b,
+                _ => a == b,
+            }
+        }
+        (StoreConfig::S3(a), StoreConfig::S3(b)) => {
+            a.endpoint == b.endpoint && a.bucket == b.bucket && a.prefix == b.prefix
+        }
+        _ => false,
+    }
+}
+
 impl ObjectStore for AnyStore {
     fn capabilities(&self) -> StoreCapabilities {
         match self {

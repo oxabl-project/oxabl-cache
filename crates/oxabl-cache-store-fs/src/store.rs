@@ -58,6 +58,25 @@ impl FsStore {
         })
     }
 
+    /// Opens a store whose root already exists, creating and removing nothing: for reading
+    /// a store another process may own.
+    pub fn open_existing(root: PathBuf, public_url: &str, url_keys: Vec<[u8; 32]>) -> Result<Self> {
+        if url_keys.is_empty() {
+            return Err(Error::bad_request("an fs store needs at least one URL key"));
+        }
+        if !root.is_dir() {
+            return Err(Error::bad_request(format!(
+                "{} is not a directory",
+                root.display()
+            )));
+        }
+        Ok(Self {
+            root,
+            public_url: public_url.trim_end_matches('/').to_owned(),
+            url_keys,
+        })
+    }
+
     /// Fails unless the root is a directory in which a file can be created and removed.
     pub(crate) fn check_writable(&self) -> Result<()> {
         let unavailable = |error: &std::io::Error| match io_error(error) {

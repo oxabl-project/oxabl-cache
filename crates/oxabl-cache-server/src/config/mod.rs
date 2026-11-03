@@ -156,12 +156,24 @@ fn transport(
 impl Config {
     /// Reads, overlays with the environment and validates the file at `path`.
     pub(crate) fn load(path: &Path) -> Result<Self, String> {
+        Self::read(path, true)
+    }
+
+    /// Reads and validates the file at `path` without the environment overlay, for a
+    /// command that reads two configurations and so cannot tell which one a variable is for.
+    pub(crate) fn load_file(path: &Path) -> Result<Self, String> {
+        Self::read(path, false)
+    }
+
+    fn read(path: &Path, overlay: bool) -> Result<Self, String> {
         let text = std::fs::read_to_string(path)
             .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
         let mut table: toml::Table = text
             .parse()
             .map_err(|error| format!("{}: {error}", path.display()))?;
-        env::overlay(&mut table, std::env::vars())?;
+        if overlay {
+            env::overlay(&mut table, std::env::vars())?;
+        }
         let raw: raw::Raw = table
             .try_into()
             .map_err(|error| format!("{}: {error}", path.display()))?;

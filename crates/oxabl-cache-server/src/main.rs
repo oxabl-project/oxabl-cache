@@ -8,6 +8,7 @@ mod keys;
 mod listener;
 mod meta;
 mod migrate;
+mod migrate_packs;
 mod scheduler;
 mod serve;
 mod store;

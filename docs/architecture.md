@@ -294,22 +294,36 @@ the binary is refused.
 ### Growth
 
 Growth from one node to many is `oxabl-cache-server migrate --from a.toml --to b.toml`.
-It runs offline and copies metadata (SQLite to Postgres) and packs (disk to S3),
-re-hashing every segment against its id from the pack footer and comparing row counts
-per table. It refuses to finish on any difference.
+Both arguments are server configurations: `a.toml` runs SQLite metadata and either
+store, `b.toml` runs Postgres metadata and either store, with its secrets and CA
+read from its own file as `serve` reads them. The environment overlay is not applied
+to either file. It runs offline and copies metadata (SQLite to Postgres) and packs
+(disk to S3, or any store to any other), re-hashing every segment against its id and
+comparing row counts and a digest per table. It refuses to finish on any difference.
 
-The metadata half is built:
 - It refuses a source whose schema version differs from the release's, a source
   table the release does not know, and a target with any row in a migrated table.
-- It copies in 1,000-row batches in one SERIALIZABLE Postgres transaction, under the
-  migration lock.
-- It then re-reads every table from Postgres and compares the row count and an
-  order-independent BLAKE3 digest with the source. It commits only if every table
-  matches, and prints one JSON line per table.
-- The source is opened read-only.
+  The emptiness check runs again, under the migration lock, after the packs are moved.
+- **Packs first.** Every committed pack (state `live`) is read whole from the source
+  store and checked: its size against the metadata, its header's cache, its footer
+  against the trailer's digest, every segment the footer lists against its id (BLAKE3
+  of its bytes), and every live segment the metadata records against the footer's
+  offset and length. It is then written to the target store and read back; the bytes
+  must equal what was written. A pack that fails any step, or is missing, refuses the
+  migration naming the pack and cache, before any metadata row is inserted.
+  Pending and deleting packs and unreferenced objects are not copied; the lease sweep
+  and the orphan scan own them.
+- When both configurations name the same directory or the same bucket and prefix, the
+  packs are verified and left where they are.
+- **Metadata second.** It copies in 1,000-row batches in one SERIALIZABLE Postgres
+  transaction, under the migration lock, then re-reads every table from Postgres and
+  compares the row count and an order-independent BLAKE3 digest with the source. It
+  commits only if every table matches, and prints one JSON line per table, then one
+  `{"packs", "bytes", "copied"}` line.
+- The source database and the source store are opened read-only: a local store is not
+  created, cleaned or written, and an S3 source skips the write probe.
 
-**Not built yet:** the documented config-file form (`--from a.toml --to b.toml`; the
-current build takes URLs), and pack copying with its hash check. Both are in progress. The schema uses no SQLite-only
+The schema uses no SQLite-only
 types (ids are bytes or text, times are integer seconds), so nothing is converted.
 During the window, builds see misses, never errors. The path has its own black-box
 test. ADR: [0003](adr/0003-metadata-sqlite-and-postgres.md).

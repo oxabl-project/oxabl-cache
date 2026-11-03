@@ -10,8 +10,8 @@ subcommands:
   scrub [--cache c_...]    re-verify the packs of one cache, or of every cache
   check-store              print the capabilities of the configured object store
   backup --to FILE         write a consistent copy of the SQLite metadata database (online)
-  migrate --from sqlite://PATH --to postgres://URL [--password-file F] [--ca-file F]
-                           copy the metadata of a SQLite database into an empty Postgres one";
+  migrate --from SOURCE.toml --to TARGET.toml
+                           copy a SQLite deployment's metadata and packs into an empty Postgres one";
 
 const DEFAULT_CONFIG: &str = "/etc/oxabl-cache/server.toml";
 
@@ -30,10 +30,8 @@ pub(crate) enum Command {
 /// The arguments of `migrate`.
 #[derive(Debug)]
 pub(crate) struct Migration {
-    pub from: String,
-    pub to: String,
-    pub password_file: Option<PathBuf>,
-    pub ca_file: Option<PathBuf>,
+    pub from: PathBuf,
+    pub to: PathBuf,
 }
 
 /// A parsed command line.
@@ -87,14 +85,11 @@ pub(crate) fn parse(args: Vec<String>) -> Result<Invocation, String> {
         }
         Some("migrate") => {
             let (mut from, mut to) = (None, None);
-            let (mut password_file, mut ca_file) = (None, None);
             while let Some(arg) = rest.next() {
                 let mut value = |what: &str| rest.next().ok_or(format!("{arg} needs {what}"));
                 match arg.as_str() {
-                    "--from" => from = Some(value("a sqlite:// URL")?),
-                    "--to" => to = Some(value("a postgres:// URL")?),
-                    "--password-file" => password_file = Some(PathBuf::from(value("a file")?)),
-                    "--ca-file" => ca_file = Some(PathBuf::from(value("a file")?)),
+                    "--from" => from = Some(PathBuf::from(value("a server config file")?)),
+                    "--to" => to = Some(PathBuf::from(value("a server config file")?)),
                     _ => return Err(format!("unknown migrate option {arg}\n{USAGE}")),
                 }
             }
@@ -103,12 +98,7 @@ pub(crate) fn parse(args: Vec<String>) -> Result<Invocation, String> {
             };
             return Ok(Invocation {
                 config,
-                command: Command::Migrate(Migration {
-                    from,
-                    to,
-                    password_file,
-                    ca_file,
-                }),
+                command: Command::Migrate(Migration { from, to }),
             });
         }
         Some("scrub") => {
