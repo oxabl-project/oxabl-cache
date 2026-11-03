@@ -86,11 +86,18 @@ fn a_second_operator_token_is_minted_then_the_first_is_revoked_and_refused_at_on
     .json();
     let rows = after["operator_tokens"].as_array().expect("tokens");
     assert_eq!(rows.len(), 2);
+    let row = |id: &str| rows.iter().find(|row| row["id"] == id).expect("row");
     assert!(
-        rows[0]["revoked_at"].is_i64(),
+        row(&first_id)["revoked_at"].is_i64(),
         "the revoked token shows when"
     );
-    assert_eq!(rows[1]["revoked_at"], serde_json::Value::Null);
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row["revoked_at"].is_null())
+            .count(),
+        1,
+        "the second token is still valid"
+    );
     assert_eq!(by_second.code(), 0);
 }
 

@@ -7,4 +7,5 @@ pub mod objects;
 pub mod party;
 pub mod rows;
 pub mod server;
+pub mod sqlite;
 pub mod tls;

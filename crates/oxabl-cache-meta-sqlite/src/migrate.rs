@@ -13,6 +13,9 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (5, include_str!("../schema/0005_tombstones.sql")),
 ];
 
+/// The schema version this release writes.
+pub const SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
+
 /// Applies every migration newer than the database. A database written by a
 /// newer release is refused rather than opened.
 pub(crate) fn migrate(conn: &Connection, now: i64) -> Result<()> {

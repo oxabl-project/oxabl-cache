@@ -6,8 +6,11 @@
 //! database opens.
 
 mod db;
+mod export;
 mod migrate;
 mod store;
 mod tx;
 
+pub use export::{SqliteExport, backup};
+pub use migrate::SCHEMA_VERSION;
 pub use store::SqliteStore;

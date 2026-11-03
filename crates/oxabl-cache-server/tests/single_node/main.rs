@@ -8,6 +8,7 @@ use support::objects::Kind;
 pub const STORE: Kind = Kind::Fs;
 
 mod administration;
+mod backup;
 mod commit_retry;
 mod config_rules;
 mod dictionary_and_reports;
@@ -18,6 +19,7 @@ mod health;
 mod lifecycle;
 mod limits;
 mod logs;
+mod migrate;
 mod object_urls;
 mod operator_tokens;
 mod roster_rules;

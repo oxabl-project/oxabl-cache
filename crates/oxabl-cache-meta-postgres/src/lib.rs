@@ -9,6 +9,7 @@
 //! session-level advisory lock.
 
 mod error;
+mod import;
 mod leader;
 mod lock;
 mod migrate;
@@ -17,5 +18,7 @@ mod store;
 mod tls;
 mod tx;
 
+pub use import::PostgresImport;
 pub use leader::LeaderSession;
+pub use migrate::SCHEMA_VERSION;
 pub use store::{PostgresOptions, PostgresStore};

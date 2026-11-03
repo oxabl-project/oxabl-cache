@@ -7,6 +7,7 @@ mod config;
 mod keys;
 mod listener;
 mod meta;
+mod migrate;
 mod scheduler;
 mod serve;
 mod store;
@@ -36,9 +37,11 @@ async fn main() -> ExitCode {
             println!("{}", cli::usage());
             return ExitCode::SUCCESS;
         }
-        Command::Unimplemented(name) => {
-            eprintln!("oxabl-cache-server: {name} is not implemented in this build");
-            return ExitCode::from(2);
+        Command::Migrate(migration) => {
+            return match migrate::run(migration).await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(message) => fail(&message),
+            };
         }
         _ => {}
     }
@@ -51,7 +54,8 @@ async fn main() -> ExitCode {
         Command::Init => commands::init(&config).await,
         Command::Scrub { cache } => commands::scrub(&config, cache.as_deref()).await,
         Command::CheckStore => commands::check_store(&config).await,
-        Command::Unimplemented(_) | Command::Help => Ok(()),
+        Command::Backup { to } => commands::backup(&config, &to),
+        Command::Migrate(_) | Command::Help => Ok(()),
     };
     match outcome {
         Ok(()) => ExitCode::SUCCESS,

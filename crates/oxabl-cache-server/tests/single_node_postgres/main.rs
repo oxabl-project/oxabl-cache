@@ -2,6 +2,8 @@
 
 #[path = "../single_node/administration.rs"]
 mod administration;
+#[path = "../single_node/backup.rs"]
+mod backup;
 #[path = "../single_node/commit_retry.rs"]
 mod commit_retry;
 #[path = "../single_node/config_rules.rs"]
@@ -22,6 +24,8 @@ mod lifecycle;
 mod limits;
 #[path = "../single_node/logs.rs"]
 mod logs;
+#[path = "../single_node/migrate.rs"]
+mod migrate;
 #[path = "../single_node/object_urls.rs"]
 mod object_urls;
 #[path = "../single_node/operator_tokens.rs"]

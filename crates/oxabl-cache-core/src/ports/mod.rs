@@ -3,6 +3,7 @@
 pub mod clock;
 pub mod identity;
 pub mod metadata;
+pub mod migration;
 pub mod object_store;
 pub mod pack_assembler;
 

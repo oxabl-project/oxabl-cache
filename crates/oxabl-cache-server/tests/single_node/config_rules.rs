@@ -102,20 +102,16 @@ fn plaintext_beyond_loopback_needs_an_explicit_upstream_terminator() {
 }
 
 #[test]
-fn init_mints_the_first_operator_token_once_and_unbuilt_subcommands_say_so() {
+fn init_mints_the_first_operator_token_once_and_the_copy_commands_need_their_options() {
     let first = run("init-once", BASE, &["init"], &[]);
     assert!(first.status.success(), "{}", stderr(&first));
     let token = String::from_utf8_lossy(&first.stdout).trim().to_owned();
     assert!(token.starts_with("oxo_"), "{token}");
 
-    for command in ["migrate", "backup"] {
-        let output = run("unbuilt", BASE, &[command], &[]);
+    for (command, option) in [("migrate", "--from"), ("backup", "--to")] {
+        let output = run("copy-options", BASE, &[command], &[]);
         assert_eq!(output.status.code(), Some(2));
-        assert!(
-            stderr(&output).contains("not implemented"),
-            "{}",
-            stderr(&output)
-        );
+        assert!(stderr(&output).contains(option), "{}", stderr(&output));
     }
 }
 
@@ -224,4 +220,24 @@ fn the_gc_batch_must_be_a_positive_number() {
         &[],
     );
     assert!(fine.status.success(), "{}", stderr(&fine));
+}
+
+#[test]
+fn backup_is_refused_on_postgres_metadata_with_a_pointer_to_base_backups() {
+    let postgres = BASE.replace(
+        "url = \"sqlite://{dir}/meta.db\"",
+        "url = \"postgres://u@127.0.0.1:1/db?sslmode=disable\"",
+    );
+    let refused = run(
+        "backup-postgres",
+        &postgres,
+        &["backup", "--to", "{dir}/copy.db"],
+        &[],
+    );
+    assert!(!refused.status.success());
+    let message = stderr(&refused);
+    assert!(
+        message.contains("SQLite") && message.contains("WAL"),
+        "{message}"
+    );
 }
