@@ -283,7 +283,7 @@ fn decoded_bytea(dump: &[u8]) -> Vec<u8> {
                 .copied()
                 .take_while(u8::is_ascii_hexdigit)
                 .collect();
-            for pair in digits.chunks_exact(2) {
+            for pair in digits.as_chunks::<2>().0 {
                 let pair = std::str::from_utf8(pair).expect("hex digits");
                 decoded.push(u8::from_str_radix(pair, 16).expect("hex digits"));
             }
