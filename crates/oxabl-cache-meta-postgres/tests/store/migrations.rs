@@ -34,7 +34,7 @@ async fn nodes_starting_together_migrate_once() {
         .iter()
         .map(|row| row.get(0))
         .collect();
-    assert_eq!(versions, vec![1, 2]);
+    assert_eq!(versions, vec![1, 2, 3]);
 }
 
 #[tokio::test(flavor = "multi_thread")]

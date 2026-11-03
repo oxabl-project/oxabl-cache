@@ -67,11 +67,14 @@ impl Env {
             decoys.push(Decoy::start(at(host)).await);
         }
         decoys.push(Decoy::start("[::1]:443".parse().expect("addr")).await);
-        let server = CacheServer::start(&format!(
-            "allowed_private_ranges = [\"{PUBLIC}/32\"]\ndns_servers = [\"{}\"]\nextra_ca_file = \"{}\"\n{extra}",
-            dns.addr,
-            ca_file.display()
-        ))
+        let server = CacheServer::start_on(
+            crate::BACKEND,
+            &format!(
+                "allowed_private_ranges = [\"{PUBLIC}/32\"]\ndns_servers = [\"{}\"]\nextra_ca_file = \"{}\"\n{extra}",
+                dns.addr,
+                ca_file.display()
+            ),
+        )
         .await;
         let tenant = server.tenant("acme").await;
         Self {

@@ -1,5 +1,6 @@
 //! The tenant's issuer allowlist.
 
+use crate::ports::TxScope;
 use crate::domain::oidc::{Issuer, IssuerShape};
 use crate::domain::principal::Caller;
 use crate::engine::Engine;
@@ -82,7 +83,7 @@ where
         }
         verifier.probe_issuer(&issuer.url).await?;
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Tenant(issuer.tenant), move |tx| {
                 if tx.insert_issuer(&issuer)? {
                     return Ok(true);
                 }
@@ -96,14 +97,14 @@ where
 
     async fn stored_issuer(&self, issuer: &Issuer) -> Result<Option<Issuer>> {
         let (tenant, url) = (issuer.tenant, issuer.url.clone());
-        self.meta.transact(move |tx| tx.issuer(&tenant, &url)).await
+        self.meta.read(move |tx| tx.issuer(&tenant, &url)).await
     }
 
     /// The tenant's issuers. Needs `tenant:admin`.
     pub async fn list_issuers(&self, caller: &Caller) -> Result<Vec<Issuer>> {
         caller.require_tenant_admin()?;
         let tenant = caller.tenant;
-        self.meta.transact(move |tx| tx.issuers_of(&tenant)).await
+        self.meta.read(move |tx| tx.issuers_of(&tenant)).await
     }
 
     /// Removes an issuer with its policies, and ends the sessions of those policies and
@@ -113,7 +114,7 @@ where
         let tenant = caller.tenant;
         let now = self.now();
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Tenant(tenant), move |tx| {
                 tx.issuer(&tenant, &url)?.ok_or(Error::NotFound)?;
                 for policy in tx.policies_of(&tenant)? {
                     if policy.issuer == url {

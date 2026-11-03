@@ -1,5 +1,6 @@
 //! Workload trust policies.
 
+use crate::ports::TxScope;
 use crate::domain::oidc::{ClaimCondition, WorkloadPolicy};
 use crate::domain::principal::Caller;
 use crate::domain::scope::{Grant, Scope, ScopeSet};
@@ -122,7 +123,7 @@ where
         let name = spec.name;
         let now = self.now();
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Tenant(tenant), move |tx| {
                 let issuer = tx.issuer(&tenant, &issuer_url)?.ok_or_else(|| {
                     Error::bad_request("the issuer is not registered for this tenant")
                 })?;
@@ -176,7 +177,7 @@ where
     pub async fn list_policies(&self, caller: &Caller) -> Result<Vec<WorkloadPolicy>> {
         caller.require_tenant_admin()?;
         let tenant = caller.tenant;
-        self.meta.transact(move |tx| tx.policies_of(&tenant)).await
+        self.meta.read(move |tx| tx.policies_of(&tenant)).await
     }
 
     /// Deletes a policy and ends its sessions at once. Needs `tenant:admin`.
@@ -185,7 +186,7 @@ where
         let tenant = caller.tenant;
         let now = self.now();
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Tenant(tenant), move |tx| {
                 let policy = tx.policy_named(&tenant, &name)?.ok_or(Error::NotFound)?;
                 tx.revoke_credentials_of(&policy.id, now)?;
                 tx.delete_policy(&tenant, &policy.id)?;

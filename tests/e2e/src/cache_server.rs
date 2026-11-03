@@ -1,6 +1,7 @@
 //! The real `oxabl-cache-server` binary on a fresh data directory, and a small HTTP
 //! client for its listeners.
 
+use crate::postgres::Postgres;
 use crate::supervise::Supervised;
 use crate::wait;
 use crate::workdir::TestDir;
@@ -48,6 +49,15 @@ impl Reply {
     }
 }
 
+/// The metadata database a server runs on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Metadata {
+    /// A SQLite file in the server's directory.
+    Sqlite,
+    /// A fresh database on the shared Postgres of this test binary.
+    Postgres,
+}
+
 /// A running server with its operator token.
 pub struct CacheServer {
     _process: Supervised,
@@ -55,21 +65,41 @@ pub struct CacheServer {
     pub public: String,
     pub admin: String,
     pub operator: String,
+    postgres_url: Option<String>,
     http: reqwest::Client,
 }
 
 impl CacheServer {
-    /// Starts a server whose `[oidc]` section is `oidc`.
+    /// Starts a server on SQLite whose `[oidc]` section is `oidc`.
     pub async fn start(oidc: &str) -> Self {
+        Self::start_on(Metadata::Sqlite, oidc).await
+    }
+
+    /// Starts a server on `metadata` whose `[oidc]` section is `oidc`.
+    pub async fn start_on(metadata: Metadata, oidc: &str) -> Self {
         let dir = TestDir::new("srv").expect("test dir");
         let root = dir.path().display();
+        let mut postgres_url = None;
+        let metadata_url = match metadata {
+            Metadata::Sqlite => format!("sqlite://{root}/meta.db"),
+            Metadata::Postgres => {
+                let database = tokio::task::spawn_blocking(Postgres::shared)
+                    .await
+                    .expect("postgres cluster")
+                    .create_database()
+                    .await
+                    .expect("create database");
+                postgres_url = Some(database.url());
+                format!("{}?sslmode=disable", database.url())
+            }
+        };
         let config = dir.path().join("server.toml");
         fs::write(
             &config,
             format!(
                 "[server]\nlisten = \"127.0.0.1:0\"\nadmin_listen = \"127.0.0.1:0\"\n\
                  metrics_listen = \"127.0.0.1:0\"\n\
-                 [metadata]\nurl = \"sqlite://{root}/meta.db\"\n\
+                 [metadata]\nurl = \"{metadata_url}\"\n\
                  [store]\nkind = \"fs\"\nroot = \"{root}/objects\"\n\
                  [keys]\nurl_key_file = \"{root}/url.key\"\nclaim_hash_key_file = \"{root}/claim.key\"\n\
                  [oidc]\n{oidc}\n"
@@ -113,6 +143,7 @@ impl CacheServer {
             _process: process,
             dir,
             operator,
+            postgres_url,
             http: reqwest::Client::builder()
                 .no_proxy()
                 .build()
@@ -173,9 +204,21 @@ impl CacheServer {
         fs::read_to_string(self.dir.path().join("server.log")).unwrap_or_default()
     }
 
-    /// The bytes of the metadata database and its write-ahead log.
+    /// The bytes of the metadata database: the SQLite file and its write-ahead log, or a
+    /// `pg_dump` of the Postgres database followed by the decoded content of every
+    /// `bytea` value in it.
     pub fn database_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
+        if let Some(url) = &self.postgres_url {
+            let dump = Command::new("pg_dump")
+                .arg(url)
+                .output()
+                .expect("run pg_dump");
+            assert!(dump.status.success(), "pg_dump failed");
+            bytes.extend_from_slice(&dump.stdout);
+            bytes.extend(decoded_bytea(&dump.stdout));
+            return bytes;
+        }
         for name in ["meta.db", "meta.db-wal"] {
             bytes.extend(fs::read(self.dir.path().join(name)).unwrap_or_default());
         }
@@ -227,4 +270,28 @@ impl Tenant {
     pub fn audience(&self) -> String {
         format!("oxabl-cache:{}", self.id)
     }
+}
+
+/// The bytes behind every `\\x<hex>` value of a `pg_dump`, one after another.
+fn decoded_bytea(dump: &[u8]) -> Vec<u8> {
+    let mut decoded = Vec::new();
+    let mut at = 0;
+    while at + 2 < dump.len() {
+        if dump[at] == b'\\' && dump[at + 1] == b'x' {
+            let digits: Vec<u8> = dump[at + 2..]
+                .iter()
+                .copied()
+                .take_while(u8::is_ascii_hexdigit)
+                .collect();
+            for pair in digits.chunks_exact(2) {
+                let pair = std::str::from_utf8(pair).expect("hex digits");
+                decoded.push(u8::from_str_radix(pair, 16).expect("hex digits"));
+            }
+            decoded.push(0);
+            at += 2 + digits.len();
+        } else {
+            at += 1;
+        }
+    }
+    decoded
 }
