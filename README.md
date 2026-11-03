@@ -12,10 +12,26 @@ Design: [architecture](docs/architecture.md), [security](docs/security.md),
 [protocol](docs/protocol.md), [client](docs/client.md),
 [operations](docs/operations.md), [testing](docs/testing.md), [decisions](docs/adr/).
 
+## Deploy
+
+One image, one Helm chart, one systemd unit and one OpenTofu module run every shape in
+[operations](docs/operations.md).
+
+| Shape | Start here |
+| --- | --- |
+| A team on one VM: container or systemd, SQLite and local disk | [deploy-container](docs/hosting/deploy-container.md), `deploy/container`, `deploy/systemd` |
+| A cluster: Helm chart on Postgres and an S3-compatible bucket | [deploy-kubernetes](docs/hosting/deploy-kubernetes.md), `deploy/helm/oxabl-cache` |
+| The hosted service: Cloudflare R2 and Hetzner Cloud | [deploy-hosted](docs/hosting/deploy-hosted.md), `deploy/tofu/hosted` |
+
+The image is `ghcr.io/oxabl-project/oxabl-cache-server` (static, distroless, non-root, read-only root, signed).
+`nix develop -c deploy/check.sh` lints the chart, validates it against the Kubernetes schemas, validates and tests
+the OpenTofu module, and verifies and scores the systemd units.
+
 ## Development
 
 The devshell provides every tool the tests start as a child process (Garage, versitygw,
-Postgres 18, libfaketime, cargo-fuzz) and `rustup`, which installs the Rust toolchain pinned
+Postgres 18, libfaketime, cargo-fuzz), the deploy checks (Helm, kubeconform, kubectl, kind, OpenTofu, tflint)
+and `rustup`, which installs the Rust toolchain pinned
 in `rust-toolchain.toml`. With [direnv](https://direnv.net) the shell loads on `cd`
 (`direnv allow` once); otherwise prefix commands with `nix develop -c`.
 

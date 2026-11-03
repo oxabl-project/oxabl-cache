@@ -1,0 +1,13 @@
+{{- if and (eq .Values.mode "cluster") .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "oxabl-cache.fullname" . }}
+  labels:
+    {{- include "oxabl-cache.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "oxabl-cache.selectorLabels" . | nindent 6 }}
+{{- end }}

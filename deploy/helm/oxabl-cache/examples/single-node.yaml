@@ -1,0 +1,31 @@
+# One replica; SQLite and the object store on a PersistentVolumeClaim.
+# Create the keys Secret first (docs/hosting/deploy-kubernetes.md).
+mode: single-node
+
+image:
+  tag: main
+
+publicUrl: https://cache.example.com
+
+keys:
+  existingSecret: oxabl-cache-keys
+
+persistence:
+  size: 20Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - cache.example.com
+  tls:
+    - secretName: cache-example-com-tls
+      hosts:
+        - cache.example.com
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi

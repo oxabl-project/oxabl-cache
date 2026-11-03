@@ -73,3 +73,12 @@ jobs:
         run: nix develop --command rustup toolchain install nightly --profile minimal
       - name: Run every fuzz target for 30 seconds
         run: fuzz/run.sh 30
+
+  deploy-artifacts:
+    name: Deploy artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+      - name: Helm chart, OpenTofu module and systemd units
+        run: nix develop --command deploy/check.sh

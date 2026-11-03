@@ -1,0 +1,114 @@
+{{- include "oxabl-cache.validate" . -}}
+{{- $single := eq .Values.mode "single-node" -}}
+{{- $secrets := "/run/secrets/oxabl-cache" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oxabl-cache.fullname" . }}
+  labels:
+    {{- include "oxabl-cache.labels" . | nindent 4 }}
+data:
+  server.toml: |
+    [server]
+    listen = "0.0.0.0:8443"
+    admin_listen = "0.0.0.0:9091"
+    metrics_listen = "0.0.0.0:9090"
+    public_url = {{ .Values.publicUrl | quote }}
+    {{- with .Values.server.urlLifetime }}
+    url_lifetime = {{ . | quote }}
+    {{- end }}
+    {{- with .Values.server.shutdownTimeout }}
+    shutdown_timeout = {{ . | quote }}
+    {{- end }}
+
+    [tls]
+    {{- if eq .Values.tls.mode "secret" }}
+    cert_file = "{{ $secrets }}/tls.crt"
+    key_file = "{{ $secrets }}/tls.key"
+    {{- else }}
+    terminated_upstream = true
+    {{- end }}
+
+    [metadata]
+    {{- if $single }}
+    url = "sqlite:///var/lib/oxabl-cache/meta.db"
+    {{- else }}
+    url = {{ .Values.metadata.postgres.url | quote }}
+    password_file = "{{ $secrets }}/db-password"
+    {{- if .Values.metadata.postgres.caSecret.name }}
+    ca_file = "{{ $secrets }}/db-ca.pem"
+    {{- end }}
+    {{- with .Values.metadata.postgres.maxConnections }}
+    max_connections = {{ . | int }}
+    {{- end }}
+    {{- end }}
+
+    [store]
+    {{- if $single }}
+    kind = "fs"
+    root = "/var/lib/oxabl-cache/objects"
+    {{- else }}
+    kind = "s3"
+    endpoint = {{ .Values.store.s3.endpoint | quote }}
+    region = {{ .Values.store.s3.region | quote }}
+    bucket = {{ .Values.store.s3.bucket | quote }}
+    {{- with .Values.store.s3.prefix }}
+    prefix = {{ . | quote }}
+    {{- end }}
+    path_style = {{ .Values.store.s3.pathStyle }}
+    access_key_id_file = "{{ $secrets }}/s3-access-key-id"
+    secret_access_key_file = "{{ $secrets }}/s3-secret-access-key"
+    {{- end }}
+
+    [keys]
+    url_key_file = "{{ $secrets }}/url-key"
+    claim_hash_key_file = "{{ $secrets }}/claim-key"
+    {{- with .Values.gc }}
+
+    [gc]
+    {{- with .grace }}
+    grace = {{ . | quote }}
+    {{- end }}
+    {{- with .lease }}
+    lease = {{ . | quote }}
+    {{- end }}
+    {{- with .interval }}
+    interval = {{ . | quote }}
+    {{- end }}
+    {{- with .compactionLiveRatio }}
+    compaction_live_ratio = {{ . }}
+    {{- end }}
+    {{- with .orphanScan }}
+    orphan_scan = {{ . | quote }}
+    {{- end }}
+    {{- end }}
+    {{- with .Values.defaults }}
+
+    [defaults]
+    {{- with .retentionDays }}
+    retention_days = {{ . | int }}
+    {{- end }}
+    {{- with .hardQuota }}
+    hard_quota = {{ . | quote }}
+    {{- end }}
+    {{- with .softQuotaRatio }}
+    soft_quota_ratio = {{ . }}
+    {{- end }}
+    {{- with .rate }}
+    rate = {{ . | int }}
+    {{- end }}
+    {{- with .burst }}
+    burst = {{ . | int }}
+    {{- end }}
+    {{- end }}
+    {{- with .Values.oidc }}
+
+    [oidc]
+    issuer_allowlist = [{{ range $i, $v := .issuerAllowlist }}{{ if $i }}, {{ end }}{{ $v | quote }}{{ end }}]
+    allowed_private_ranges = [{{ range $i, $v := .allowedPrivateRanges }}{{ if $i }}, {{ end }}{{ $v | quote }}{{ end }}]
+    dns_servers = [{{ range $i, $v := .dnsServers }}{{ if $i }}, {{ end }}{{ $v | quote }}{{ end }}]
+    {{- end }}
+
+    [log]
+    level = {{ .Values.log.level | quote }}
+    format = "json"

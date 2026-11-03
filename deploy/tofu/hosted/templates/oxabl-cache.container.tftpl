@@ -1,0 +1,27 @@
+[Unit]
+Description=oxabl-cache server
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Container]
+ContainerName=oxabl-cache
+Image=${image}
+Network=host
+ReadOnly=true
+DropCapability=ALL
+NoNewPrivileges=true
+Volume=/etc/oxabl-cache/server.toml:/etc/oxabl-cache/server.toml:ro
+Volume=/etc/oxabl-cache/secrets:/run/secrets/oxabl-cache:ro
+%{ if data_mount != "" ~}
+Volume=${data_mount}:/var/lib/oxabl-cache
+%{ endif ~}
+Exec=serve
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

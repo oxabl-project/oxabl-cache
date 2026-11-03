@@ -1,0 +1,9 @@
+.git
+.github
+.direnv
+target
+fuzz/target
+scripts/gate-fixture/target
+deploy
+docs
+**/*.md

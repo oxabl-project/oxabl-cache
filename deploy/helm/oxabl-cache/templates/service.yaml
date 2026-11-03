@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oxabl-cache.fullname" . }}
+  labels:
+    {{- include "oxabl-cache.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: https
+      port: {{ .Values.service.port }}
+      targetPort: https
+      protocol: TCP
+  selector:
+    {{- include "oxabl-cache.selectorLabels" . | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oxabl-cache.fullname" . }}-admin
+  labels:
+    {{- include "oxabl-cache.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admin
+spec:
+  type: ClusterIP
+  ports:
+    - name: admin
+      port: 9091
+      targetPort: admin
+      protocol: TCP
+  selector:
+    {{- include "oxabl-cache.selectorLabels" . | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oxabl-cache.fullname" . }}-metrics
+  labels:
+    {{- include "oxabl-cache.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "oxabl-cache.selectorLabels" . | nindent 4 }}

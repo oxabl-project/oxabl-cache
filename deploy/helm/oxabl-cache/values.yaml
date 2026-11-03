@@ -1,0 +1,148 @@
+# cluster: stateless replicas on Postgres and an S3-compatible bucket.
+# single-node: one replica with SQLite and the object store on a PersistentVolumeClaim.
+mode: cluster
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/oxabl-project/oxabl-cache-server
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# URL clients reach the public listener on; presigned object URLs are built from it.
+publicUrl: ""
+
+tls:
+  # upstream: an Ingress or proxy terminates TLS and speaks plain HTTP to the pod.
+  # secret: the server terminates TLS 1.3 from existingSecret (type kubernetes.io/tls).
+  mode: upstream
+  existingSecret: ""
+
+# Secret holding the two 64-character lowercase hex keys. Created by the operator, never by the chart.
+keys:
+  existingSecret: ""
+  urlKeyKey: url-key
+  claimKeyKey: claim-key
+
+# The Postgres connection always uses TLS. Without caSecret the server trusts the web roots.
+metadata:
+  postgres:
+    url: ""
+    maxConnections: 16
+    passwordSecret:
+      name: ""
+      key: password
+    caSecret:
+      name: ""
+      key: ca.crt
+
+store:
+  s3:
+    endpoint: ""
+    region: ""
+    bucket: ""
+    prefix: ""
+    pathStyle: false
+    credentialsSecret:
+      name: ""
+      accessKeyIdKey: access-key-id
+      secretAccessKeyKey: secret-access-key
+
+server:
+  urlLifetime: 15m
+  shutdownTimeout: 10s
+
+gc: {}
+#  grace: 24h
+#  lease: 1h
+#  interval: 10m
+#  compactionLiveRatio: 0.5
+#  orphanScan: 7d
+
+defaults: {}
+#  retentionDays: 30
+#  hardQuota: 20GiB
+#  softQuotaRatio: 0.9
+#  rate: 50
+#  burst: 200
+
+oidc: {}
+#  issuerAllowlist: ["https://token.actions.githubusercontent.com"]
+#  allowedPrivateRanges: []
+#  dnsServers: []
+
+log:
+  level: info
+
+persistence:
+  size: 20Gi
+  storageClass: ""
+  existingClaim: ""
+  annotations: {}
+
+service:
+  type: ClusterIP
+  port: 443
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+monitoring:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+# Ingress rules per port. An empty publicFrom allows any source; an empty adminFrom or
+# metricsFrom allows none. Egress is unrestricted unless rules are listed.
+networkPolicy:
+  enabled: false
+  publicFrom: []
+  adminFrom: []
+  metricsFrom: []
+  egress: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+terminationGracePeriodSeconds: 30
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+extraEnv: []
+extraVolumes: []
+extraVolumeMounts: []

@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["mode", "publicUrl", "keys"],
+  "properties": {
+    "mode": { "enum": ["cluster", "single-node"] },
+    "replicaCount": { "type": "integer", "minimum": 1 },
+    "publicUrl": { "type": "string", "pattern": "^https?://" },
+    "image": {
+      "type": "object",
+      "required": ["repository"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "digest": { "type": "string", "pattern": "^(sha256:[0-9a-f]{64})?$" },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "tls": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["upstream", "secret"] },
+        "existingSecret": { "type": "string" }
+      }
+    },
+    "keys": {
+      "type": "object",
+      "required": ["existingSecret"],
+      "properties": {
+        "existingSecret": { "type": "string", "minLength": 1 }
+      }
+    },
+    "autoscaling": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minReplicas": { "type": "integer", "minimum": 1 },
+        "maxReplicas": { "type": "integer", "minimum": 1 },
+        "targetCPUUtilizationPercentage": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "properties": {
+        "size": { "type": "string" },
+        "existingClaim": { "type": "string" }
+      }
+    }
+  }
+}

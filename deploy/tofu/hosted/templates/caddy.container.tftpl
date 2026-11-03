@@ -1,0 +1,24 @@
+[Unit]
+Description=Caddy in front of oxabl-cache
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Container]
+ContainerName=caddy
+Image=${image}
+Network=host
+ReadOnly=true
+DropCapability=ALL
+AddCapability=NET_BIND_SERVICE
+NoNewPrivileges=true
+Volume=/etc/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+Volume=/var/lib/caddy/data:/data
+Volume=/var/lib/caddy/config:/config
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

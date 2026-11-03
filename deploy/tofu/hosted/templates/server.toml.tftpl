@@ -1,0 +1,50 @@
+[server]
+listen = "${listen}"
+metrics_listen = "${metrics_listen}"
+public_url = "https://${domain}"
+%{ if tls_certificate ~}
+
+[tls]
+cert_file = "/run/secrets/oxabl-cache/tls.crt"
+key_file = "/run/secrets/oxabl-cache/tls.key"
+%{ endif ~}
+
+[metadata]
+%{ if single ~}
+url = "sqlite:///var/lib/oxabl-cache/meta.db"
+%{ else ~}
+url = "postgres://oxabl_cache@${database_host}:5432/oxabl_cache"
+password_file = "/run/secrets/oxabl-cache/db-password"
+ca_file = "/run/secrets/oxabl-cache/db-ca.pem"
+%{ endif ~}
+
+[store]
+%{ if s3 ~}
+kind = "s3"
+endpoint = "${r2_endpoint}"
+region = "auto"
+bucket = "${r2_bucket}"
+path_style = true
+access_key_id_file = "/run/secrets/oxabl-cache/s3-access-key-id"
+secret_access_key_file = "/run/secrets/oxabl-cache/s3-secret-access-key"
+%{ else ~}
+kind = "fs"
+root = "/var/lib/oxabl-cache/objects"
+%{ endif ~}
+
+[keys]
+url_key_file = "/run/secrets/oxabl-cache/url-key"
+claim_hash_key_file = "/run/secrets/oxabl-cache/claim-key"
+
+[defaults]
+retention_days = ${retention_days}
+hard_quota = "${hard_quota}"
+rate = ${rate}
+burst = ${burst}
+
+[oidc]
+issuer_allowlist = [${issuers}]
+
+[log]
+level = "${log_level}"
+format = "json"
