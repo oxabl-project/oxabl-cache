@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use reqwest::StatusCode;
-use rusty_s3::actions::{CreateBucket, DeleteObject, GetObject, HeadObject, PutObject};
+use rusty_s3::actions::{
+    CreateBucket, DeleteObject, GetObject, HeadObject, ListObjectsV2, PutObject,
+};
 use rusty_s3::{Bucket, Credentials, S3Action, UrlStyle};
 use url::Url;
 
@@ -86,6 +88,21 @@ impl S3Bucket {
             StatusCode::NOT_FOUND => Ok(None),
             status => bail!("HEAD answered {status}"),
         }
+    }
+
+    /// Presigned listing of the keys under `prefix`, first page only.
+    pub async fn list(&self, prefix: &str) -> Result<Vec<String>> {
+        let bucket = self.bucket()?;
+        let credentials = self.credentials();
+        let mut action = bucket.list_objects_v2(Some(&credentials));
+        action.with_prefix(prefix);
+        let url = action.sign(SIGNATURE_LIFETIME);
+        let response = reqwest::Client::new().get(url).send().await?;
+        if response.status() != StatusCode::OK {
+            bail!("list answered {}", response.status());
+        }
+        let page = ListObjectsV2::parse_response(&response.text().await?)?;
+        Ok(page.contents.into_iter().map(|object| object.key).collect())
     }
 
     /// Presigned DELETE of `key`.

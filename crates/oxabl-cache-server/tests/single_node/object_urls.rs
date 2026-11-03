@@ -112,8 +112,5 @@ fn a_committed_pack_accepts_no_further_put_and_a_pending_one_serves_no_get() {
         "ok",
         "a new client_ref reserves a new pack"
     );
-    assert_eq!(
-        std::fs::read(world.object_file(pack_id)).expect("object"),
-        pack.bytes
-    );
+    assert_eq!(world.read_object(pack_id), pack.bytes);
 }

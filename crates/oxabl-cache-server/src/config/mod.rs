@@ -2,7 +2,10 @@
 
 mod env;
 mod raw;
+mod store;
 mod units;
+
+pub(crate) use store::StoreConfig;
 
 use oxabl_cache_core::Config as CoreConfig;
 use oxabl_cache_http::log::Level;
@@ -36,7 +39,7 @@ pub(crate) struct Config {
     pub shutdown_timeout: Duration,
     pub transport: Transport,
     pub metadata_path: PathBuf,
-    pub store_root: PathBuf,
+    pub store: StoreConfig,
     pub url_key_file: PathBuf,
     pub claim_hash_key_file: Option<PathBuf>,
     pub core: CoreConfig,
@@ -166,23 +169,6 @@ impl Config {
                 "server.public_url is required when server.listen is a wildcard address".to_owned(),
             );
         }
-        if raw.store.kind != "fs" {
-            return Err(format!(
-                "store kind `{}` is not available in this build (fs only)",
-                raw.store.kind
-            ));
-        }
-        let s3_only = [
-            &raw.store.endpoint,
-            &raw.store.region,
-            &raw.store.bucket,
-            &raw.store.prefix,
-            &raw.store.access_key_id_file,
-            &raw.store.secret_access_key_file,
-        ];
-        if s3_only.iter().any(|key| key.is_some()) || raw.store.path_style.is_some() {
-            return Err("store keys for s3 are set but the store kind is fs".to_owned());
-        }
         if raw.metadata.password_file.is_some() {
             return Err("metadata.password_file applies to postgres only".to_owned());
         }
@@ -195,7 +181,7 @@ impl Config {
         {
             warnings.push("[oidc] settings are ignored: OIDC is not available in this build");
         }
-        let store_root = raw.store.root.ok_or("store.root is required for kind fs")?;
+        let store = store::parse(raw.store)?;
         if raw
             .log
             .format
@@ -247,7 +233,7 @@ impl Config {
             shutdown_timeout,
             transport,
             metadata_path: sqlite_path(&raw.metadata.url)?,
-            store_root: store_root.into(),
+            store,
             url_key_file: raw.keys.url_key_file.into(),
             claim_hash_key_file: raw.keys.claim_hash_key_file.map(PathBuf::from),
             core,

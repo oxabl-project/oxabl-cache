@@ -15,7 +15,7 @@ fn call(
     body: Option<&Value>,
 ) -> crate::support::http::Response {
     let bytes = body.map(Value::to_string).unwrap_or_default();
-    let cert = server.cert_pem.as_deref().expect("a TLS server");
+    let cert = &std::fs::read_to_string(server.dir.join("tls.crt")).expect("certificate");
     tls::request(
         addr,
         cert,
@@ -104,7 +104,7 @@ fn the_listeners_speak_tls_1_3_only_and_object_urls_are_https() {
         "object URLs point at the TLS listener: {url}"
     );
 
-    let cert = server.cert_pem.as_deref().expect("cert");
+    let cert = &std::fs::read_to_string(server.dir.join("tls.crt")).expect("certificate");
     let old = tls::request(
         &server.public,
         cert,

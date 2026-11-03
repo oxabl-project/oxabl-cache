@@ -1,6 +1,7 @@
 //! The real `oxabl-cache-server` binary on a fresh data directory.
 
 use super::http::{Response, request};
+use super::objects::Objects;
 use serde_json::{Value, json};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
@@ -41,21 +42,22 @@ pub struct Server {
     pub metrics: String,
     pub public_url: String,
     pub dir: PathBuf,
+    pub objects: Objects,
     pub operator: String,
-    pub cert_pem: Option<String>,
     config: PathBuf,
     runs: u32,
 }
 
 const BIN: &str = env!("CARGO_BIN_EXE_oxabl-cache-server");
 
-fn config_text(dir: &Path, options: &Options) -> String {
+fn config_text(dir: &Path, objects: &Objects, options: &Options) -> String {
+    let store = objects.section(dir);
     let dir = dir.display();
     format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nadmin_listen = \"127.0.0.1:0\"\n\
          metrics_listen = \"127.0.0.1:0\"\nurl_lifetime = \"{}\"\nshutdown_timeout = \"{}\"\n\
          [metadata]\nurl = \"sqlite://{dir}/meta.db\"\n\
-         [store]\nkind = \"fs\"\nroot = \"{dir}/objects\"\n\
+         {store}\
          [keys]\nurl_key_file = \"{dir}/url.key\"\n\
          [gc]\ngrace = \"{}\"\nlease = \"{}\"\ninterval = \"{}\"\n{}\n",
         options.url_lifetime,
@@ -78,15 +80,14 @@ impl Server {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("data dir");
         let config = dir.join("server.toml");
-        let mut cert_pem = None;
         if options.tls {
             let issued = rcgen::generate_simple_self_signed(vec!["localhost".to_owned()])
                 .expect("certificate");
             fs::write(dir.join("tls.crt"), issued.cert.pem()).expect("cert file");
             fs::write(dir.join("tls.key"), issued.signing_key.serialize_pem()).expect("key file");
-            cert_pem = Some(issued.cert.pem());
         }
-        fs::write(&config, config_text(&dir, &options)).expect("config");
+        let objects = Objects::open(crate::STORE, &dir);
+        fs::write(&config, config_text(&dir, &objects, &options)).expect("config");
         let init = Command::new(BIN)
             .arg("-c")
             .arg(&config)
@@ -109,8 +110,8 @@ impl Server {
             metrics: String::new(),
             public_url: String::new(),
             dir,
+            objects,
             operator,
-            cert_pem,
             config,
             runs: 0,
         };

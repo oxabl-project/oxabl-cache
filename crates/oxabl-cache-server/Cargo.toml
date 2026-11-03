@@ -21,6 +21,7 @@ oxabl-cache-format.workspace = true
 oxabl-cache-http.workspace = true
 oxabl-cache-meta-sqlite.workspace = true
 oxabl-cache-store-fs.workspace = true
+oxabl-cache-store-s3.workspace = true
 axum.workspace = true
 blake3.workspace = true
 getrandom.workspace = true
@@ -33,6 +34,10 @@ tokio-rustls = { workspace = true, features = ["aws_lc_rs"] }
 toml.workspace = true
 
 [dev-dependencies]
+base64.workspace = true
+sha2.workspace = true
+oxabl-cache-e2e.workspace = true
+tokio = { workspace = true, features = ["rt"] }
 rcgen = { workspace = true, features = ["aws_lc_rs", "pem"] }
 rustls = { workspace = true, features = ["std", "aws_lc_rs", "tls12"] }
 oxabl-cache-format.workspace = true

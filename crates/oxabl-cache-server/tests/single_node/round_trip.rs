@@ -2,6 +2,7 @@
 
 use crate::support::fixture::World;
 use crate::support::frames::{self, Entry};
+use crate::support::objects::Kind;
 use crate::support::server::Options;
 use oxabl_cache_format as format;
 use serde_json::json;
@@ -14,7 +15,10 @@ fn an_operator_bootstraps_a_tenant_and_ci_uploads_then_readers_fetch_byte_identi
     let info = world.info(&world.reader);
     assert_eq!(info["epoch"], 0);
     assert_eq!(info["roster_version"], 0);
-    assert_eq!(info["store"]["kind"], "fs");
+    assert_eq!(
+        info["store"]["kind"],
+        if crate::STORE == Kind::Fs { "fs" } else { "s3" }
+    );
     assert_eq!(info["limits"]["lookup_ids"], 10_000);
 
     let pack = frames::pack(world.cache_bytes, &[3_000, 5_000]);
@@ -74,12 +78,14 @@ fn an_operator_bootstraps_a_tenant_and_ci_uploads_then_readers_fetch_byte_identi
     assert_eq!((whole.status, whole.body), (200, pack.bytes.clone()));
     let outside = world.get_object(&url, Some(&format!("bytes={}-", pack.bytes.len())));
     assert_eq!(outside.status, 416);
-    let past_the_end = world.get_object(&url, Some(&format!("bytes=0-{}", pack.bytes.len())));
-    assert_eq!(
-        past_the_end.status, 416,
-        "a range ending beyond the object is refused"
-    );
-    assert_eq!(outside.error_code(), "bad_request");
+    if crate::STORE == Kind::Fs {
+        let past_the_end = world.get_object(&url, Some(&format!("bytes=0-{}", pack.bytes.len())));
+        assert_eq!(
+            past_the_end.status, 416,
+            "a range ending beyond the object is refused"
+        );
+        assert_eq!(outside.error_code(), "bad_request");
+    }
 
     let (frame, shape) = frames::lookup(&[a], true, false, false, true);
     let personal = world.dev.binary("POST", &world.path("/lookup"), &frame);

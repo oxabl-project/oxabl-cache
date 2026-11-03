@@ -53,7 +53,7 @@ pub(crate) async fn run(config: Config) -> Result<(), String> {
         .clone()
         .unwrap_or_else(|| format!("{scheme}://{public_addr}"));
 
-    let app = wiring::build(&config, &public_url)?;
+    let app = wiring::build(&config, &public_url).await?;
     app.engine
         .heartbeat()
         .await

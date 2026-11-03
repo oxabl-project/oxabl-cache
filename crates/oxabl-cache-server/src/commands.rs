@@ -18,7 +18,7 @@ pub(crate) async fn init(config: &Config) -> Result<(), String> {
             eprintln!("created key file {}", path.display());
         }
     }
-    let app = wiring::build(config, PLACEHOLDER_URL)?;
+    let app = wiring::build(config, PLACEHOLDER_URL).await?;
     let exists = app
         .engine
         .operator_tokens_exist()
@@ -42,7 +42,7 @@ pub(crate) async fn init(config: &Config) -> Result<(), String> {
 
 /// Re-verifies the packs of one cache, or of every cache, and prints one JSON line per cache.
 pub(crate) async fn scrub(config: &Config, only: Option<&str>) -> Result<(), String> {
-    let app = wiring::build(config, PLACEHOLDER_URL)?;
+    let app = wiring::build(config, PLACEHOLDER_URL).await?;
     let caches: Vec<CacheId> = match only {
         Some(text) => vec![
             text.parse()
@@ -74,8 +74,8 @@ pub(crate) async fn scrub(config: &Config, only: Option<&str>) -> Result<(), Str
 }
 
 /// Prints what the configured object store supports.
-pub(crate) fn check_store(config: &Config) -> Result<(), String> {
-    let app = wiring::build(config, PLACEHOLDER_URL)?;
+pub(crate) async fn check_store(config: &Config) -> Result<(), String> {
+    let app = wiring::build(config, PLACEHOLDER_URL).await?;
     let capabilities = app.engine.object_store().capabilities();
     println!(
         "{}",

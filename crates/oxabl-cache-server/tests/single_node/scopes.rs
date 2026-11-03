@@ -26,7 +26,7 @@ fn a_read_token_cannot_write_and_a_developer_cannot_write_trusted() {
         .json()["packs"][0]
         .clone();
     assert_eq!(slot["status"], "ok");
-    let put = world.put_object(slot["url"].as_str().expect("url"), &pack.bytes);
+    let put = world.put_slot(&slot, &pack.bytes);
     assert_eq!(put.status, 200);
     let pack_id = slot["pack_id"].as_str().expect("id");
     let as_trusted = frames::commit(

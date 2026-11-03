@@ -26,12 +26,7 @@ fn a_commit_retry_gets_the_recorded_answer_and_a_different_body_is_refused() {
         "pack_incomplete",
         "the bytes have not arrived"
     );
-    assert_eq!(
-        world
-            .put_object(slot["url"].as_str().expect("url"), &pack.bytes)
-            .status,
-        200
-    );
+    assert_eq!(world.put_slot(&slot, &pack.bytes).status, 200);
 
     let intruder = world.commit(&world.reader, pack_id, &frame);
     assert_eq!(intruder.status, 403);

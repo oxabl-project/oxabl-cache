@@ -119,10 +119,17 @@ impl World {
         )
     }
 
-    /// PUTs `bytes` to a reserved pack's URL and returns the response.
-    pub fn put_object(&self, url: &str, bytes: &[u8]) -> Response {
-        let (addr, path) = split_url(url);
-        request(&addr, "PUT", &path, &[], bytes)
+    /// PUTs `bytes` to a reserved pack's URL with the headers the slot names.
+    pub fn put_slot(&self, slot: &Value, bytes: &[u8]) -> Response {
+        let (addr, path) = split_url(slot["url"].as_str().expect("url"));
+        let headers: Vec<(&str, String)> = slot["headers"]
+            .as_object()
+            .expect("headers")
+            .iter()
+            .filter(|(name, _)| !name.eq_ignore_ascii_case("content-length"))
+            .map(|(name, value)| (name.as_str(), value.as_str().expect("header").to_owned()))
+            .collect();
+        request(&addr, "PUT", &path, &headers, bytes)
     }
 
     pub fn get_object(&self, url: &str, range: Option<&str>) -> Response {
@@ -161,7 +168,7 @@ impl World {
         );
         let slot = reserved.json()["packs"][0].clone();
         assert_eq!(slot["status"], "ok", "{slot}");
-        let put = self.put_object(slot["url"].as_str().expect("url"), &pack.bytes);
+        let put = self.put_slot(&slot, &pack.bytes);
         assert_eq!(put.status, 200, "{}", String::from_utf8_lossy(&put.body));
         let pack_id = slot["pack_id"].as_str().expect("pack id").to_owned();
         let committed = self.commit(client, &pack_id, &frames::commit(ns, pack, entries));
@@ -187,13 +194,24 @@ impl World {
         (answered.body, shape)
     }
 
-    pub fn object_file(&self, pack_id: &str) -> std::path::PathBuf {
-        self.server
-            .dir
-            .join("objects/v1")
-            .join(&self.cache)
-            .join(&pack_id[..2])
-            .join(pack_id)
+    pub fn object_exists(&self, pack_id: &str) -> bool {
+        self.server.objects.exists(&self.cache, pack_id)
+    }
+
+    pub fn read_object(&self, pack_id: &str) -> Vec<u8> {
+        self.server.objects.read(&self.cache, pack_id)
+    }
+
+    /// Replaces a stored pack's bytes behind the server's back.
+    pub fn overwrite_object(&self, pack_id: &str, bytes: Vec<u8>) {
+        self.server.objects.overwrite(&self.cache, pack_id, bytes);
+    }
+
+    /// Flips one bit of the stored pack at `offset`.
+    pub fn flip_stored_bit(&self, pack_id: &str, offset: usize, mask: u8) {
+        let mut object = self.read_object(pack_id);
+        object[offset] ^= mask;
+        self.overwrite_object(pack_id, object);
     }
 }
 

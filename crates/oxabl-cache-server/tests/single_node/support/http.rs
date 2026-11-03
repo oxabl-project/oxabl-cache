@@ -50,7 +50,13 @@ pub fn connect(addr: &str) -> TcpStream {
 }
 
 pub fn head_text(method: &str, path: &str, headers: &[(&str, String)]) -> String {
-    let mut text = format!("{method} {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n");
+    let mut text = format!("{method} {path} HTTP/1.1\r\nConnection: close\r\n");
+    if !headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("host"))
+    {
+        text.push_str("Host: test\r\n");
+    }
     for (name, value) in headers {
         text.push_str(&format!("{name}: {value}\r\n"));
     }
@@ -122,6 +128,7 @@ pub fn request(
 ) -> Response {
     let mut stream = connect(addr);
     let mut all = headers.to_vec();
+    all.push(("Host", addr.to_owned()));
     all.push(("Content-Length", body.len().to_string()));
     stream
         .write_all(head_text(method, path, &all).as_bytes())
