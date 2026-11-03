@@ -468,7 +468,9 @@ session-level `pg_try_advisory_lock` every second. The node that holds the lock 
 the leader. The database releases the lock when that connection ends, process death
 included. The GC loop checks leadership before every tick and runs jobs only while
 it leads; `oxabl_cache_gc_leader` reports it. A node that cannot reach the database is
-never the leader. With SQLite, the single process is always the leader.
+never the leader. A node notices a lost lock at its next poll, so for up to a second
+after a takeover both nodes can report `oxabl_cache_gc_leader 1`; only the newest
+epoch can write (below). With SQLite, the single process is always the leader.
 
 **Fencing.** A deposed leader may still have a GC pass in flight, for example one
 that started before a network partition, whose database session outlives the

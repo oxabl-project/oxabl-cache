@@ -56,8 +56,12 @@ and the storage attacks below use it, so it also checks the spec.
   - **GC fencing.** Leader A runs behind the fault proxy with slowed replies and is
     caught inside a GC pass, then `SIGSTOP`ped. Its lock session is terminated, and
     rival B takes over. B is configured never to delete anything in the test window.
-    After A is resumed, A's `oxabl_cache_gc_fenced_total` rises, A no longer leads,
-    and the expired pack A would have swept is still in `packs` and in the bucket.
+    The test waits until the pack's lease has run out, then resumes A. A stops
+    leading, and the expired pack A would have swept is still in `packs` and in the
+    bucket. A in flight with more steps to run is refused by the fence; A at the end
+    of its pass gives up at its next election poll. Both leave the pack untouched.
+    The session termination is limited to the test's own database, because the
+    Postgres cluster is shared with the other tests of the binary.
   - **Readiness.** `/readyz` answers 503 while Postgres is stopped and 200 after it
     restarts, while `/livez` and `/v1/health` stay up.
   - **Postgres timeouts.** With `statement_timeout = "1s"`, a request blocked on a

@@ -1,6 +1,6 @@
 //! A garbage-collection leader that lost leadership while it was frozen cannot act on resume.
 
-use crate::nodes::{Node, leads, metrics, sql};
+use crate::nodes::{Node, leads, sql};
 use crate::support::backend::new_database;
 use crate::support::fixture::{World, wait_until};
 use crate::support::frames;
@@ -20,21 +20,29 @@ fn signal(pid: u32, name: &str) {
     assert!(status.success());
 }
 
-fn counter(addr: &str, name: &str) -> u64 {
-    metrics(addr)
-        .lines()
-        .find_map(|line| line.strip_prefix(name)?.trim().parse().ok())
-        .unwrap_or(0)
-}
-
-/// Ends the sessions that hold the leadership lock and nothing else.
+/// Ends the sessions of `url`'s database that hold the leadership lock and nothing
+/// else. The cluster is shared with other tests, whose leaders must stay untouched.
 fn terminate_leader_session(url: &str) {
     sql(
         url,
         "SELECT pg_terminate_backend(a.pid) FROM pg_stat_activity a
-         WHERE a.application_name = 'oxabl-cache-server' AND a.state = 'idle'
-           AND a.pid IN (SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND granted)",
+         WHERE a.datname = current_database()
+           AND a.application_name = 'oxabl-cache-server' AND a.state = 'idle'
+           AND a.pid IN (SELECT pid FROM pg_locks
+                         WHERE locktype = 'advisory' AND granted AND database = a.datid)",
     );
+}
+
+fn pack_is_due(url: &str, pack: &str) -> bool {
+    sql(
+        url,
+        &format!(
+            "SELECT lease_until < floor(extract(epoch FROM now()))::bigint FROM packs
+             WHERE encode(pack_id, 'hex') = '{pack}'"
+        ),
+    )
+    .first()
+    .is_some_and(|row| row.get::<_, bool>(0))
 }
 
 fn pack_state(url: &str, pack: &str) -> Option<i64> {
@@ -121,6 +129,10 @@ fn a_frozen_leader_that_lost_leadership_is_refused_on_resume_and_deletes_nothing
     signal(leader_pid, "STOP");
     terminate_leader_session(&direct);
     wait_until(Duration::from_secs(4), || leads(&rival.metrics));
+    assert!(
+        wait_until(WAIT, || pack_is_due(&direct, &pack_id)),
+        "the pack's lease runs out while the old leader is frozen"
+    );
     signal(leader_pid, "CONT");
     assert!(
         wait_until(WAIT, || leads(&rival.metrics)),
@@ -130,10 +142,9 @@ fn a_frozen_leader_that_lost_leadership_is_refused_on_resume_and_deletes_nothing
 
     assert!(
         wait_until(WAIT, || {
-            counter(&old_leader, "oxabl_cache_gc_fenced_total") > 0
-                || pack_state(&direct, &pack_id).is_none()
+            !leads(&old_leader) || pack_state(&direct, &pack_id).is_none()
         }),
-        "the old leader either meets the fence or acts"
+        "the old leader stops collecting before it deletes anything"
     );
     assert_eq!(
         pack_state(&direct, &pack_id),
@@ -141,12 +152,12 @@ fn a_frozen_leader_that_lost_leadership_is_refused_on_resume_and_deletes_nothing
         "the expired pack the old leader would have swept is still there"
     );
     assert!(world.object_exists(&pack_id), "and so are its bytes");
-    assert!(
-        counter(&old_leader, "oxabl_cache_gc_fenced_total") > 0,
-        "the old leader's transaction was refused"
-    );
     assert!(!leads(&old_leader), "the old leader no longer collects");
     std::thread::sleep(Duration::from_secs(3));
-    assert_eq!(pack_state(&direct, &pack_id), Some(0));
-    assert!(leads(&rival.metrics), "the rival still leads");
+    assert_eq!(
+        pack_state(&direct, &pack_id),
+        Some(0),
+        "a pass resumed late deletes nothing either"
+    );
+    assert!(leads(&rival.metrics), "the rival leads");
 }
