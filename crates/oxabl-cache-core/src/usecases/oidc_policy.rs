@@ -1,12 +1,12 @@
 //! Workload trust policies.
 
-use crate::ports::TxScope;
 use crate::domain::oidc::{ClaimCondition, WorkloadPolicy};
 use crate::domain::principal::Caller;
 use crate::domain::scope::{Grant, Scope, ScopeSet};
 use crate::engine::Engine;
 use crate::error::{Conflict, Error, Result};
 use crate::ids::{CacheId, PrincipalId};
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 use crate::usecases::oidc_rules::check_claim_name;
 use std::collections::BTreeMap;

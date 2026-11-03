@@ -1,10 +1,10 @@
 //! The tenant's issuer allowlist.
 
-use crate::ports::TxScope;
 use crate::domain::oidc::{Issuer, IssuerShape};
 use crate::domain::principal::Caller;
 use crate::engine::Engine;
 use crate::error::{Error, Result};
+use crate::ports::TxScope;
 use crate::ports::{Clock, IdentityVerifier, MetadataStore, ObjectStore, PackAssembler};
 use crate::usecases::oidc_rules::check_claim_name;
 

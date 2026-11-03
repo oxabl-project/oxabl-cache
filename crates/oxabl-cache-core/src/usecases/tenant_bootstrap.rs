@@ -1,12 +1,12 @@
 //! The first human administrator of a tenant, named by an operator.
 
-use crate::ports::TxScope;
 use crate::domain::oidc::{Issuer, IssuerShape};
 use crate::domain::scope::{Grant, Scope, ScopeSet};
 use crate::domain::tenant::TenantStatus;
 use crate::engine::Engine;
 use crate::error::{Conflict, Error, Result};
 use crate::ids::{PrincipalId, TenantId};
+use crate::ports::TxScope;
 use crate::ports::metadata::User;
 use crate::ports::{Clock, IdentityVerifier, MetadataStore, ObjectStore, PackAssembler};
 
