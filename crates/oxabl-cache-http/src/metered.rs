@@ -5,7 +5,7 @@ use oxabl_cache_core::Result;
 use oxabl_cache_core::ids::CacheId;
 use oxabl_cache_core::ports::{
     MetaTx, MetadataStore, ObjectHead, ObjectInfo, ObjectKey, ObjectStore, SignedUrl,
-    StoreCapabilities,
+    StoreCapabilities, TxScope,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -25,16 +25,31 @@ impl<M> MeteredMeta<M> {
 }
 
 impl<M: MetadataStore> MetadataStore for MeteredMeta<M> {
-    async fn transact<T, F>(&self, work: F) -> Result<T>
+    async fn transact_in<T, F>(&self, scope: TxScope, work: F) -> Result<T>
     where
         T: Send + 'static,
         F: FnOnce(&mut dyn MetaTx) -> Result<T> + Send + 'static,
     {
         let started = Instant::now();
-        let outcome = self.inner.transact(work).await;
+        let outcome = self.inner.transact_in(scope, work).await;
         self.metrics.observe(
             "oxabl_cache_metadata_query_seconds",
             &[("op", "transact")],
+            started.elapsed().as_secs_f64(),
+        );
+        outcome
+    }
+
+    async fn read<T, F>(&self, work: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut dyn MetaTx) -> Result<T> + Send + 'static,
+    {
+        let started = Instant::now();
+        let outcome = self.inner.read(work).await;
+        self.metrics.observe(
+            "oxabl_cache_metadata_query_seconds",
+            &[("op", "read")],
             started.elapsed().as_secs_f64(),
         );
         outcome

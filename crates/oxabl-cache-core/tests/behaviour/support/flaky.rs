@@ -1,6 +1,6 @@
 //! A metadata port that can lose the acknowledgement of a committed transaction.
 
-use oxabl_cache_core::ports::{MetaTx, MetadataStore};
+use oxabl_cache_core::ports::{MetaTx, MetadataStore, TxScope};
 use oxabl_cache_core::{Error, Result};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,12 +26,12 @@ impl<M> FlakyMeta<M> {
 }
 
 impl<M: MetadataStore> MetadataStore for FlakyMeta<M> {
-    async fn transact<T, F>(&self, work: F) -> Result<T>
+    async fn transact_in<T, F>(&self, scope: TxScope, work: F) -> Result<T>
     where
         T: Send + 'static,
         F: FnOnce(&mut dyn MetaTx) -> Result<T> + Send + 'static,
     {
-        let outcome = self.inner.transact(work).await?;
+        let outcome = self.inner.transact_in(scope, work).await?;
         if self.lose_next_ack.swap(false, Ordering::SeqCst) {
             return Err(Error::unavailable("acknowledgement lost"));
         }

@@ -10,6 +10,7 @@ use crate::domain::usage::Metric;
 use crate::engine::Engine;
 use crate::error::{Conflict, Error, Result};
 use crate::ids::{CacheId, PackId};
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectKey, ObjectStore, PackAssembler};
 use crate::usecases::commit_apply::{CommitInput, CommitOutput, answer_repeat, apply_commit};
 use crate::usecases::commit_validate::validate_frame;
@@ -65,7 +66,7 @@ where
         let authorized = caller.clone();
         let (tenant, pack) = self
             .meta
-            .transact(move |tx| {
+            .read(move |tx| {
                 let cache = scoped_cache(tx, &authorized, &cache_id, scope)?;
                 let pack = tx.pack(&cache_id, &pack_id)?.ok_or(Error::NotFound)?;
                 if pack.uploader != authorized.principal {
@@ -117,7 +118,7 @@ where
             pack_size,
         } = self
             .meta
-            .transact(move |tx| apply_commit(tx, input))
+            .transact_in(TxScope::Cache(cache_id), move |tx| apply_commit(tx, input))
             .await?;
         if recorded {
             let committed = statuses
@@ -139,7 +140,9 @@ where
     async fn queue_scrub(&self, cache: CacheId, pack: PackId) -> Result<()> {
         let now = self.now();
         self.meta
-            .transact(move |tx| tx.queue_scrub(&cache, &pack, now))
+            .transact_in(TxScope::Cache(cache), move |tx| {
+                tx.queue_scrub(&cache, &pack, now)
+            })
             .await
     }
 }

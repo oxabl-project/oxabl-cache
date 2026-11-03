@@ -13,3 +13,13 @@ workspace = true
 
 [dependencies]
 oxabl-cache-core.workspace = true
+blake3.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
+tokio-postgres.workspace = true
+tokio-rustls = { workspace = true, features = ["aws_lc_rs"] }
+rustls = { workspace = true, features = ["std", "aws_lc_rs"] }
+webpki-root-certs.workspace = true
+
+[dev-dependencies]
+oxabl-cache-e2e.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

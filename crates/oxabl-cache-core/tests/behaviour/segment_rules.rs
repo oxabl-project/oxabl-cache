@@ -2,7 +2,7 @@
 
 use crate::support::{Env, entry, lookup_id, sealed};
 use oxabl_cache_core::Error;
-use oxabl_cache_core::domain::entry::EntryStatus::{Committed, Invalid, MissingDictionary};
+use oxabl_cache_core::domain::entry::EntryStatus::{Committed, Exists, Invalid, MissingDictionary};
 use oxabl_cache_core::domain::namespace::NamespaceKind::{Personal, Trusted};
 use oxabl_cache_core::domain::segment::SegmentKind;
 use oxabl_cache_core::ids::SegmentId;
@@ -213,4 +213,26 @@ async fn a_segment_table_that_leaves_the_pack_or_overlaps_is_refused_and_the_pac
         Ok(vec![Committed, Committed]),
         "a refused frame does not close the pack"
     );
+}
+
+#[tokio::test]
+async fn one_lookup_id_twice_in_a_commit_keeps_the_first_and_kills_the_second_segment() {
+    let env = Env::new().await;
+    let built = env.artifacts(&[1, 2, 3], 2048);
+    let (_, statuses) = env
+        .publish(
+            &env.ci,
+            Trusted,
+            &built,
+            vec![entry(1, 0), entry(1, 1), entry(2, 2)],
+        )
+        .await;
+    assert_eq!(statuses, vec![Committed, Exists, Committed]);
+    assert_eq!(env.hits(&env.reader, &[1, 2], false).await, vec![0, 1]);
+    assert_eq!(
+        env.info().await.quota.live_bytes,
+        2 * 2048,
+        "the losing entry's segment is dead from birth"
+    );
+    env.assert_consistent().await;
 }

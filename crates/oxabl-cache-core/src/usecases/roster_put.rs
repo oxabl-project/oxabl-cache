@@ -7,6 +7,7 @@ use crate::engine::Engine;
 use crate::error::{Error, Result};
 use crate::ids::CacheId;
 use crate::limits::ROSTER_BYTES;
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 use crate::usecases::scoped_cache::scoped_cache;
 use crate::usecases::signature_check::verifies;
@@ -36,7 +37,7 @@ where
         let caller = caller.clone();
         let now = self.now();
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Cache(cache), move |tx| {
                 let found = scoped_cache(tx, &caller, &cache, Scope::CacheAdmin)?;
                 if found.roster_version != expected_version {
                     return Err(Error::PreconditionFailed);

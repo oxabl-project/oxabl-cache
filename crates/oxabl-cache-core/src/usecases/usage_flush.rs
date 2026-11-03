@@ -2,6 +2,7 @@
 
 use crate::engine::Engine;
 use crate::error::Result;
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 use std::collections::HashMap;
 
@@ -35,7 +36,7 @@ where
         let (node, seq) = (pending.node, pending.seq);
         let report = self
             .meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Ledger, move |tx| {
                 if tx.ledger_high_water(&node)?.is_some_and(|mark| seq <= mark) {
                     return Ok(FlushReport {
                         ignored: true,

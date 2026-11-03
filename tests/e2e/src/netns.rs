@@ -1,4 +1,6 @@
-//! Runs a test inside an unprivileged user and network namespace of its own.
+//! Runs a test inside a user and network namespace of its own. The namespace is
+//! configured as its root, then the test runs as the invoking user's own uid, so
+//! programs that refuse to run as root (Postgres) work inside it.
 
 use std::process::Command;
 use std::thread;
@@ -28,7 +30,11 @@ pub fn enter(addresses: &[&str]) -> bool {
         .iter()
         .map(|address| format!("ip addr add {address}/32 dev lo && "))
         .collect();
-    let script = format!("ip link set lo up && {adds}exec \"$0\" \"$@\"");
+    let uid = nix::unistd::getuid();
+    let script = format!(
+        "ip link set lo up && {adds}sysctl -w net.ipv4.ip_unprivileged_port_start=0 >/dev/null \
+         && exec unshare --user --map-user={uid} \"$0\" \"$@\""
+    );
     let output = Command::new("unshare")
         .args(["--user", "--map-root-user", "--net", "sh", "-c", &script])
         .arg(executable)

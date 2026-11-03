@@ -1936,7 +1936,9 @@ dependencies = [
  "blake3",
  "ed25519-dalek",
  "getrandom 0.4.3",
+ "oxabl-cache-e2e",
  "oxabl-cache-format",
+ "oxabl-cache-meta-postgres",
  "oxabl-cache-meta-sqlite",
  "oxabl-cache-store-fs",
  "sha2 0.11.1",
@@ -2008,7 +2010,14 @@ dependencies = [
 name = "oxabl-cache-meta-postgres"
 version = "0.0.0"
 dependencies = [
+ "blake3",
  "oxabl-cache-core",
+ "oxabl-cache-e2e",
+ "rustls",
+ "tokio",
+ "tokio-postgres",
+ "tokio-rustls",
+ "webpki-root-certs",
 ]
 
 [[package]]
@@ -2053,6 +2062,7 @@ dependencies = [
  "oxabl-cache-e2e",
  "oxabl-cache-format",
  "oxabl-cache-http",
+ "oxabl-cache-meta-postgres",
  "oxabl-cache-meta-sqlite",
  "oxabl-cache-oidc",
  "oxabl-cache-store-fs",
@@ -2063,6 +2073,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "tokio",
+ "tokio-postgres",
  "tokio-rustls",
  "toml 0.9.12+spec-1.1.0",
 ]

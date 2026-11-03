@@ -44,7 +44,7 @@ where
     ) -> Result<Exchanged> {
         let (status, issuers) = self
             .meta
-            .transact(move |tx| {
+            .read(move |tx| {
                 let status = tx.tenant(&tenant)?.map(|found| found.status);
                 let issuers = tx.issuers_of(&tenant)?;
                 Ok((status, issuers))
@@ -63,7 +63,7 @@ where
         let key = self.config.claim_key.clone();
         let resolved = self
             .meta
-            .transact(move |tx| {
+            .read(move |tx| {
                 let matched: Vec<WorkloadPolicy> = match &key {
                     Some(key) => tx
                         .policies_of(&tenant)?

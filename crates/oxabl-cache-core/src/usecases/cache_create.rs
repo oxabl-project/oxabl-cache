@@ -6,6 +6,7 @@ use crate::domain::roster::PublicKey;
 use crate::engine::Engine;
 use crate::error::{Conflict, Error, Result};
 use crate::ids::CacheId;
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 
 /// What a new cache is made of.
@@ -52,7 +53,7 @@ where
         let id = cache.id;
         let keys = spec.owner_keys;
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Tenant(cache.tenant), move |tx| {
                 if tx
                     .caches_of(&cache.tenant)?
                     .iter()
@@ -82,7 +83,7 @@ where
         }
         let tenant = caller.tenant;
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::TenantCache(tenant, cache), move |tx| {
                 tx.cache(&tenant, &cache)?.ok_or(Error::NotFound)?;
                 tx.set_owner_keys(&cache, &keys)
             })

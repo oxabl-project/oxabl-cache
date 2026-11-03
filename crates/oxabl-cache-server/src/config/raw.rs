@@ -46,6 +46,8 @@ pub(crate) struct Tls {
 pub(crate) struct Metadata {
     pub url: String,
     pub password_file: Option<String>,
+    pub ca_file: Option<String>,
+    pub max_connections: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,5 +1,6 @@
 //! A Postgres cluster in a temporary directory with a fresh database per test.
 
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -16,8 +17,9 @@ const STARTUP: Duration = Duration::from_secs(60);
 /// A running cluster that trusts connections from loopback.
 pub struct Postgres {
     port: u16,
-    _process: Supervised,
-    _dir: TestDir,
+    data: PathBuf,
+    process: Option<Supervised>,
+    dir: TestDir,
 }
 
 /// A database created by [`Postgres::create_database`].
@@ -79,23 +81,54 @@ impl Postgres {
         ]);
         cli::run(&mut initdb)?;
 
+        let process = Self::start(dir.path(), &data, port)?;
+
+        Ok(Self {
+            port,
+            data,
+            process: Some(process),
+            dir,
+        })
+    }
+
+    fn start(dir: &Path, data: &Path, port: u16) -> Result<Supervised> {
         let mut server = Command::new("postgres");
         server
             .arg("-D")
-            .arg(&data)
+            .arg(data)
             .args(["-p", &port.to_string()])
             .args(["-c", "listen_addresses=127.0.0.1"])
             .args(["-c", "unix_socket_directories="])
             .args(["-c", "fsync=off"])
             .args(["-c", "max_connections=200"]);
-        let mut process = Supervised::spawn("postgres", server, dir.path())?;
+        let mut process = Supervised::spawn("postgres", server, dir)?;
         wait::for_port(&mut process, port, STARTUP)?;
+        wait::until(STARTUP, || {
+            process.ensure_running()?;
+            let mut ready = Command::new("pg_isready");
+            ready.args(["-h", "127.0.0.1", "-p", &port.to_string()]);
+            cli::run(&mut ready)
+        })?;
+        Ok(process)
+    }
 
-        Ok(Self {
-            port,
-            _process: process,
-            _dir: dir,
-        })
+    /// Kills every process of the cluster at once, as a crash would, and starts it again
+    /// on the same port and data directory. Connections to it are lost; the database
+    /// recovers from its log.
+    pub fn crash_and_restart(&mut self) -> Result<()> {
+        self.crash();
+        self.restart()
+    }
+
+    /// Kills every process of the cluster; connections are refused until [`Postgres::restart`].
+    pub fn crash(&mut self) {
+        self.process = None;
+    }
+
+    /// Starts a crashed cluster again on its port.
+    pub fn restart(&mut self) -> Result<()> {
+        self.process = Some(Self::start(self.dir.path(), &self.data, self.port)?);
+        Ok(())
     }
 
     pub fn port(&self) -> u16 {

@@ -26,7 +26,7 @@ where
     ) -> Result<()> {
         let found = self
             .meta
-            .transact(move |tx| tx.pack(&cache, &pack))
+            .read(move |tx| tx.pack(&cache, &pack))
             .await?
             .ok_or(Error::NotFound)?;
         if found.state != PackState::Pending || found.commit_digest.is_some() {
@@ -43,7 +43,7 @@ where
     /// Whether a signed GET may read the pack: it must be a live pack. Anything
     /// else is `NotFound`.
     pub async fn pack_serves_get(&self, cache: CacheId, pack: PackId) -> Result<()> {
-        match self.meta.transact(move |tx| tx.pack(&cache, &pack)).await? {
+        match self.meta.read(move |tx| tx.pack(&cache, &pack)).await? {
             Some(found) if found.state == PackState::Live => Ok(()),
             _ => Err(Error::NotFound),
         }
@@ -53,7 +53,7 @@ where
     pub async fn count_served_bytes(&self, cache: CacheId, bytes: u64) -> Result<()> {
         let tenant = self
             .meta
-            .transact(move |tx| tx.cache_tenant(&cache))
+            .read(move |tx| tx.cache_tenant(&cache))
             .await?
             .ok_or(Error::NotFound)?;
         self.count(tenant, cache, Metric::EgressBytes, bytes);

@@ -6,6 +6,7 @@ mod commands;
 mod config;
 mod keys;
 mod listener;
+mod meta;
 mod scheduler;
 mod serve;
 mod store;

@@ -1,3 +1,4 @@
+pub mod backend;
 pub mod cli;
 pub mod fixture;
 pub mod frames;

@@ -35,7 +35,7 @@ async fn a_crash_between_upload_and_commit_leaves_nothing_an_entry_names() {
     drop(engine);
     drop(meta);
 
-    let (restarted, _) = open_engine(dir.path(), &clock, small_config());
+    let (restarted, _) = open_engine(dir.path(), &clock, small_config()).await;
     let lookup = restarted
         .lookup(
             &reader,
@@ -132,7 +132,7 @@ async fn committed_entries_and_their_recorded_answers_survive_a_restart() {
     drop(engine);
     drop(meta);
 
-    let (restarted, _) = open_engine(dir.path(), &clock, small_config());
+    let (restarted, _) = open_engine(dir.path(), &clock, small_config()).await;
     let lookup = restarted
         .lookup(
             &reader,

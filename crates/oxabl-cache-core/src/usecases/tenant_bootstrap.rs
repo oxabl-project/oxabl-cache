@@ -6,6 +6,7 @@ use crate::domain::tenant::TenantStatus;
 use crate::engine::Engine;
 use crate::error::{Conflict, Error, Result};
 use crate::ids::{PrincipalId, TenantId};
+use crate::ports::TxScope;
 use crate::ports::metadata::User;
 use crate::ports::{Clock, IdentityVerifier, MetadataStore, ObjectStore, PackAssembler};
 
@@ -43,7 +44,7 @@ where
         let (url, known) = (issuer.clone(), tenant);
         let registered = self
             .meta
-            .transact(move |tx| {
+            .read(move |tx| {
                 match tx.tenant(&known)?.map(|found| found.status) {
                     None => return Err(Error::NotFound),
                     Some(TenantStatus::Suspended) => return Err(Error::TenantSuspended),
@@ -57,7 +58,7 @@ where
         }
         let now = self.now();
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Tenant(tenant), move |tx| {
                 if tx.issuer(&tenant, &issuer)?.is_none() {
                     tx.insert_issuer(&Issuer {
                         tenant,

@@ -20,7 +20,7 @@ where
     pub async fn get_roster(&self, caller: &Caller, cache: CacheId) -> Result<StoredRoster> {
         let caller = caller.clone();
         self.meta
-            .transact(move |tx| {
+            .read(move |tx| {
                 scoped_cache(tx, &caller, &cache, Scope::Read)?;
                 tx.roster(&cache)?.ok_or(Error::NotFound)
             })

@@ -5,6 +5,7 @@ use crate::domain::scope::{Grant, Scope, ScopeSet};
 use crate::engine::Engine;
 use crate::error::{Conflict, Error, Result};
 use crate::ids::PrincipalId;
+use crate::ports::TxScope;
 use crate::ports::metadata::User;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 
@@ -35,7 +36,7 @@ where
         };
         let id = user.id;
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Tenant(user.tenant), move |tx| {
                 if tx.insert_user(&user)? {
                     Ok(())
                 } else {
@@ -52,7 +53,7 @@ where
         let tenant = caller.tenant;
         let now = self.now();
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Tenant(tenant), move |tx| {
                 match tx.user(&user)? {
                     Some(found) if found.tenant == tenant => {}
                     _ => return Err(Error::NotFound),
@@ -84,7 +85,7 @@ where
         }
         let tenant = caller.tenant;
         self.meta
-            .transact(move |tx| {
+            .transact_in(TxScope::Tenant(tenant), move |tx| {
                 match tx.user(&principal)? {
                     Some(found) if found.tenant == tenant => {}
                     _ => return Err(Error::NotFound),

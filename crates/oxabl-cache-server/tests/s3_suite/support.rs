@@ -1,5 +1,7 @@
 //! The parts of the shared test support the S3 targets use.
 
+#[path = "../single_node/support/backend.rs"]
+pub mod backend;
 #[path = "../single_node/support/fixture.rs"]
 pub mod fixture;
 #[path = "../single_node/support/frames.rs"]

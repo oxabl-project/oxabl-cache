@@ -1,7 +1,7 @@
 //! `serve`: bind the listeners, run the background work, drain on a signal.
 
 use crate::config::{Config, Transport};
-use crate::{keys, listener, scheduler, tls, wiring};
+use crate::{keys, listener, meta, scheduler, tls, wiring};
 use oxabl_cache_http::log::{self, Level, emit};
 use oxabl_cache_http::{admin_router, metrics_router, public_router};
 use serde_json::{Value, json};
@@ -53,7 +53,8 @@ pub(crate) async fn run(config: Config) -> Result<(), String> {
         .map_err(|error| format!("cannot reach the metadata database: {error}"))?;
 
     let (stop, stopped) = watch::channel(false);
-    let background = scheduler::spawn(&app, config.gc, &stopped);
+    let election = meta::Election::new(&config.metadata)?;
+    let background = scheduler::spawn(&app, config.gc, election, &stopped).await;
     let drain = config.shutdown_timeout;
     let serving = vec![
         tokio::spawn(listener::run(

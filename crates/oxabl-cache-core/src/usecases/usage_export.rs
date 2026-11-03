@@ -18,9 +18,7 @@ where
     /// An operator action: it spans every tenant.
     pub async fn usage_export(&self, month: &str) -> Result<Vec<UsageTotal>> {
         let (from, to) = month_days(month).ok_or_else(|| Error::bad_request("month is YYYY-MM"))?;
-        self.meta
-            .transact(move |tx| tx.usage_totals(from, to))
-            .await
+        self.meta.read(move |tx| tx.usage_totals(from, to)).await
     }
 
     /// The caller's own tenant's usage for a UTC month. Needs `tenant:admin`.

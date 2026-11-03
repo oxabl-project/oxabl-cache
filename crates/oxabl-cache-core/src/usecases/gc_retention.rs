@@ -2,6 +2,7 @@
 
 use crate::engine::Engine;
 use crate::error::Result;
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 use crate::time::day_of;
 use crate::usecases::entry_removal::remove_entries;
@@ -16,7 +17,7 @@ where
     /// Deletes entries whose access day is older than their cache's retention and
     /// returns how many. Bytes follow through the mark rules, grace and sweep.
     pub async fn gc_retention(&self) -> Result<u64> {
-        let caches = self.meta.transact(|tx| tx.all_caches()).await?;
+        let caches = self.meta.read(|tx| tx.all_caches()).await?;
         let batch = self.config.gc_batch;
         let mut total = 0;
         for cache in caches {
@@ -26,7 +27,7 @@ where
                 let now = self.now();
                 let removed = self
                     .meta
-                    .transact(move |tx| {
+                    .transact_in(TxScope::Cache(id), move |tx| {
                         let idle = tx.entries_idle_before(&id, cutoff, batch)?;
                         Ok(remove_entries(tx, &id, &idle, now, |_| false)?.entries)
                     })

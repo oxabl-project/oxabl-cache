@@ -1,7 +1,8 @@
-//! Background work of a single-process node, which is its own garbage-collection
-//! leader: heartbeat, flushes of usage and access days, and the GC jobs.
+//! Background work of a node: heartbeat, flushes of usage and access days, and the
+//! GC jobs while the node leads.
 
 use crate::config::Gc;
+use crate::meta::Election;
 use crate::wiring::Prod;
 use oxabl_cache_core::ports::{Clock, MetadataStore};
 use oxabl_cache_http::App;
@@ -17,6 +18,7 @@ use tokio::time::{MissedTickBehavior, interval, interval_at};
 const HEARTBEAT: Duration = Duration::from_secs(10);
 const ACCESS_FLUSH: Duration = Duration::from_secs(10);
 const USAGE_FLUSH: Duration = Duration::from_secs(60);
+const ELECTION: Duration = Duration::from_secs(1);
 
 async fn job<T>(name: &str, work: impl Future<Output = oxabl_cache_core::Result<T>>) -> Option<T> {
     match work.await {
@@ -151,16 +153,60 @@ async fn weekly(app: &App<Prod>) {
     }
 }
 
-async fn gc_loop(app: Arc<App<Prod>>, gc: Gc, mut stop: watch::Receiver<bool>) {
-    app.set_gc_leader(true);
-    app.metrics.set("oxabl_cache_gc_leader", &[], 1.0);
-    let start = tokio::time::Instant::now();
-    let mut ticker = interval_at(start + gc.interval, gc.interval);
+async fn lead(app: &App<Prod>, election: &mut Election) -> bool {
+    let leads = match election.poll().await {
+        Ok(leads) => leads,
+        Err(error) => {
+            emit(
+                Level::Warn,
+                "leader_election_failed",
+                vec![("error", Value::from(error))],
+            );
+            false
+        }
+    };
+    if leads != app.gc_leader() {
+        emit(
+            Level::Info,
+            if leads {
+                "gc_leader_acquired"
+            } else {
+                "gc_leader_lost"
+            },
+            Vec::new(),
+        );
+    }
+    app.set_gc_leader(leads);
+    app.metrics
+        .set("oxabl_cache_gc_leader", &[], if leads { 1.0 } else { 0.0 });
+    leads
+}
+
+async fn gc_loop(
+    app: Arc<App<Prod>>,
+    gc: Gc,
+    mut election: Election,
+    mut stop: watch::Receiver<bool>,
+) {
+    let mut election_tick = interval(ELECTION);
+    election_tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut ticker = interval_at(tokio::time::Instant::now() + gc.interval, gc.interval);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut last_weekly = Instant::now();
+    election_tick.tick().await;
     loop {
         tokio::select! {
+            _ = election_tick.tick() => {
+                let was = app.gc_leader();
+                if lead(&app, &mut election).await && !was {
+                    ticker.reset();
+                    last_weekly = Instant::now();
+                }
+            }
             _ = ticker.tick() => {
+                if !app.gc_leader() || !lead(&app, &mut election).await {
+                    continue;
+                }
                 gc_tick(&app).await;
                 if last_weekly.elapsed() >= gc.orphan_scan {
                     weekly(&app).await;
@@ -175,13 +221,15 @@ async fn gc_loop(app: Arc<App<Prod>>, gc: Gc, mut stop: watch::Receiver<bool>) {
 }
 
 /// Starts the background tasks; they end when `stop` changes.
-pub(crate) fn spawn(
+pub(crate) async fn spawn(
     app: &Arc<App<Prod>>,
     gc: Gc,
+    mut election: Election,
     stop: &watch::Receiver<bool>,
 ) -> Vec<JoinHandle<()>> {
+    lead(app, &mut election).await;
     vec![
         tokio::spawn(flush_loop(Arc::clone(app), stop.clone())),
-        tokio::spawn(gc_loop(Arc::clone(app), gc, stop.clone())),
+        tokio::spawn(gc_loop(Arc::clone(app), gc, election, stop.clone())),
     ]
 }

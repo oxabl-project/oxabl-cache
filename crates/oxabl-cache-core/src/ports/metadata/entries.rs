@@ -18,6 +18,15 @@ pub enum EvictionScope {
 pub trait EntriesTx {
     /// Inserts an entry and its access row; `false`, changing nothing, if the key exists.
     fn insert_entry(&mut self, entry: &Entry, access_day: i64) -> Result<bool>;
+    /// Inserts entries and their access rows in one round trip where the store can;
+    /// per entry, `false` if its key exists, which includes an earlier entry of the
+    /// same batch with that key.
+    fn insert_entries(&mut self, entries: &[Entry], access_day: i64) -> Result<Vec<bool>> {
+        entries
+            .iter()
+            .map(|entry| self.insert_entry(entry, access_day))
+            .collect()
+    }
     /// The entries of `ids` in `namespaces` whose segment is live, with the
     /// record only when `with_record`.
     fn lookup_entries(

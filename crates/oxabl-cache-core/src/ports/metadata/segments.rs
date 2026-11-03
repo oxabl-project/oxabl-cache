@@ -17,6 +17,14 @@ pub trait SegmentsTx {
     ) -> Result<HashSet<SegmentId>>;
     /// Inserts a segment; `false`, changing nothing, if its id is recorded.
     fn insert_segment(&mut self, segment: &Segment) -> Result<bool>;
+    /// Inserts segments in one round trip where the store can; per segment, `false`
+    /// if its id is recorded. The ids of one batch are distinct.
+    fn insert_segments(&mut self, segments: &[Segment]) -> Result<Vec<bool>> {
+        segments
+            .iter()
+            .map(|segment| self.insert_segment(segment))
+            .collect()
+    }
     /// Sets `dead_since` on a live segment and returns it; `None` if it is dead or unknown.
     fn kill_segment(
         &mut self,

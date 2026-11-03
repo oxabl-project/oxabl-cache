@@ -18,13 +18,13 @@ where
 {
     /// Every tenant. An operator action.
     pub async fn list_tenants(&self) -> Result<Vec<Tenant>> {
-        self.meta.transact(|tx| tx.all_tenants()).await
+        self.meta.read(|tx| tx.all_tenants()).await
     }
 
     /// One tenant, or `NotFound`.
     pub async fn get_tenant(&self, id: TenantId) -> Result<Tenant> {
         self.meta
-            .transact(move |tx| tx.tenant(&id)?.ok_or(Error::NotFound))
+            .read(move |tx| tx.tenant(&id)?.ok_or(Error::NotFound))
             .await
     }
 

@@ -25,6 +25,7 @@ pub fn block_on<T>(work: impl Future<Output = T>) -> T {
 }
 
 /// A store with its own empty bucket or directory.
+#[derive(Clone)]
 pub enum Objects {
     Fs { root: PathBuf },
     S3 { bucket: S3Bucket },

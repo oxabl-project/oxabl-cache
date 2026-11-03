@@ -8,7 +8,7 @@ pub mod pack_assembler;
 
 pub use clock::{Clock, SystemClock};
 pub use identity::{IdentityVerifier, VerifiedIdentity};
-pub use metadata::{MetaTx, MetadataStore};
+pub use metadata::{MetaTx, MetadataStore, TxScope};
 pub use object_store::{
     ObjectHead, ObjectInfo, ObjectKey, ObjectStore, SignedUrl, StoreCapabilities,
 };

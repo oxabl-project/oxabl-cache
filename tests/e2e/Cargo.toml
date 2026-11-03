@@ -21,7 +21,7 @@ base64.workspace = true
 rcgen = { workspace = true, features = ["aws_lc_rs", "pem"] }
 rustls = { workspace = true, features = ["std", "aws_lc_rs"] }
 serde_json.workspace = true
-nix = { workspace = true, features = ["process", "signal"] }
+nix = { workspace = true, features = ["process", "signal", "user"] }
 reqwest = { workspace = true, features = ["rustls"] }
 rusty-s3.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time"] }

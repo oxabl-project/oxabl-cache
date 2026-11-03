@@ -39,7 +39,7 @@ where
     ) -> Result<ReportOutcome> {
         let authorized = caller.clone();
         self.meta
-            .transact(move |tx| {
+            .read(move |tx| {
                 scoped_cache(tx, &authorized, &cache, Scope::Read)?;
                 Ok(())
             })
@@ -54,7 +54,7 @@ where
             .map_err(|retry_after_secs| Error::RateLimited { retry_after_secs })?;
         let reported = self
             .meta
-            .transact(move |tx| tx.segment(&cache, &segment))
+            .read(move |tx| tx.segment(&cache, &segment))
             .await?;
         let Some(found) = reported.filter(|s| s.pack == pack && s.dead_since.is_none()) else {
             return Ok(ReportOutcome::Unconfirmed);

@@ -6,6 +6,7 @@ use crate::domain::scope::Scope;
 use crate::engine::Engine;
 use crate::error::Result;
 use crate::ids::{CacheId, PrincipalId};
+use crate::ports::TxScope;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
 use crate::usecases::entry_removal::remove_entries;
 use crate::usecases::scoped_cache::scoped_cache;
@@ -31,7 +32,7 @@ where
     pub async fn purge(&self, caller: &Caller, cache: CacheId, scope: PurgeScope) -> Result<u64> {
         let authorized = caller.clone();
         self.meta
-            .transact(move |tx| {
+            .read(move |tx| {
                 scoped_cache(tx, &authorized, &cache, Scope::CacheAdmin)?;
                 Ok(())
             })
@@ -42,7 +43,7 @@ where
             let now = self.now();
             let removed = self
                 .meta
-                .transact(move |tx| {
+                .transact_in(TxScope::Cache(cache), move |tx| {
                     let entries = match scope {
                         PurgeScope::BelowEpoch(epoch) => {
                             tx.entries_below_epoch(&cache, epoch, batch)?
