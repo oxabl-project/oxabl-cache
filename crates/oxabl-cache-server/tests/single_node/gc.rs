@@ -13,7 +13,10 @@ const WAIT: Duration = Duration::from_secs(30);
 fn an_uncommitted_pack_is_swept_after_its_lease_and_its_reservation_is_released() {
     let world = World::start("lease-sweep", Options::default());
     let pack = frames::pack(world.cache_bytes, &[4_000]);
-    let slot = world.reserve(&world.ci, "trusted", pack.bytes.len()).json()["packs"][0].clone();
+    let slot = world
+        .reserve_bytes(&world.ci, "trusted", &pack.bytes)
+        .json()["packs"][0]
+        .clone();
     assert_eq!(world.put_slot(&slot, &pack.bytes).status, 200);
     let pack_id = slot["pack_id"].as_str().expect("id").to_owned();
     assert!(world.object_exists(&pack_id));
@@ -27,12 +30,19 @@ fn an_uncommitted_pack_is_swept_after_its_lease_and_its_reservation_is_released(
         "the object is deleted once the lease has expired"
     );
     assert_eq!(world.info(&world.ci)["quota"]["pending_bytes"], 0);
-    let late = world.commit(
-        &world.ci,
-        &pack_id,
-        &frames::commit(TRUSTED, &pack, &[Entry::new(frames::lookup_id(), 0)]),
+    let frame = frames::commit(TRUSTED, &pack, &[Entry::new(frames::lookup_id(), 0)]);
+    let mut answers = Vec::new();
+    assert!(
+        wait_until(WAIT, || {
+            answers.push(world.commit(&world.ci, &pack_id, &frame).status);
+            answers.last() == Some(&404)
+        }),
+        "a swept pack is not found once its row is gone: {answers:?}"
     );
-    assert_eq!(late.status, 404, "nothing can commit a swept pack");
+    assert!(
+        !answers.contains(&200),
+        "nothing can commit a swept pack: {answers:?}"
+    );
 }
 
 #[test]

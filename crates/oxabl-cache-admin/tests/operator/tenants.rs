@@ -223,3 +223,67 @@ fn missing_settings_and_bad_flags_are_usage_errors() {
     );
     assert_eq!(bare(&["--help"], &[]).code(), 0);
 }
+
+#[test]
+fn deleting_a_tenant_ends_its_access_at_once_and_frees_its_name_after_the_teardown() {
+    let server = Server::start_with(
+        "op-delete",
+        false,
+        "[gc]\ngrace = \"2s\"\nlease = \"60s\"\ninterval = \"200ms\"\n",
+    );
+    let doomed = Tenant::create(&server, "doomed");
+    let kept = Tenant::create(&server, "kept");
+    assert_eq!(doomed.fetch_cache_info(&server).status(), 200);
+
+    let deleted = run(&server, &["--json", "tenant", "delete", "doomed"]);
+    assert_eq!(deleted.code(), 0, "{}", deleted.stderr());
+    assert_eq!(deleted.json(), json!({"deleted": doomed.id}));
+    assert_eq!(
+        doomed.fetch_cache_info(&server).status(),
+        401,
+        "its tokens stop working at once"
+    );
+    assert_eq!(
+        call(
+            &server.public_url(),
+            &doomed.admin_token,
+            "GET",
+            "/v1/tenant/caches",
+            None
+        )
+        .status(),
+        401
+    );
+    let listed = run(&server, &["--json", "tenant", "list"]).json();
+    let names: Vec<&str> = listed["tenants"]
+        .as_array()
+        .expect("tenants")
+        .iter()
+        .map(|row| row["name"].as_str().expect("name"))
+        .collect();
+    assert_eq!(names, vec!["kept"], "a deleted tenant is not listed");
+    assert_eq!(run(&server, &["tenant", "show", "doomed"]).code(), 1);
+    assert_eq!(
+        run(&server, &["tenant", "delete", &doomed.id]).code(),
+        1,
+        "twice finds nothing"
+    );
+    assert_eq!(run(&server, &["tenant", "delete", "nobody"]).code(), 1);
+    let taken = run(&server, &["tenant", "create", "doomed"]);
+    assert_eq!(taken.code(), 1, "the name stays taken until the teardown");
+    assert!(taken.stderr().contains("conflict"), "{}", taken.stderr());
+    assert_eq!(
+        kept.fetch_cache_info(&server).status(),
+        200,
+        "other tenants are untouched"
+    );
+
+    let freed = (0..300).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        run(&server, &["tenant", "create", "doomed"]).code() == 0
+    });
+    assert!(freed, "the name is free once the teardown is complete");
+    let reborn = run(&server, &["--json", "tenant", "show", "doomed"]).json();
+    assert_ne!(reborn["id"], json!(doomed.id), "a new tenant took the name");
+    assert_eq!(kept.fetch_cache_info(&server).status(), 200);
+}

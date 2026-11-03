@@ -1,22 +1,42 @@
 //! The transactional metadata port.
 
-mod accounts;
 mod admin;
+mod caches;
+mod credentials;
 mod entries;
+mod fence;
+mod grants;
 mod ledger;
 mod oidc;
+mod operator_tokens;
+mod pack_accounting;
+mod pack_selection;
 mod packs;
 mod roster;
+mod scrub_queue;
 mod segments;
+mod teardown;
+mod tenants;
+mod users;
 
-pub use accounts::{AccountsTx, User};
 pub use admin::AdminTx;
+pub use caches::CachesTx;
+pub use credentials::CredentialsTx;
 pub use entries::{EntriesTx, EvictionScope};
+pub use fence::FenceTx;
+pub use grants::GrantsTx;
 pub use ledger::LedgerTx;
 pub use oidc::OidcTx;
+pub use operator_tokens::OperatorTokensTx;
+pub use pack_accounting::PackAccountingTx;
+pub use pack_selection::PackSelectionTx;
 pub use packs::{PacksTx, RecordedCommit};
 pub use roster::RosterTx;
+pub use scrub_queue::ScrubQueueTx;
 pub use segments::SegmentsTx;
+pub use teardown::TeardownTx;
+pub use tenants::TenantsTx;
+pub use users::{User, UsersTx};
 
 use crate::error::Result;
 use crate::ids::{CacheId, TenantId};
@@ -24,12 +44,46 @@ use std::future::Future;
 
 /// Every operation available inside one metadata transaction.
 pub trait MetaTx:
-    AccountsTx + AdminTx + OidcTx + RosterTx + PacksTx + SegmentsTx + EntriesTx + LedgerTx
+    TenantsTx
+    + CachesTx
+    + UsersTx
+    + GrantsTx
+    + CredentialsTx
+    + AdminTx
+    + OperatorTokensTx
+    + OidcTx
+    + RosterTx
+    + PacksTx
+    + PackSelectionTx
+    + PackAccountingTx
+    + ScrubQueueTx
+    + SegmentsTx
+    + EntriesTx
+    + LedgerTx
+    + FenceTx
+    + TeardownTx
 {
 }
 
 impl<T> MetaTx for T where
-    T: AccountsTx + AdminTx + OidcTx + RosterTx + PacksTx + SegmentsTx + EntriesTx + LedgerTx
+    T: TenantsTx
+        + CachesTx
+        + UsersTx
+        + GrantsTx
+        + CredentialsTx
+        + AdminTx
+        + OperatorTokensTx
+        + OidcTx
+        + RosterTx
+        + PacksTx
+        + PackSelectionTx
+        + PackAccountingTx
+        + ScrubQueueTx
+        + SegmentsTx
+        + EntriesTx
+        + LedgerTx
+        + FenceTx
+        + TeardownTx
 {
 }
 

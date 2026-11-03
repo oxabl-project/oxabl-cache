@@ -102,20 +102,16 @@ fn plaintext_beyond_loopback_needs_an_explicit_upstream_terminator() {
 }
 
 #[test]
-fn init_mints_the_first_operator_token_once_and_unbuilt_subcommands_say_so() {
+fn init_mints_the_first_operator_token_once_and_the_copy_commands_need_their_options() {
     let first = run("init-once", BASE, &["init"], &[]);
     assert!(first.status.success(), "{}", stderr(&first));
     let token = String::from_utf8_lossy(&first.stdout).trim().to_owned();
     assert!(token.starts_with("oxo_"), "{token}");
 
-    for command in ["migrate", "backup"] {
-        let output = run("unbuilt", BASE, &[command], &[]);
+    for (command, option) in [("migrate", "--from"), ("backup", "--to")] {
+        let output = run("copy-options", BASE, &[command], &[]);
         assert_eq!(output.status.code(), Some(2));
-        assert!(
-            stderr(&output).contains("not implemented"),
-            "{}",
-            stderr(&output)
-        );
+        assert!(stderr(&output).contains(option), "{}", stderr(&output));
     }
 }
 
@@ -205,4 +201,99 @@ fn a_wildcard_listener_needs_a_public_url_and_check_store_reports_the_capabiliti
         serde_json::from_slice(&outputs[1].stdout).expect("check-store prints JSON");
     assert_eq!(capabilities["kind"], "fs");
     assert_eq!(capabilities["if_none_match"], false);
+}
+
+#[test]
+fn the_gc_batch_must_be_a_positive_number() {
+    let zero = run(
+        "config-gc-batch",
+        &format!("{BASE}[gc]\nbatch = 0\n"),
+        &["check-store"],
+        &[],
+    );
+    assert!(!zero.status.success());
+    assert!(stderr(&zero).contains("gc.batch"), "{}", stderr(&zero));
+    let fine = run(
+        "config-gc-batch-ok",
+        &format!("{BASE}[gc]\nbatch = 25\n"),
+        &["init"],
+        &[],
+    );
+    assert!(fine.status.success(), "{}", stderr(&fine));
+}
+
+#[test]
+fn backup_is_refused_on_postgres_metadata_with_a_pointer_to_base_backups() {
+    let postgres = BASE.replace(
+        "url = \"sqlite://{dir}/meta.db\"",
+        "url = \"postgres://u@127.0.0.1:1/db?sslmode=disable\"",
+    );
+    let refused = run(
+        "backup-postgres",
+        &postgres,
+        &["backup", "--to", "{dir}/copy.db"],
+        &[],
+    );
+    assert!(!refused.status.success());
+    let message = stderr(&refused);
+    assert!(
+        message.contains("SQLite") && message.contains("WAL"),
+        "{message}"
+    );
+}
+
+#[test]
+fn the_postgres_timeouts_are_validated_and_apply_to_postgres_only() {
+    let postgres = |keys: &str| {
+        BASE.replace(
+            "url = \"sqlite://{dir}/meta.db\"",
+            &format!("url = \"postgres://u@127.0.0.1:1/db?sslmode=disable\"\n{keys}"),
+        )
+    };
+    for (keys, mentioned) in [
+        ("statement_timeout = \"0s\"", "statement_timeout"),
+        ("statement_timeout = \"2h\"", "statement_timeout"),
+        ("statement_timeout = \"soon\"", "soon"),
+        (
+            "idle_in_transaction_timeout = \"0s\"",
+            "idle_in_transaction_timeout",
+        ),
+        (
+            "idle_in_transaction_timeout = \"1d\"",
+            "idle_in_transaction_timeout",
+        ),
+        ("max_connections = 0", "max_connections"),
+    ] {
+        let refused = run("config-pg-timeouts", &postgres(keys), &["check-store"], &[]);
+        assert!(!refused.status.success(), "{keys}");
+        assert!(
+            stderr(&refused).contains(mentioned),
+            "{keys}: {}",
+            stderr(&refused)
+        );
+    }
+    let accepted = run(
+        "config-pg-timeouts-ok",
+        &postgres("statement_timeout = \"30s\"\nidle_in_transaction_timeout = \"5s\""),
+        &["check-store"],
+        &[],
+    );
+    assert!(
+        stderr(&accepted).contains("cannot open the metadata database"),
+        "valid timeouts pass validation and reach the connection: {}",
+        stderr(&accepted)
+    );
+
+    let sqlite = run(
+        "config-sqlite-timeouts",
+        &BASE.replace("[metadata]\n", "[metadata]\nstatement_timeout = \"30s\"\n"),
+        &["check-store"],
+        &[],
+    );
+    assert!(!sqlite.status.success());
+    assert!(
+        stderr(&sqlite).contains("postgres only"),
+        "{}",
+        stderr(&sqlite)
+    );
 }

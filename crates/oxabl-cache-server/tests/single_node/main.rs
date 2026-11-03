@@ -8,21 +8,26 @@ use support::objects::Kind;
 pub const STORE: Kind = Kind::Fs;
 
 mod administration;
+mod backup;
 mod commit_retry;
 mod config_rules;
 mod dictionary_and_reports;
 mod first_write_wins;
 mod fs_support;
 mod gc;
+mod health;
 mod lifecycle;
 mod limits;
 mod logs;
+mod migrate;
 mod object_urls;
+mod operator_tokens;
 mod roster_rules;
 mod round_trip;
 mod scopes;
 mod shutdown_upload;
 mod support;
+mod teardown;
 mod tls_listener;
 
 use support::backend::Backend;

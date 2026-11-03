@@ -36,7 +36,7 @@ fn prepare(world: &World, client: &Client, keys: &[[u8; 32]], size: usize) -> Pr
         .enumerate()
         .map(|(index, key)| Entry::new(*key, index as u32))
         .collect();
-    let reserved = world.reserve(client, "trusted", pack.bytes.len());
+    let reserved = world.reserve_bytes(client, "trusted", &pack.bytes);
     let slot = reserved.json()["packs"][0].clone();
     assert_eq!(slot["status"], "ok", "{slot}");
     assert_eq!(world.put_slot(&slot, &pack.bytes).status, 200);

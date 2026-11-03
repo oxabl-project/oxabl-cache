@@ -143,7 +143,11 @@ fn concurrent_reservations_never_admit_more_than_the_hard_quota() {
 fn api_routes_are_rate_limited_per_tenant_and_object_routes_are_not() {
     let world = World::build(
         "rate-limit",
-        Options::default(),
+        Options {
+            frozen_clock: true,
+            url_lifetime: "300s",
+            ..Options::default()
+        },
         json!({"rate": 1, "burst": 60}),
         json!({}),
     );

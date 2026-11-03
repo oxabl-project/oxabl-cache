@@ -38,6 +38,9 @@ pub enum Command {
     /// Create tokens.
     #[command(subcommand)]
     Token(TokenCommand),
+    /// Create, list and revoke operator tokens.
+    #[command(subcommand)]
+    OperatorToken(OperatorTokenCommand),
     /// Export usage.
     #[command(subcommand)]
     Usage(UsageCommand),
@@ -118,6 +121,26 @@ pub struct TokenCreate {
     /// Label stored with the token.
     #[arg(long, default_value = "operator")]
     pub name: String,
+}
+
+#[derive(Subcommand)]
+pub enum OperatorTokenCommand {
+    /// Mint another operator token and print its secret once.
+    Create {
+        /// Lifetime in whole days, such as 30d. Without it the server's default applies.
+        #[arg(long)]
+        expires: Option<String>,
+        /// Label stored with the token.
+        #[arg(long, default_value = "operator")]
+        name: String,
+    },
+    /// List operator tokens with their ids, expiry and revocation.
+    List,
+    /// Revoke an operator token at once; the last valid one is refused.
+    Revoke {
+        /// Token id, as printed by `create` and `list`.
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]

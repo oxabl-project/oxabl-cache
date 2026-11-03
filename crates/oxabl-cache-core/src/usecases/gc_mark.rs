@@ -2,7 +2,7 @@
 
 use crate::engine::Engine;
 use crate::error::Result;
-use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler};
+use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler, TxScope};
 use crate::usecases::segment_death::kill_segment;
 
 /// What a mark pass changed.
@@ -28,21 +28,20 @@ where
         let now = self.now();
         let grace = self.config.grace_secs;
         let batch = self.config.gc_batch;
-        self.meta
-            .transact(move |tx| {
-                let mut report = MarkReport::default();
-                for (cache, id) in tx.unreferenced_dictionaries(now - grace, batch)? {
-                    if kill_segment(tx, &cache, &id, now)? > 0 {
-                        report.dictionaries += 1;
-                    }
+        self.gc_transact_in(TxScope::Global, move |tx| {
+            let mut report = MarkReport::default();
+            for (cache, id) in tx.unreferenced_dictionaries(now - grace, batch)? {
+                if kill_segment(tx, &cache, &id, now)? > 0 {
+                    report.dictionaries += 1;
                 }
-                for pack in tx.empty_unmarked_packs(batch)? {
-                    if tx.mark_pack_dead(&pack.cache, &pack.id, now)? {
-                        report.packs += 1;
-                    }
+            }
+            for pack in tx.empty_unmarked_packs(batch)? {
+                if tx.mark_pack_dead(&pack.cache, &pack.id, now)? {
+                    report.packs += 1;
                 }
-                Ok(report)
-            })
-            .await
+            }
+            Ok(report)
+        })
+        .await
     }
 }

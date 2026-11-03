@@ -2113,6 +2113,7 @@ name = "oxabl-cache-meta-postgres"
 version = "0.0.0"
 dependencies = [
  "blake3",
+ "bytes",
  "oxabl-cache-core",
  "oxabl-cache-e2e",
  "rustls",
@@ -2170,6 +2171,7 @@ dependencies = [
  "oxabl-cache-store-fs",
  "oxabl-cache-store-s3",
  "rcgen",
+ "rusqlite",
  "rustls",
  "serde",
  "serde_json",

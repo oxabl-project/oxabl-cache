@@ -11,6 +11,7 @@ mod ctx;
 mod envelope;
 mod error;
 mod frames;
+mod health;
 mod json;
 mod limiter;
 pub mod log;

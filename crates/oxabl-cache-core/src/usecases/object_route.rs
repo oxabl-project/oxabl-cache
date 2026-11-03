@@ -26,7 +26,10 @@ where
     ) -> Result<()> {
         let found = self
             .meta
-            .read(move |tx| tx.pack(&cache, &pack))
+            .read(move |tx| {
+                tx.cache_tenant(&cache)?.ok_or(Error::NotFound)?;
+                tx.pack(&cache, &pack)
+            })
             .await?
             .ok_or(Error::NotFound)?;
         if found.state != PackState::Pending || found.commit_digest.is_some() {
@@ -43,7 +46,14 @@ where
     /// Whether a signed GET may read the pack: it must be a live pack. Anything
     /// else is `NotFound`.
     pub async fn pack_serves_get(&self, cache: CacheId, pack: PackId) -> Result<()> {
-        match self.meta.read(move |tx| tx.pack(&cache, &pack)).await? {
+        let found = self
+            .meta
+            .read(move |tx| {
+                tx.cache_tenant(&cache)?.ok_or(Error::NotFound)?;
+                tx.pack(&cache, &pack)
+            })
+            .await?;
+        match found {
             Some(found) if found.state == PackState::Live => Ok(()),
             _ => Err(Error::NotFound),
         }

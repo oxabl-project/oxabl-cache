@@ -70,6 +70,42 @@ where
         })
     }
 
+    /// Every operator token, oldest first.
+    pub async fn list_operator_tokens(&self) -> Result<Vec<OperatorToken>> {
+        self.meta.read(|tx| tx.operator_tokens()).await
+    }
+
+    /// Revokes an operator token at once. The last token that is still valid cannot
+    /// be revoked: the service would be left without an operator. An unknown or
+    /// already revoked token is `NotFound`.
+    pub async fn revoke_operator_token(&self, id: CredentialId) -> Result<()> {
+        let now = self.now();
+        self.meta
+            .transact(move |tx| {
+                let tokens = tx.operator_tokens()?;
+                let valid =
+                    |token: &&OperatorToken| token.revoked_at.is_none() && now < token.expires_at;
+                let target = tokens
+                    .iter()
+                    .find(|token| token.id == id && token.revoked_at.is_none())
+                    .ok_or(Error::NotFound)?;
+                let others = tokens
+                    .iter()
+                    .filter(valid)
+                    .filter(|token| token.id != target.id)
+                    .count();
+                if valid(&target) && others == 0 {
+                    return Err(Error::Conflict(Conflict::LastOperatorToken));
+                }
+                if tx.revoke_operator_token(&id, now)? {
+                    Ok(())
+                } else {
+                    Err(Error::NotFound)
+                }
+            })
+            .await
+    }
+
     /// Whether an operator token was ever created.
     pub async fn operator_tokens_exist(&self) -> Result<bool> {
         self.meta.read(|tx| tx.operator_tokens_exist()).await

@@ -3,6 +3,7 @@
 pub mod cache_server;
 pub mod cli;
 pub mod fake_dns;
+pub mod faketime;
 pub mod fault_proxy;
 pub mod garage;
 pub mod idp;

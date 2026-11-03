@@ -4,6 +4,7 @@
 use crate::config::Gc;
 use crate::meta::Election;
 use crate::wiring::Prod;
+use oxabl_cache_core::Error;
 use oxabl_cache_core::ports::{Clock, MetadataStore};
 use oxabl_cache_http::App;
 use oxabl_cache_http::log::{Level, emit};
@@ -20,9 +21,19 @@ const ACCESS_FLUSH: Duration = Duration::from_secs(10);
 const USAGE_FLUSH: Duration = Duration::from_secs(60);
 const ELECTION: Duration = Duration::from_secs(1);
 
-async fn job<T>(name: &str, work: impl Future<Output = oxabl_cache_core::Result<T>>) -> Option<T> {
+async fn job<T>(
+    app: &App<Prod>,
+    name: &str,
+    work: impl Future<Output = oxabl_cache_core::Result<T>>,
+) -> Option<T> {
     match work.await {
         Ok(done) => Some(done),
+        Err(Error::Fenced) => {
+            resign(app);
+            app.metrics.inc("oxabl_cache_gc_fenced_total", &[], 1);
+            emit(Level::Warn, "gc_fenced", vec![("job", Value::from(name))]);
+            None
+        }
         Err(error) => {
             emit(
                 Level::Warn,
@@ -37,10 +48,16 @@ async fn job<T>(name: &str, work: impl Future<Output = oxabl_cache_core::Result<
     }
 }
 
+fn resign(app: &App<Prod>) {
+    app.engine.resign_gc_leadership();
+    app.set_gc_leader(false);
+    app.metrics.set("oxabl_cache_gc_leader", &[], 0.0);
+}
+
 /// Flushes access days and usage counters; used on a timer and once more at shutdown.
 pub(crate) async fn flush_counters(app: &App<Prod>) {
-    job("access_flush", app.engine.flush_access_days()).await;
-    job("usage_flush", app.flush_usage()).await;
+    job(app, "access_flush", app.engine.flush_access_days()).await;
+    job(app, "usage_flush", app.flush_usage()).await;
 }
 
 async fn flush_loop(app: Arc<App<Prod>>, mut stop: watch::Receiver<bool>) {
@@ -52,9 +69,9 @@ async fn flush_loop(app: Arc<App<Prod>>, mut stop: watch::Receiver<bool>) {
     }
     loop {
         tokio::select! {
-            _ = heartbeat.tick() => { job("heartbeat", app.engine.heartbeat()).await; }
-            _ = access.tick() => { job("access_flush", app.engine.flush_access_days()).await; }
-            _ = usage.tick() => { job("usage_flush", app.flush_usage()).await; }
+            _ = heartbeat.tick() => { job(&app, "heartbeat", app.engine.heartbeat()).await; }
+            _ = access.tick() => { job(&app, "access_flush", app.engine.flush_access_days()).await; }
+            _ = usage.tick() => { job(&app, "usage_flush", app.flush_usage()).await; }
             _ = stop.changed() => return,
         }
     }
@@ -78,7 +95,9 @@ async fn pack_totals(app: &App<Prod>) -> oxabl_cache_core::Result<(u64, u64, u64
 }
 
 async fn publish_pack_bytes(app: &App<Prod>) {
-    if let Some((live, pending, reclaimable, stored)) = job("pack_totals", pack_totals(app)).await {
+    if let Some((live, pending, reclaimable, stored)) =
+        job(app, "pack_totals", pack_totals(app)).await
+    {
         for (state, bytes) in [
             ("live", live),
             ("pending", pending),
@@ -91,15 +110,31 @@ async fn publish_pack_bytes(app: &App<Prod>) {
     }
 }
 
+/// Awaits a GC job and ends the tick when the job found this node fenced.
+macro_rules! step {
+    ($app:expr, $name:literal, $work:expr) => {{
+        let done = job($app, $name, $work).await;
+        if !$app.gc_leader() {
+            return;
+        }
+        done
+    }};
+}
+
 async fn gc_tick(app: &App<Prod>) {
-    let retired = job("retention", app.engine.gc_retention()).await;
-    let evicted = job("eviction", app.engine.gc_eviction()).await;
-    job("mark", app.engine.gc_mark()).await;
-    let compacted = job("compaction", app.engine.gc_compaction()).await;
-    let swept = job("sweep", app.engine.gc_sweep()).await;
-    job("queued_scrubs", app.engine.run_queued_scrubs()).await;
-    job("close_ledger_days", app.engine.close_ledger_days()).await;
-    job("snapshot_stored_bytes", app.engine.snapshot_stored_bytes()).await;
+    let retired = step!(app, "retention", app.engine.gc_retention());
+    let evicted = step!(app, "eviction", app.engine.gc_eviction());
+    step!(app, "mark", app.engine.gc_mark());
+    let compacted = step!(app, "compaction", app.engine.gc_compaction());
+    let swept = step!(app, "sweep", app.engine.gc_sweep());
+    let torn_down = step!(app, "teardown", app.engine.gc_teardown());
+    step!(app, "queued_scrubs", app.engine.run_queued_scrubs());
+    step!(app, "close_ledger_days", app.engine.close_ledger_days());
+    step!(
+        app,
+        "snapshot_stored_bytes",
+        app.engine.snapshot_stored_bytes()
+    );
 
     if let Some(packs) = swept {
         app.metrics
@@ -113,11 +148,13 @@ async fn gc_tick(app: &App<Prod>) {
     app.metrics
         .set("oxabl_cache_gc_last_run_timestamp", &[], now as f64);
     publish_pack_bytes(app).await;
+    let removed = torn_down.map_or(0, |report| report.caches + report.tenants);
     let changed = [
         retired.unwrap_or(0),
         evicted.unwrap_or(0),
         swept.unwrap_or(0),
         compacted.map_or(0, |report| report.packs),
+        removed,
     ];
     if changed.iter().any(|count| *count > 0) {
         emit(
@@ -128,14 +165,15 @@ async fn gc_tick(app: &App<Prod>) {
                 ("evicted_entries", Value::from(changed[1])),
                 ("swept_packs", Value::from(changed[2])),
                 ("compacted_packs", Value::from(changed[3])),
+                ("removed_tenants_and_caches", Value::from(changed[4])),
             ],
         );
     }
 }
 
 async fn weekly(app: &App<Prod>) {
-    job("orphan_scan", app.engine.gc_orphans()).await;
-    let caches = job("list_caches", async {
+    step!(app, "orphan_scan", app.engine.gc_orphans());
+    let caches = job(app, "list_caches", async {
         app.engine
             .metadata()
             .transact(|tx| {
@@ -149,12 +187,13 @@ async fn weekly(app: &App<Prod>) {
     })
     .await;
     for cache in caches.unwrap_or_default() {
-        job("scrub", app.engine.scrub_cache(cache)).await;
+        step!(app, "scrub", app.engine.gc_scrub_cache(cache));
     }
 }
 
 async fn lead(app: &App<Prod>, election: &mut Election) -> bool {
-    let leads = match election.poll().await {
+    let was = app.gc_leader();
+    let polled = match election.poll().await {
         Ok(leads) => leads,
         Err(error) => {
             emit(
@@ -165,7 +204,22 @@ async fn lead(app: &App<Prod>, election: &mut Election) -> bool {
             false
         }
     };
-    if leads != app.gc_leader() {
+    let leads = if polled && !was {
+        match app.engine.assume_gc_leadership().await {
+            Ok(_) => true,
+            Err(error) => {
+                emit(
+                    Level::Warn,
+                    "leader_takeover_failed",
+                    vec![("error", Value::from(error.to_string()))],
+                );
+                false
+            }
+        }
+    } else {
+        polled
+    };
+    if leads != was {
         emit(
             Level::Info,
             if leads {
@@ -176,9 +230,12 @@ async fn lead(app: &App<Prod>, election: &mut Election) -> bool {
             Vec::new(),
         );
     }
-    app.set_gc_leader(leads);
-    app.metrics
-        .set("oxabl_cache_gc_leader", &[], if leads { 1.0 } else { 0.0 });
+    if leads {
+        app.set_gc_leader(true);
+        app.metrics.set("oxabl_cache_gc_leader", &[], 1.0);
+    } else {
+        resign(app);
+    }
     leads
 }
 
@@ -208,7 +265,7 @@ async fn gc_loop(
                     continue;
                 }
                 gc_tick(&app).await;
-                if last_weekly.elapsed() >= gc.orphan_scan {
+                if app.gc_leader() && last_weekly.elapsed() >= gc.orphan_scan {
                     weekly(&app).await;
                     last_weekly = Instant::now();
                 }
@@ -216,8 +273,7 @@ async fn gc_loop(
             _ = stop.changed() => break,
         }
     }
-    app.set_gc_leader(false);
-    app.metrics.set("oxabl_cache_gc_leader", &[], 0.0);
+    resign(&app);
 }
 
 /// Starts the background tasks; they end when `stop` changes.

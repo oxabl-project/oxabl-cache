@@ -3,9 +3,11 @@
 use super::frames::{self, Entry, Pack};
 use super::http::{Response, request, split_url};
 use super::server::{Client, Options, Server};
+use base64::Engine as _;
 use ed25519_dalek::{Signer, SigningKey};
 use oxabl_cache_format as format;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 pub struct World {
     pub server: Server,
@@ -108,13 +110,61 @@ impl World {
         info.json()
     }
 
+    /// Reserves a pack that is never uploaded: its digest is a placeholder.
     pub fn reserve(&self, client: &Client, namespace: &str, size: usize) -> Response {
+        self.reserve_digest(client, namespace, size, &Sha256::digest(b""))
+    }
+
+    /// Reserves a pack of exactly `bytes`.
+    pub fn reserve_bytes(&self, client: &Client, namespace: &str, bytes: &[u8]) -> Response {
+        self.reserve_digest(client, namespace, bytes.len(), &Sha256::digest(bytes))
+    }
+
+    /// [`World::reserve_bytes`] in another cache of the server.
+    pub fn reserve_bytes_in(
+        &self,
+        client: &Client,
+        cache: &str,
+        namespace: &str,
+        bytes: &[u8],
+    ) -> Response {
+        self.reserve_at(
+            client,
+            &format!("/v1/caches/{cache}"),
+            namespace,
+            bytes.len(),
+            &Sha256::digest(bytes),
+        )
+    }
+
+    fn reserve_digest(
+        &self,
+        client: &Client,
+        namespace: &str,
+        size: usize,
+        digest: &[u8],
+    ) -> Response {
+        self.reserve_at(client, &self.path(""), namespace, size, digest)
+    }
+
+    fn reserve_at(
+        &self,
+        client: &Client,
+        cache_path: &str,
+        namespace: &str,
+        size: usize,
+        digest: &[u8],
+    ) -> Response {
         client.json(
             "POST",
-            &self.path("/uploads"),
+            &format!("{cache_path}/uploads"),
             Some(&json!({
                 "namespace": namespace,
-                "packs": [{"client_ref": hex(&frames::random(16)), "size": size}],
+                "packs": [{
+                    "client_ref": hex(&frames::random(16)),
+                    "size": size,
+                    "sha256": base64::engine::general_purpose::STANDARD.encode(digest),
+                }],
             })),
         )
     }
@@ -159,7 +209,7 @@ impl World {
             format::Namespace::Trusted => "trusted",
             format::Namespace::Personal => "personal",
         };
-        let reserved = self.reserve(client, namespace, pack.bytes.len());
+        let reserved = self.reserve_bytes(client, namespace, &pack.bytes);
         assert_eq!(
             reserved.status,
             200,

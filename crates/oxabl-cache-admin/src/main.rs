@@ -29,6 +29,7 @@ fn run(cli: Cli) -> Result<(), Failure> {
             args.expires.as_deref(),
             &args.name,
         ),
+        Command::OperatorToken(command) => commands::operator_token::run(&admin, json, command),
         Command::Usage(UsageCommand::Export { month, format }) => {
             commands::usage::export(&admin, &month, format)
         }

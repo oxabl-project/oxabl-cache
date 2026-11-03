@@ -43,6 +43,8 @@ fn postgres_options(metadata: &Metadata) -> Result<Option<PostgresOptions>, Stri
         password_file,
         ca_file,
         max_connections,
+        statement_timeout,
+        idle_in_transaction_timeout,
     } = metadata
     else {
         return Ok(None);
@@ -50,6 +52,8 @@ fn postgres_options(metadata: &Metadata) -> Result<Option<PostgresOptions>, Stri
     let mut options = PostgresOptions::new(url.clone());
     options.ca_file = ca_file.clone();
     options.max_connections = *max_connections;
+    options.statement_timeout = *statement_timeout;
+    options.idle_in_transaction_timeout = *idle_in_transaction_timeout;
     if let Some(path) = password_file {
         let text = std::fs::read_to_string(path)
             .map_err(|error| format!("cannot read password file {}: {error}", path.display()))?;

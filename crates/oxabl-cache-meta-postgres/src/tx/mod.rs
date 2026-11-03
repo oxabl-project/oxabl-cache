@@ -3,11 +3,14 @@
 mod accounts;
 mod admin;
 mod entries;
+mod fence;
 mod ledger;
 mod oidc;
+mod operator_tokens;
 mod packs;
 mod roster;
 mod segments;
+mod teardown;
 
 use crate::error::DbResult;
 use crate::pool::Conn;

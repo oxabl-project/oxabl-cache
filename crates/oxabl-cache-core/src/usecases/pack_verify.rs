@@ -63,6 +63,17 @@ where
     /// that name corrupt ones. The recorded ETag is then refreshed: every live
     /// segment has been proven by its hash, so a replaced object is trusted again.
     pub async fn verify_pack(&self, cache: CacheId, pack: PackId) -> Result<VerifyOutcome> {
+        self.verify(cache, pack, false).await
+    }
+
+    /// [`Engine::verify_pack`]; when `fenced`, entries are removed only while this
+    /// node leads garbage collection.
+    pub(crate) async fn verify(
+        &self,
+        cache: CacheId,
+        pack: PackId,
+        fenced: bool,
+    ) -> Result<VerifyOutcome> {
         let live = self
             .meta
             .read(move |tx| {
@@ -89,19 +100,22 @@ where
         }
         let now = self.now();
         let count = u64::try_from(corrupt.len()).unwrap_or(u64::MAX);
-        let entries_removed = self
-            .meta
-            .transact_in(TxScope::Cache(cache), move |tx| {
-                let mut removed = 0;
-                for id in &corrupt {
-                    removed += condemn_segment(tx, &cache, id, now)?;
-                }
-                if let Some(head) = head {
-                    tx.set_pack_etag(&cache, &pack, &head.etag)?;
-                }
-                Ok(removed)
-            })
-            .await?;
+        let write = move |tx: &mut dyn MetaTx| {
+            let mut removed = 0;
+            for id in &corrupt {
+                removed += condemn_segment(tx, &cache, id, now)?;
+            }
+            if let Some(head) = head {
+                tx.set_pack_etag(&cache, &pack, &head.etag)?;
+            }
+            Ok(removed)
+        };
+        let scope = TxScope::Cache(cache);
+        let entries_removed = if fenced {
+            self.gc_transact_in(scope, write).await?
+        } else {
+            self.meta.transact_in(scope, write).await?
+        };
         Ok(VerifyOutcome {
             corrupt_segments: count,
             entries_removed,

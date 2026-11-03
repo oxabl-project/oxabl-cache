@@ -1,11 +1,11 @@
 //! Listings and operator-level writes behind the administration routes.
 
 use crate::domain::cache::Cache;
-use crate::domain::credential::{OperatorToken, TokenSummary};
+use crate::domain::credential::TokenSummary;
 use crate::domain::scope::Grant;
 use crate::domain::tenant::{Tenant, TenantLimits};
 use crate::error::Result;
-use crate::ids::{CredentialId, PrincipalId, TenantId};
+use crate::ids::{PrincipalId, TenantId};
 use crate::ports::metadata::User;
 
 /// Queries and writes of tenant and operator administration.
@@ -22,10 +22,4 @@ pub trait AdminTx {
     fn users_of(&self, tenant: &TenantId) -> Result<Vec<User>>;
     /// Every standing grant in the tenant, with its principal.
     fn tenant_grants(&self, tenant: &TenantId) -> Result<Vec<(PrincipalId, Grant)>>;
-    /// Inserts an operator token; `false` if the id exists.
-    fn insert_operator_token(&mut self, token: &OperatorToken) -> Result<bool>;
-    /// An operator token by id.
-    fn operator_token(&self, id: &CredentialId) -> Result<Option<OperatorToken>>;
-    /// Whether any operator token was ever created.
-    fn operator_tokens_exist(&self) -> Result<bool>;
 }

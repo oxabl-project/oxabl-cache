@@ -13,7 +13,10 @@ fn a_commit_retry_gets_the_recorded_answer_and_a_different_body_is_refused() {
     let pack = frames::pack(world.cache_bytes, &[3_000, 3_000]);
     let (a, b) = (frames::lookup_id(), frames::lookup_id());
     let frame = frames::commit(TRUSTED, &pack, &[Entry::new(a, 0), Entry::new(b, 1)]);
-    let slot = world.reserve(&world.ci, "trusted", pack.bytes.len()).json()["packs"][0].clone();
+    let slot = world
+        .reserve_bytes(&world.ci, "trusted", &pack.bytes)
+        .json()["packs"][0]
+        .clone();
     let pack_id = slot["pack_id"].as_str().expect("id");
 
     let early = world.commit(&world.ci, pack_id, &frame);

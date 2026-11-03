@@ -26,8 +26,7 @@ where
             loop {
                 let now = self.now();
                 let removed = self
-                    .meta
-                    .transact_in(TxScope::Cache(id), move |tx| {
+                    .gc_transact_in(TxScope::Cache(id), move |tx| {
                         let idle = tx.entries_idle_before(&id, cutoff, batch)?;
                         Ok(remove_entries(tx, &id, &idle, now, |_| false)?.entries)
                     })

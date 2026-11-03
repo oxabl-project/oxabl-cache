@@ -21,6 +21,8 @@ mod dictionary_and_reports;
 mod first_write_wins;
 #[path = "../single_node/gc.rs"]
 mod gc;
+#[path = "../single_node/health.rs"]
+mod health;
 #[path = "../single_node/lifecycle.rs"]
 mod lifecycle;
 #[path = "../single_node/limits.rs"]
@@ -31,6 +33,8 @@ mod roster_rules;
 mod round_trip;
 #[path = "../single_node/scopes.rs"]
 mod scopes;
+#[path = "../single_node/teardown.rs"]
+mod teardown;
 
 #[path = "../s3_suite/capabilities.rs"]
 mod capabilities;
@@ -49,10 +53,16 @@ mod tamper;
 
 #[path = "../multi_node/database_crash.rs"]
 mod database_crash;
+#[path = "../multi_node/gc_fencing.rs"]
+mod gc_fencing;
 #[path = "../multi_node/gc_leader.rs"]
 mod gc_leader;
 #[path = "../multi_node/nodes.rs"]
 mod nodes;
+#[path = "../multi_node/pg_timeouts.rs"]
+mod pg_timeouts;
+#[path = "../multi_node/readiness.rs"]
+mod readiness;
 #[path = "../multi_node/two_nodes.rs"]
 mod two_nodes;
 

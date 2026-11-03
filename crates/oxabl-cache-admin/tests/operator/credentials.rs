@@ -13,7 +13,9 @@ fn a_wrong_operator_token_is_refused_with_exit_one_and_the_envelope() {
     let server = Server::start("op-wrong", false);
     let operator = server.operator_token();
     let wrong = server.dir.join("wrong.token");
-    fs::write(&wrong, format!("{}x", &operator[..operator.len() - 1])).expect("token");
+    let (stem, last) = operator.split_at(operator.len() - 1);
+    let other = if last == "x" { "y" } else { "x" };
+    fs::write(&wrong, format!("{stem}{other}")).expect("token");
     let refused = run_with(&server, &wrong, None, &["tenant", "list"]);
     assert_eq!(refused.code(), 1);
     assert!(

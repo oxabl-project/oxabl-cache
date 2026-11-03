@@ -89,7 +89,10 @@ fn an_expired_url_is_refused() {
 fn a_committed_pack_accepts_no_further_put_and_a_pending_one_serves_no_get() {
     let world = World::start("put-after-commit", Options::default());
     let pack = frames::pack(world.cache_bytes, &[4_000]);
-    let slot = world.reserve(&world.ci, "trusted", pack.bytes.len()).json()["packs"][0].clone();
+    let slot = world
+        .reserve_bytes(&world.ci, "trusted", &pack.bytes)
+        .json()["packs"][0]
+        .clone();
     let url = slot["url"].as_str().expect("url");
     assert_eq!(world.put_object(url, &pack.bytes).status, 200);
     let pack_id = slot["pack_id"].as_str().expect("id");
@@ -106,11 +109,32 @@ fn a_committed_pack_accepts_no_further_put_and_a_pending_one_serves_no_get() {
         (409, "conflict")
     );
     assert_eq!(replay.json()["error"]["reason"], "pack_closed");
-    let again = world.reserve(&world.ci, "trusted", pack.bytes.len());
+    let again = world.reserve_bytes(&world.ci, "trusted", &pack.bytes);
     assert_eq!(
         again.json()["packs"][0]["status"],
         "ok",
         "a new client_ref reserves a new pack"
     );
     assert_eq!(world.read_object(pack_id), pack.bytes);
+}
+
+#[test]
+fn the_local_store_takes_a_reservation_with_or_without_a_digest() {
+    let world = World::start("digest-optional", Options::default());
+    assert_eq!(
+        world.info(&world.reader)["store"]["checksum_sha256"],
+        false,
+        "the local store has no checksum capability"
+    );
+    let size = frames::pack(world.cache_bytes, &[4_000]).bytes.len();
+    let bare = world.ci.json(
+        "POST",
+        &world.path("/uploads"),
+        Some(&serde_json::json!({
+            "namespace": "trusted",
+            "packs": [{"client_ref": crate::support::fixture::hex(&frames::random(16)), "size": size}],
+        })),
+    );
+    assert_eq!(bare.status, 200, "{}", String::from_utf8_lossy(&bare.body));
+    assert_eq!(bare.json()["packs"][0]["status"], "ok");
 }

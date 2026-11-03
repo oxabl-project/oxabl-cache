@@ -10,7 +10,7 @@ const WAIT: Duration = Duration::from_secs(30);
 
 fn swept_after_the_lease(world: &World, client: &Client) -> bool {
     let pack = frames::pack(world.cache_bytes, &[4_000]);
-    let slot = world.reserve(client, "trusted", pack.bytes.len()).json()["packs"][0].clone();
+    let slot = world.reserve_bytes(client, "trusted", &pack.bytes).json()["packs"][0].clone();
     assert_eq!(world.put_slot(&slot, &pack.bytes).status, 200);
     let pack_id = slot["pack_id"].as_str().expect("id").to_owned();
     assert!(world.object_exists(&pack_id));

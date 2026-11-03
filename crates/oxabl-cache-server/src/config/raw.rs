@@ -48,6 +48,8 @@ pub(crate) struct Metadata {
     pub password_file: Option<String>,
     pub ca_file: Option<String>,
     pub max_connections: Option<usize>,
+    pub statement_timeout: Option<String>,
+    pub idle_in_transaction_timeout: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,6 +81,7 @@ pub(crate) struct Gc {
     pub interval: Option<String>,
     pub compaction_live_ratio: Option<f64>,
     pub orphan_scan: Option<String>,
+    pub batch: Option<usize>,
 }
 
 #[derive(Debug, Default, Deserialize)]

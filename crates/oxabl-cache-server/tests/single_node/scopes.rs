@@ -22,7 +22,7 @@ fn a_read_token_cannot_write_and_a_developer_cannot_write_trusted() {
 
     let pack = frames::pack(world.cache_bytes, &[3_000]);
     let slot = world
-        .reserve(&world.dev, "personal", pack.bytes.len())
+        .reserve_bytes(&world.dev, "personal", &pack.bytes)
         .json()["packs"][0]
         .clone();
     assert_eq!(slot["status"], "ok");

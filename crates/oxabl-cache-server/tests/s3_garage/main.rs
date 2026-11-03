@@ -20,6 +20,8 @@ mod dictionary_and_reports;
 mod first_write_wins;
 #[path = "../single_node/gc.rs"]
 mod gc;
+#[path = "../single_node/health.rs"]
+mod health;
 #[path = "../single_node/lifecycle.rs"]
 mod lifecycle;
 #[path = "../single_node/limits.rs"]
@@ -30,6 +32,8 @@ mod roster_rules;
 mod round_trip;
 #[path = "../single_node/scopes.rs"]
 mod scopes;
+#[path = "../single_node/teardown.rs"]
+mod teardown;
 
 #[path = "../s3_suite/capabilities.rs"]
 mod capabilities;

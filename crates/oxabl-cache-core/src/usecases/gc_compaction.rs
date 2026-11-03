@@ -89,11 +89,10 @@ where
                 Ok(_) | Err(Error::NotFound) => corrupt.push(segment.id),
                 Err(Error::Conflict(_)) => {
                     let now = self.now();
-                    self.meta
-                        .transact_in(TxScope::Cache(cache), move |tx| {
-                            tx.queue_scrub(&cache, &source_id, now)
-                        })
-                        .await?;
+                    self.gc_transact_in(TxScope::Cache(cache), move |tx| {
+                        tx.queue_scrub(&cache, &source_id, now)
+                    })
+                    .await?;
                     return Ok(None);
                 }
                 Err(other) => return Err(other),
@@ -101,14 +100,13 @@ where
         }
         let now = self.now();
         if !corrupt.is_empty() {
-            self.meta
-                .transact_in(TxScope::Cache(cache), move |tx| {
-                    for id in &corrupt {
-                        condemn_segment(tx, &cache, id, now)?;
-                    }
-                    Ok(())
-                })
-                .await?;
+            self.gc_transact_in(TxScope::Cache(cache), move |tx| {
+                for id in &corrupt {
+                    condemn_segment(tx, &cache, id, now)?;
+                }
+                Ok(())
+            })
+            .await?;
         }
         if parts.is_empty() {
             return Ok(None);
@@ -131,8 +129,7 @@ where
         let placements = assembled.placements;
         let now = self.now();
         let moved = self
-            .meta
-            .transact_in(TxScope::Cache(cache), move |tx| {
+            .gc_transact_in(TxScope::Cache(cache), move |tx| {
                 let current = tx.pack(&cache, &source_id)?.ok_or(Error::NotFound)?;
                 if current.state != PackState::Live {
                     return Ok(0);

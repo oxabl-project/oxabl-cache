@@ -2,6 +2,8 @@
 
 #[path = "../single_node/administration.rs"]
 mod administration;
+#[path = "../single_node/backup.rs"]
+mod backup;
 #[path = "../single_node/commit_retry.rs"]
 mod commit_retry;
 #[path = "../single_node/config_rules.rs"]
@@ -14,14 +16,20 @@ mod first_write_wins;
 mod fs_support;
 #[path = "../single_node/gc.rs"]
 mod gc;
+#[path = "../single_node/health.rs"]
+mod health;
 #[path = "../single_node/lifecycle.rs"]
 mod lifecycle;
 #[path = "../single_node/limits.rs"]
 mod limits;
 #[path = "../single_node/logs.rs"]
 mod logs;
+#[path = "../single_node/migrate.rs"]
+mod migrate;
 #[path = "../single_node/object_urls.rs"]
 mod object_urls;
+#[path = "../single_node/operator_tokens.rs"]
+mod operator_tokens;
 #[path = "../single_node/roster_rules.rs"]
 mod roster_rules;
 #[path = "../single_node/round_trip.rs"]
@@ -32,6 +40,8 @@ mod scopes;
 mod shutdown_upload;
 #[path = "../single_node/support/mod.rs"]
 mod support;
+#[path = "../single_node/teardown.rs"]
+mod teardown;
 #[path = "../single_node/tls_listener.rs"]
 mod tls_listener;
 

@@ -9,7 +9,12 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../schema/0001_init.sql")),
     (2, include_str!("../schema/0002_operator_tokens.sql")),
     (3, include_str!("../schema/0003_oidc.sql")),
+    (4, include_str!("../schema/0004_gc_leader.sql")),
+    (5, include_str!("../schema/0005_tombstones.sql")),
 ];
+
+/// The schema version this release writes.
+pub const SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
 
 /// Applies every migration newer than the database. A database written by a
 /// newer release is refused rather than opened.

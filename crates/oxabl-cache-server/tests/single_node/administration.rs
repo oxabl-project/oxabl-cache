@@ -50,10 +50,19 @@ fn caches_users_grants_and_tokens_are_managed_with_natural_keys_and_no_secrets_i
         .find(|c| c["id"] == second.as_str())
         .cloned();
     assert_eq!(kept.expect("second cache")["retention_days"], 7);
-    let removed = admin.json("DELETE", &format!("/v1/tenant/caches/{second}"), None);
+    let scratch = create_cache(admin, "scratch", json!({}));
+    let removed = admin.json("DELETE", &format!("/v1/tenant/caches/{scratch}"), None);
+    assert_eq!(removed.status, 202);
+    let again = admin.json("DELETE", &format!("/v1/tenant/caches/{scratch}"), None);
     assert_eq!(
-        (removed.status, removed.error_code().as_str()),
-        (501, "not_configured")
+        (again.status, again.error_code().as_str()),
+        (404, "not_found")
+    );
+    let listed = admin.json("GET", "/v1/tenant/caches", None).json();
+    assert_eq!(
+        listed["caches"].as_array().expect("caches").len(),
+        2,
+        "a deleted cache is not listed"
     );
 
     let keys = admin.json(
@@ -251,12 +260,11 @@ fn operators_manage_tenants_quotas_health_and_export_usage() {
         Some(&json!({"status": "gone"})),
     );
     assert_eq!(bad.status, 400);
-    let delete = server.admin_call(
-        "DELETE",
-        &format!("/admin/v1/tenants/{}", world.tenant),
-        None,
-    );
-    assert_eq!(delete.status, 501);
+    let scratch = server.create_tenant("scratch", json!({}));
+    let delete = server.admin_call("DELETE", &format!("/admin/v1/tenants/{scratch}"), None);
+    assert_eq!(delete.status, 202);
+    let again = server.admin_call("DELETE", &format!("/admin/v1/tenants/{scratch}"), None);
+    assert_eq!(again.status, 404);
     let unknown = server.admin_call(
         "PATCH",
         "/admin/v1/tenants/t_00000000000000000000000000",

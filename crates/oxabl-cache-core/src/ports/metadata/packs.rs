@@ -1,11 +1,10 @@
-//! Packs, their accounting and the scrub queue.
+//! Packs and their lifecycle.
 
-use crate::domain::namespace::NamespaceKey;
-use crate::domain::pack::{Pack, PackState, PackTotals};
+use crate::domain::pack::{Pack, PackState};
 use crate::error::Result;
 use crate::ids::{CacheId, ClientRef, PackId, PrincipalId};
 
-/// Queries and writes of pack rows.
+/// Pack rows and their lifecycle.
 pub trait PacksTx {
     /// A pack of a cache.
     fn pack(&self, cache: &CacheId, id: &PackId) -> Result<Option<Pack>>;
@@ -18,10 +17,6 @@ pub trait PacksTx {
     ) -> Result<Option<Pack>>;
     /// Inserts a pack row.
     fn insert_pack(&mut self, pack: &Pack) -> Result<()>;
-    /// Byte totals over the cache's packs.
-    fn pack_totals(&self, cache: &CacheId) -> Result<PackTotals>;
-    /// Live bytes plus pending sizes of one namespace.
-    fn namespace_bytes(&self, cache: &CacheId, namespace: &NamespaceKey) -> Result<u64>;
     /// Flips a pending pack to live and records the commit. Returns `false`,
     /// changing nothing, if the pack is not pending.
     fn record_commit(
@@ -42,29 +37,8 @@ pub trait PacksTx {
     fn set_pack_deleting(&mut self, cache: &CacheId, id: &PackId) -> Result<Option<PackState>>;
     /// Deletes a pack row; fails if segment rows still reference it.
     fn delete_pack(&mut self, cache: &CacheId, id: &PackId) -> Result<bool>;
-    /// Packs ready for the sweep: dead longer than the grace, pending with an
-    /// expired lease, or already deleting.
-    fn packs_due_for_sweep(&self, now: i64, grace: i64, limit: usize) -> Result<Vec<Pack>>;
-    /// Live packs created before `created_before` whose live share is below
-    /// `max_live_permille` thousandths, at least `min_size` bytes large, with live bytes left.
-    fn compaction_candidates(
-        &self,
-        created_before: i64,
-        max_live_permille: u64,
-        min_size: u64,
-        limit: usize,
-    ) -> Result<Vec<Pack>>;
-    /// Live packs whose live bytes are zero but that carry no `dead_since`.
-    fn empty_unmarked_packs(&self, limit: usize) -> Result<Vec<Pack>>;
     /// Every pack id of a cache.
     fn pack_ids(&self, cache: &CacheId) -> Result<Vec<PackId>>;
-    /// Recomputes live-byte sums from segment rows and describes each mismatch
-    /// with the stored counters of the cache and of its packs.
-    fn audit_live_bytes(&self, cache: &CacheId) -> Result<Vec<String>>;
-    /// Queues a pack for a full re-verification.
-    fn queue_scrub(&mut self, cache: &CacheId, id: &PackId, now: i64) -> Result<()>;
-    /// Removes and returns up to `limit` queued scrubs.
-    fn take_scrubs(&mut self, limit: usize) -> Result<Vec<(CacheId, PackId)>>;
 }
 
 /// What a commit records on its pack.

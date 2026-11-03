@@ -31,6 +31,8 @@ pub enum Error {
     Internal(String),
     /// The feature needs settings this deployment lacks.
     NotConfigured(&'static str),
+    /// A newer garbage-collection leader exists, or this node leads no longer.
+    Fenced,
 }
 
 /// The reason for a [`Error::Conflict`].
@@ -44,6 +46,8 @@ pub enum Conflict {
     PackChanged,
     /// The stored object is missing or its size differs from the declared one.
     PackIncomplete,
+    /// The only operator token still valid cannot be revoked.
+    LastOperatorToken,
 }
 
 /// Result alias used across the crate.
@@ -84,6 +88,7 @@ impl fmt::Display for Error {
             Self::Unavailable(why) => write!(f, "unavailable: {why}"),
             Self::Internal(why) => write!(f, "internal: {why}"),
             Self::NotConfigured(what) => write!(f, "not configured: {what}"),
+            Self::Fenced => f.write_str("fenced: this node is not the garbage-collection leader"),
         }
     }
 }

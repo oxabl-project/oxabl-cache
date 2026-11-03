@@ -2,6 +2,7 @@
 
 pub mod cache;
 pub mod health;
+pub mod operator_token;
 pub mod tenant;
 pub mod token;
 pub mod usage;

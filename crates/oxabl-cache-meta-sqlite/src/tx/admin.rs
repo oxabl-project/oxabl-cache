@@ -3,13 +3,13 @@
 use super::SqliteTx;
 use crate::db::{DbResult, RowExt, int};
 use oxabl_cache_core::domain::cache::Cache;
-use oxabl_cache_core::domain::credential::{OperatorToken, TokenSummary};
+use oxabl_cache_core::domain::credential::TokenSummary;
 use oxabl_cache_core::domain::scope::{Grant, ScopeSet};
 use oxabl_cache_core::domain::tenant::{Tenant, TenantLimits, TenantStatus};
 use oxabl_cache_core::ids::{CacheId, CredentialId, PrincipalId, TenantId};
 use oxabl_cache_core::ports::metadata::{AdminTx, User};
 use oxabl_cache_core::{Error, Result};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::params;
 
 const NO_CACHE: [u8; CacheId::LEN] = [0; CacheId::LEN];
 
@@ -30,7 +30,7 @@ impl AdminTx for SqliteTx<'_> {
             .conn
             .prepare_cached(
                 "SELECT tenant_id, name, status, hard_bytes, egress_bytes, rate, burst, created_at
-                 FROM tenants ORDER BY tenant_id",
+                 FROM tenants WHERE deleted_at IS NULL ORDER BY tenant_id",
             )
             .db()?;
         let rows = statement
@@ -59,7 +59,7 @@ impl AdminTx for SqliteTx<'_> {
             .conn
             .prepare_cached(
                 "UPDATE tenants SET hard_bytes = ?2, egress_bytes = ?3, rate = ?4, burst = ?5
-                 WHERE tenant_id = ?1",
+                 WHERE tenant_id = ?1 AND deleted_at IS NULL",
             )
             .db()?
             .execute(params![
@@ -75,7 +75,7 @@ impl AdminTx for SqliteTx<'_> {
 
     fn caches_of(&self, tenant: &TenantId) -> Result<Vec<Cache>> {
         Ok(
-            oxabl_cache_core::ports::metadata::AccountsTx::all_caches(self)?
+            oxabl_cache_core::ports::metadata::CachesTx::all_caches(self)?
                 .into_iter()
                 .filter(|cache| cache.tenant == *tenant)
                 .collect(),
@@ -171,57 +171,5 @@ impl AdminTx for SqliteTx<'_> {
             Ok((principal, grant_of(cache, scopes)?))
         })
         .collect()
-    }
-
-    fn insert_operator_token(&mut self, token: &OperatorToken) -> Result<bool> {
-        let changed = self
-            .conn
-            .prepare_cached(
-                "INSERT INTO operator_tokens
-                   (credential_id, name, secret_hash, created_at, expires_at, revoked_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT (credential_id) DO NOTHING",
-            )
-            .db()?
-            .execute(params![
-                token.id.as_bytes().as_slice(),
-                token.name,
-                token.secret_hash.as_slice(),
-                token.created_at,
-                token.expires_at,
-                token.revoked_at,
-            ])
-            .db()?;
-        Ok(changed == 1)
-    }
-
-    fn operator_token(&self, id: &CredentialId) -> Result<Option<OperatorToken>> {
-        self.conn
-            .prepare_cached(
-                "SELECT credential_id, name, secret_hash, created_at, expires_at, revoked_at
-                 FROM operator_tokens WHERE credential_id = ?1",
-            )
-            .db()?
-            .query_row([id.as_bytes().as_slice()], |row| {
-                Ok(OperatorToken {
-                    id: CredentialId::from_bytes(row.blob(0)?),
-                    name: row.get(1)?,
-                    secret_hash: row.blob(2)?,
-                    created_at: row.get(3)?,
-                    expires_at: row.get(4)?,
-                    revoked_at: row.get(5)?,
-                })
-            })
-            .optional()
-            .db()
-    }
-
-    fn operator_tokens_exist(&self) -> Result<bool> {
-        self.conn
-            .prepare_cached("SELECT EXISTS (SELECT 1 FROM operator_tokens)")
-            .db()?
-            .query_row([], |row| row.get::<_, i64>(0))
-            .map(|found| found == 1)
-            .db()
     }
 }

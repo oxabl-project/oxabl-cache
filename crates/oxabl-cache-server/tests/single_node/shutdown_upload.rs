@@ -18,7 +18,10 @@ fn a_graceful_shutdown_in_the_middle_of_an_upload_leaves_nothing_an_entry_names(
     world.publish(&world.ci, TRUSTED, &kept, &[Entry::new(kept_key, 0)]);
 
     let pack = frames::pack(world.cache_bytes, &[200_000]);
-    let slot = world.reserve(&world.ci, "trusted", pack.bytes.len()).json()["packs"][0].clone();
+    let slot = world
+        .reserve_bytes(&world.ci, "trusted", &pack.bytes)
+        .json()["packs"][0]
+        .clone();
     let pack_id = slot["pack_id"].as_str().expect("id").to_owned();
     let (addr, path) = crate::support::http::split_url(slot["url"].as_str().expect("url"));
     let mut stream = connect(&addr);

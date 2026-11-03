@@ -92,6 +92,7 @@ impl From<Error> for ApiError {
                     Conflict::PackClosed => "pack_closed",
                     Conflict::PackChanged => "pack_changed",
                     Conflict::PackIncomplete => "pack_incomplete",
+                    Conflict::LastOperatorToken => "last_operator_token",
                 };
                 let mut conflict = Self::new(StatusCode::CONFLICT, "conflict", reason);
                 conflict.reason = Some(reason);
@@ -117,6 +118,7 @@ impl From<Error> for ApiError {
                 limited.retry_after = Some(retry_after_secs);
                 limited
             }
+            Error::Fenced => Self::from(Error::unavailable("garbage-collection leadership lost")),
             Error::Unavailable(detail) => {
                 let mut down = Self::new(
                     StatusCode::SERVICE_UNAVAILABLE,

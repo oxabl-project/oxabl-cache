@@ -28,10 +28,12 @@ pub async fn open_engine(
     let meta = FlakyMeta::new(AnyMeta::open(dir).await);
     let store =
         FsStore::open(dir.join("objects"), "http://cache.test", vec![URL_KEY]).expect("open store");
-    (
-        Engine::new(meta.clone(), store, TestAssembler, clock.clone(), config),
-        meta,
-    )
+    let engine = Engine::new(meta.clone(), store, TestAssembler, clock.clone(), config);
+    engine
+        .assume_gc_leadership()
+        .await
+        .expect("take over garbage collection");
+    (engine, meta)
 }
 
 pub struct Env {

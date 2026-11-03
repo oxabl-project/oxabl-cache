@@ -15,8 +15,6 @@ use std::time::Duration;
 use tokio::runtime::Handle;
 use tokio_postgres::config::SslMode;
 
-const STATEMENT_TIMEOUT_MS: u64 = 120_000;
-const IDLE_IN_TRANSACTION_MS: u64 = 60_000;
 const KEEPALIVE: Duration = Duration::from_secs(30);
 
 /// How to reach the database.
@@ -32,10 +30,15 @@ pub struct PostgresOptions {
     pub max_connections: usize,
     /// How long opening one connection may take.
     pub connect_timeout: Duration,
+    /// The longest one statement may run before the database cancels it.
+    pub statement_timeout: Duration,
+    /// How long a transaction may sit idle before the database ends its session.
+    pub idle_in_transaction_timeout: Duration,
 }
 
 impl PostgresOptions {
-    /// Options for `url` with a pool of 16 connections.
+    /// Options for `url` with a pool of 16 connections, a 120 s statement timeout and a 60 s
+    /// idle-in-transaction timeout.
     pub fn new(url: impl Into<String>) -> Self {
         Self {
             url: url.into(),
@@ -43,6 +46,8 @@ impl PostgresOptions {
             ca_file: None,
             max_connections: 16,
             connect_timeout: Duration::from_secs(10),
+            statement_timeout: Duration::from_secs(120),
+            idle_in_transaction_timeout: Duration::from_secs(60),
         }
     }
 }
@@ -77,8 +82,9 @@ pub(crate) fn connection_config(
         .keepalives_idle(KEEPALIVE)
         .application_name("oxabl-cache-server")
         .options(format!(
-            "-c statement_timeout={STATEMENT_TIMEOUT_MS} \
-             -c idle_in_transaction_session_timeout={IDLE_IN_TRANSACTION_MS}"
+            "-c statement_timeout={} -c idle_in_transaction_session_timeout={}",
+            options.statement_timeout.as_millis(),
+            options.idle_in_transaction_timeout.as_millis()
         ));
     Ok((config, tls))
 }
@@ -88,6 +94,11 @@ impl PostgresStore {
     pub async fn connect(options: &PostgresOptions) -> Result<Self> {
         if options.max_connections == 0 {
             return Err(Error::bad_request("the pool needs at least one connection"));
+        }
+        if options.statement_timeout.is_zero() || options.idle_in_transaction_timeout.is_zero() {
+            return Err(Error::bad_request(
+                "a zero statement or idle-in-transaction timeout would disable the guard",
+            ));
         }
         let (config, tls) = connection_config(options)?;
         let first = Conn::connect(&config, tls.as_ref()).await?;

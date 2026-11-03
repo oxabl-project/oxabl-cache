@@ -3,7 +3,7 @@
 use crate::app::{App, Backend};
 use crate::auth::Authed;
 use crate::error::ApiError;
-use crate::json::{json_response, read_json};
+use crate::json::{empty, json_response, read_json};
 use crate::path::public_key;
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -103,15 +103,13 @@ pub(crate) async fn create<B: Backend>(
     }
 }
 
-/// Deleting a cache needs a tombstone and an asynchronous teardown this build lacks.
+/// Deletes a cache: 202 once it is tombstoned, its removal follows asynchronously.
 pub(crate) async fn delete<B: Backend>(
-    State(_app): State<Arc<App<B>>>,
+    State(app): State<Arc<App<B>>>,
     auth: Authed,
     Path(cache): Path<String>,
 ) -> Result<Response, ApiError> {
-    auth.caller.require_tenant_admin()?;
-    auth.cache(&cache)?;
-    Err(ApiError::not_implemented(
-        "deleting a cache is not implemented in this build",
-    ))
+    let cache = auth.cache(&cache)?;
+    app.engine.delete_cache(&auth.caller, cache).await?;
+    Ok(empty(StatusCode::ACCEPTED))
 }

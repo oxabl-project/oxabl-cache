@@ -1,10 +1,11 @@
 //! The subcommands other than `serve`.
 
-use crate::config::Config;
+use crate::config::{Config, Metadata};
 use crate::{keys, wiring};
 use oxabl_cache_core::ids::CacheId;
 use oxabl_cache_core::ports::{MetadataStore, ObjectStore};
 use serde_json::json;
+use std::path::Path;
 
 const PLACEHOLDER_URL: &str = "http://localhost";
 
@@ -70,6 +71,20 @@ pub(crate) async fn scrub(config: &Config, only: Option<&str>) -> Result<(), Str
             })
         );
     }
+    Ok(())
+}
+
+/// Writes a consistent copy of the SQLite metadata database to `to` while a server may be running.
+pub(crate) fn backup(config: &Config, to: &Path) -> Result<(), String> {
+    let Metadata::Sqlite(path) = &config.metadata else {
+        return Err(
+            "backup applies to SQLite metadata only: back up Postgres with base backups and WAL \
+             archiving"
+                .to_owned(),
+        );
+    };
+    oxabl_cache_meta_sqlite::backup(path, to).map_err(|error| error.to_string())?;
+    println!("{}", json!({"backup": to.display().to_string()}));
     Ok(())
 }
 

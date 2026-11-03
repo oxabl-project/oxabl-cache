@@ -34,8 +34,7 @@ where
                 loop {
                     let now = self.now();
                     let removed = self
-                        .meta
-                        .transact_in(TxScope::Cache(id), move |tx| {
+                        .gc_transact_in(TxScope::Cache(id), move |tx| {
                             let current = tx.cache(&tenant, &id)?.ok_or(Error::NotFound)?;
                             if current.live_bytes <= target {
                                 return Ok(0);

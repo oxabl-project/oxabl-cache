@@ -228,6 +228,12 @@ impl Config {
             grace_secs: seconds(grace)?,
             ..CoreConfig::default()
         };
+        if let Some(batch) = raw.gc.batch {
+            if batch == 0 {
+                return Err("gc.batch must be positive".into());
+            }
+            core.gc_batch = batch;
+        }
         if let Some(ratio) = raw.gc.compaction_live_ratio {
             core.compaction_live_permille = permille(ratio, "gc.compaction_live_ratio")?;
         }

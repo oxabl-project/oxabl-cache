@@ -6,7 +6,7 @@ use super::accounts::{
 use super::{PgTx, RowExt, args, int};
 use oxabl_cache_core::Result;
 use oxabl_cache_core::domain::cache::Cache;
-use oxabl_cache_core::domain::credential::{OperatorToken, TokenSummary};
+use oxabl_cache_core::domain::credential::TokenSummary;
 use oxabl_cache_core::domain::scope::Grant;
 use oxabl_cache_core::domain::tenant::{Tenant, TenantLimits};
 use oxabl_cache_core::ids::{CredentialId, PrincipalId, TenantId};
@@ -15,7 +15,9 @@ use oxabl_cache_core::ports::metadata::{AdminTx, User};
 impl AdminTx for PgTx<'_> {
     fn all_tenants(&self) -> Result<Vec<Tenant>> {
         self.query(
-            &format!("SELECT {TENANT_COLUMNS} FROM tenants ORDER BY tenant_id"),
+            &format!(
+                "SELECT {TENANT_COLUMNS} FROM tenants WHERE deleted_at IS NULL ORDER BY tenant_id"
+            ),
             args![],
         )?
         .iter()
@@ -26,7 +28,7 @@ impl AdminTx for PgTx<'_> {
     fn set_tenant_limits(&mut self, id: &TenantId, limits: &TenantLimits) -> Result<bool> {
         let changed = self.execute(
             "UPDATE tenants SET hard_bytes = $2, egress_bytes = $3, rate = $4, burst = $5
-             WHERE tenant_id = $1",
+             WHERE tenant_id = $1 AND deleted_at IS NULL",
             args![
                 id.as_bytes().as_slice(),
                 limits.hard_bytes.map(int),
@@ -40,7 +42,10 @@ impl AdminTx for PgTx<'_> {
 
     fn caches_of(&self, tenant: &TenantId) -> Result<Vec<Cache>> {
         self.query(
-            &format!("SELECT {CACHE_COLUMNS} FROM caches WHERE tenant_id = $1 ORDER BY cache_id"),
+            &format!(
+                "SELECT {CACHE_COLUMNS} FROM caches
+                 WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY cache_id"
+            ),
             args![tenant.as_bytes().as_slice()],
         )?
         .iter()
@@ -104,47 +109,5 @@ impl AdminTx for PgTx<'_> {
             ))
         })
         .collect()
-    }
-
-    fn insert_operator_token(&mut self, token: &OperatorToken) -> Result<bool> {
-        let changed = self.execute(
-            "INSERT INTO operator_tokens
-               (credential_id, name, secret_hash, created_at, expires_at, revoked_at)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (credential_id) DO NOTHING",
-            args![
-                token.id.as_bytes().as_slice(),
-                token.name,
-                token.secret_hash.as_slice(),
-                token.created_at,
-                token.expires_at,
-                token.revoked_at,
-            ],
-        )?;
-        Ok(changed == 1)
-    }
-
-    fn operator_token(&self, id: &CredentialId) -> Result<Option<OperatorToken>> {
-        self.query_opt(
-            "SELECT credential_id, name, secret_hash, created_at, expires_at, revoked_at
-             FROM operator_tokens WHERE credential_id = $1",
-            args![id.as_bytes().as_slice()],
-        )?
-        .map(|row| {
-            Ok(OperatorToken {
-                id: CredentialId::from_bytes(row.blob(0)?),
-                name: row.text(1)?,
-                secret_hash: row.blob(2)?,
-                created_at: row.int(3)?,
-                expires_at: row.int(4)?,
-                revoked_at: row.opt_int(5)?,
-            })
-        })
-        .transpose()
-    }
-
-    fn operator_tokens_exist(&self) -> Result<bool> {
-        self.query_one("SELECT EXISTS (SELECT 1 FROM operator_tokens)", args![])?
-            .flag(0)
     }
 }
