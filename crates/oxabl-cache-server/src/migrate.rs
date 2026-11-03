@@ -7,8 +7,12 @@ use oxabl_cache_meta_sqlite::SqliteExport;
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 const BATCH_ROWS: usize = 1_000;
+
+/// The copy holds one transaction open while it reads a whole source database.
+const LONG_RUNNING: Duration = Duration::from_secs(3600);
 
 fn options(migration: &Migration) -> Result<PostgresOptions, String> {
     let url = migration.to.as_str();
@@ -17,6 +21,8 @@ fn options(migration: &Migration) -> Result<PostgresOptions, String> {
     }
     let mut options = PostgresOptions::new(url);
     options.ca_file.clone_from(&migration.ca_file);
+    options.statement_timeout = LONG_RUNNING;
+    options.idle_in_transaction_timeout = LONG_RUNNING;
     if let Some(path) = &migration.password_file {
         let text = std::fs::read_to_string(path)
             .map_err(|error| format!("cannot read password file {}: {error}", path.display()))?;

@@ -1,9 +1,14 @@
 //! The `[metadata]` section: where the metadata database lives.
 
 use super::raw;
+use super::units;
 use std::path::PathBuf;
+use std::time::Duration;
 
 const DEFAULT_POOL: usize = 16;
+const DEFAULT_STATEMENT_TIMEOUT: &str = "120s";
+const DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT: &str = "60s";
+const LONGEST_TIMEOUT: Duration = Duration::from_secs(3600);
 
 /// The metadata database.
 #[derive(Debug, Clone)]
@@ -16,6 +21,8 @@ pub(crate) enum Metadata {
         password_file: Option<PathBuf>,
         ca_file: Option<PathBuf>,
         max_connections: usize,
+        statement_timeout: Duration,
+        idle_in_transaction_timeout: Duration,
     },
 }
 
@@ -35,9 +42,15 @@ pub(super) fn parse(raw: &raw::Metadata) -> Result<Metadata, String> {
         if path.is_empty() {
             return Err("metadata url names no SQLite file".to_owned());
         }
-        if raw.password_file.is_some() || raw.ca_file.is_some() || raw.max_connections.is_some() {
+        if raw.password_file.is_some()
+            || raw.ca_file.is_some()
+            || raw.max_connections.is_some()
+            || raw.statement_timeout.is_some()
+            || raw.idle_in_transaction_timeout.is_some()
+        {
             return Err(
-                "metadata.password_file, ca_file and max_connections apply to postgres only"
+                "metadata.password_file, ca_file, max_connections, statement_timeout and \
+                 idle_in_transaction_timeout apply to postgres only"
                     .to_owned(),
             );
         }
@@ -51,11 +64,30 @@ pub(super) fn parse(raw: &raw::Metadata) -> Result<Metadata, String> {
         if max_connections == 0 {
             return Err("metadata.max_connections must be positive".to_owned());
         }
+        let timeout = |text: &Option<String>, default: &str, name: &str| {
+            let timeout = units::duration(text.as_deref().unwrap_or(default))?;
+            if timeout.is_zero() || timeout > LONGEST_TIMEOUT {
+                return Err(format!("metadata.{name} must be positive and at most 1h"));
+            }
+            Ok(timeout)
+        };
+        let statement_timeout = timeout(
+            &raw.statement_timeout,
+            DEFAULT_STATEMENT_TIMEOUT,
+            "statement_timeout",
+        )?;
+        let idle_in_transaction_timeout = timeout(
+            &raw.idle_in_transaction_timeout,
+            DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT,
+            "idle_in_transaction_timeout",
+        )?;
         return Ok(Metadata::Postgres {
             url: url.to_owned(),
             password_file: raw.password_file.as_ref().map(PathBuf::from),
             ca_file: raw.ca_file.as_ref().map(PathBuf::from),
             max_connections,
+            statement_timeout,
+            idle_in_transaction_timeout,
         });
     }
     Err(format!(

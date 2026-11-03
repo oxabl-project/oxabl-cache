@@ -241,3 +241,59 @@ fn backup_is_refused_on_postgres_metadata_with_a_pointer_to_base_backups() {
         "{message}"
     );
 }
+
+#[test]
+fn the_postgres_timeouts_are_validated_and_apply_to_postgres_only() {
+    let postgres = |keys: &str| {
+        BASE.replace(
+            "url = \"sqlite://{dir}/meta.db\"",
+            &format!("url = \"postgres://u@127.0.0.1:1/db?sslmode=disable\"\n{keys}"),
+        )
+    };
+    for (keys, mentioned) in [
+        ("statement_timeout = \"0s\"", "statement_timeout"),
+        ("statement_timeout = \"2h\"", "statement_timeout"),
+        ("statement_timeout = \"soon\"", "soon"),
+        (
+            "idle_in_transaction_timeout = \"0s\"",
+            "idle_in_transaction_timeout",
+        ),
+        (
+            "idle_in_transaction_timeout = \"1d\"",
+            "idle_in_transaction_timeout",
+        ),
+        ("max_connections = 0", "max_connections"),
+    ] {
+        let refused = run("config-pg-timeouts", &postgres(keys), &["check-store"], &[]);
+        assert!(!refused.status.success(), "{keys}");
+        assert!(
+            stderr(&refused).contains(mentioned),
+            "{keys}: {}",
+            stderr(&refused)
+        );
+    }
+    let accepted = run(
+        "config-pg-timeouts-ok",
+        &postgres("statement_timeout = \"30s\"\nidle_in_transaction_timeout = \"5s\""),
+        &["check-store"],
+        &[],
+    );
+    assert!(
+        stderr(&accepted).contains("cannot open the metadata database"),
+        "valid timeouts pass validation and reach the connection: {}",
+        stderr(&accepted)
+    );
+
+    let sqlite = run(
+        "config-sqlite-timeouts",
+        &BASE.replace("[metadata]\n", "[metadata]\nstatement_timeout = \"30s\"\n"),
+        &["check-store"],
+        &[],
+    );
+    assert!(!sqlite.status.success());
+    assert!(
+        stderr(&sqlite).contains("postgres only"),
+        "{}",
+        stderr(&sqlite)
+    );
+}

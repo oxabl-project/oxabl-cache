@@ -59,6 +59,8 @@ mod gc_fencing;
 mod gc_leader;
 #[path = "../multi_node/nodes.rs"]
 mod nodes;
+#[path = "../multi_node/pg_timeouts.rs"]
+mod pg_timeouts;
 #[path = "../multi_node/readiness.rs"]
 mod readiness;
 #[path = "../multi_node/two_nodes.rs"]

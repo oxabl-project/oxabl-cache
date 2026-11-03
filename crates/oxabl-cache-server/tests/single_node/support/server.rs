@@ -19,6 +19,8 @@ pub struct Options {
     pub url_lifetime: &'static str,
     pub shutdown_timeout: &'static str,
     pub extra: &'static str,
+    /// Lines added to the `[metadata]` section.
+    pub metadata_extra: &'static str,
     pub tls: bool,
     /// Replaces the generated `[metadata] url`.
     pub metadata_url: Option<String>,
@@ -35,6 +37,7 @@ impl Default for Options {
             url_lifetime: "5s",
             shutdown_timeout: "1s",
             extra: "",
+            metadata_extra: "",
             tls: false,
             metadata_url: None,
             frozen_clock: false,
@@ -64,12 +67,13 @@ fn config_text(dir: &Path, metadata_url: &str, objects: &Objects, options: &Opti
     format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nadmin_listen = \"127.0.0.1:0\"\n\
          metrics_listen = \"127.0.0.1:0\"\nurl_lifetime = \"{}\"\nshutdown_timeout = \"{}\"\n\
-         [metadata]\nurl = \"{metadata_url}\"\n\
+         [metadata]\nurl = \"{metadata_url}\"\n{}\n\
          {store}\
          [keys]\nurl_key_file = \"{dir}/url.key\"\n\
          [gc]\ngrace = \"{}\"\nlease = \"{}\"\ninterval = \"{}\"\n{}\n",
         options.url_lifetime,
         options.shutdown_timeout,
+        options.metadata_extra,
         options.grace,
         options.lease,
         options.interval,

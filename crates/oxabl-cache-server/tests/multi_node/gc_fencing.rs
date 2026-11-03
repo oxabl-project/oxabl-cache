@@ -99,7 +99,24 @@ fn a_frozen_leader_that_lost_leadership_is_refused_on_resume_and_deletes_nothing
     assert_eq!(world.put_slot(&slot, &pack.bytes).status, 200);
     let pack_id = slot["pack_id"].as_str().expect("id").to_owned();
 
-    std::thread::sleep(Duration::from_secs(5));
+    assert!(
+        wait_until(WAIT, || {
+            let open = |direct: &str| {
+                sql(
+                    direct,
+                    "SELECT count(*) FROM pg_stat_activity
+                     WHERE application_name = 'oxabl-cache-server'
+                       AND state LIKE 'idle in transaction%'",
+                )[0]
+                .get::<_, i64>(0)
+            };
+            open(&direct) > 0 && {
+                std::thread::sleep(Duration::from_millis(1200));
+                open(&direct) > 0
+            }
+        }),
+        "the old leader sits inside a transaction of its slowed garbage-collection pass"
+    );
     let leader_pid = world.server.pid();
     signal(leader_pid, "STOP");
     terminate_leader_session(&direct);
