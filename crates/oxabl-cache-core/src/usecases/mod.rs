@@ -53,6 +53,7 @@ mod user_manage;
 
 pub use cache_create::CacheSpec;
 pub use cache_info::{CacheInfo, Limits};
+pub use dictionary_get::LocatedDictionary;
 pub use entry_removal::Removal;
 pub use gc_compaction::CompactionReport;
 pub use gc_mark::MarkReport;
