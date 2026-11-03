@@ -1,0 +1,45 @@
+[Unit]
+Description=oxabl-cache first operator token (run once)
+Documentation=https://github.com/oxabl-project/oxabl-cache/blob/main/docs/hosting/deploy-container.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/oxabl-cache-server --config /etc/oxabl-cache/server.toml init
+StandardOutput=truncate:/etc/oxabl-cache/operator-token
+Environment=OXABL_CACHED_KEYS_URL_KEY_FILE=%d/url-key
+Environment=OXABL_CACHED_KEYS_CLAIM_HASH_KEY_FILE=%d/claim-key
+
+User=oxabl-cache
+DynamicUser=yes
+StateDirectory=oxabl-cache
+StateDirectoryMode=0700
+UMask=0077
+LoadCredential=url-key:/etc/oxabl-cache/secrets/url-key
+LoadCredential=claim-key:/etc/oxabl-cache/secrets/claim-key
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateUsers=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
+ProcSubset=pid
+RemoveIPC=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
