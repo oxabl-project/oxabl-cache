@@ -277,17 +277,32 @@ cache design can detect that.
   humans and to tokens a human creates.
 - **Issuer fetches are SSRF-guarded**, on every discovery and JWKS fetch:
   registration, each periodic refetch and each refetch on an unknown `kid`.
-  - URLs must be `https` on port 443.
-  - The server resolves the name itself and checks every address. Loopback,
-    private, link-local, CGNAT, unique-local and metadata ranges are refused, except
-    ranges the operator explicitly allows (`[oidc] allowed_private_ranges`, for a
-    self-hosted IdP on an internal network).
-  - It then connects to the address it checked, with SNI and `Host` set to the name.
-    DNS rebinding between the check and the connect, or between fetches, therefore
-    cannot redirect it.
-  - Each redirect (at most 3) is checked the same way.
-  - Responses are capped at 256 KiB and 5 s, and errors returned to the tenant are
-    generic.
+  - URLs must be `https` on port 443, with no credentials in the URL.
+  - The server resolves the name itself, through the system resolver or the
+    configured `dns_servers` over UDP (truncated answers are refused). It checks
+    every returned address, and one forbidden address refuses the whole name.
+    Forbidden ranges:
+    - IPv4: `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`,
+      `169.254.0.0/16` (which includes the cloud metadata address),
+      `172.16.0.0/12`, `192.0.0.0/24`, `192.0.2.0/24`, `192.88.99.0/24`,
+      `192.168.0.0/16`, `198.18.0.0/15`, `198.51.100.0/24`, `203.0.113.0/24`,
+      `224.0.0.0/4` and `240.0.0.0/4`;
+    - IPv6: `::`, `::1`, `100::/64`, `2001::/23` (Teredo included),
+      `2001:db8::/32`, `fc00::/7`, `fe80::/10`, `fec0::/10`, `ff00::/8`,
+      `5f00::/16`. Mapped IPv4 addresses are checked as IPv4, and NAT64 or 6to4
+      addresses that embed a forbidden IPv4 address are forbidden.
+
+    `[oidc] allowed_private_ranges` (CIDR blocks or single addresses) overrides
+    this, for a self-hosted IdP on an internal network.
+  - It then connects to the address it checked, with SNI and `Host` set to the issuer
+    name (an IP SNI for IP literals). DNS rebinding between the check and the
+    connect, or between fetches, therefore cannot redirect it.
+  - At most 3 redirects, each re-parsed and re-checked from scratch.
+  - Bodies are capped at 256 KiB. One 5 s budget covers the whole fetch, redirects
+    included. No `Accept-Encoding` is sent.
+  - Every failure shows the tenant one generic message ("the issuer could not be
+    verified"), and the exchange route answers the same 401 for every token
+    failure.
 
   On the hosted service an operator allowlist of issuers is also enforced.
 - **Gitea Actions** uses a scoped API token held as a CI secret.

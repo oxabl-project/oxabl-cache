@@ -78,8 +78,36 @@ path as a miss.
 The client takes `tenant` from `.oxabl/cache.toml`. The token's `aud` must be exactly
 `oxabl-cache:<tenant>`; this is not configurable, and no endpoint ever suggests an
 audience to the client. The call returns 200 `{"token": "oxs_…", "expires_at": 1793000000, "grants": [{"cache": "c_…", "scopes": ["read", "write:trusted"]}]}`.
-It answers 401 if the token is invalid or no trust policy matches. Workload sessions
-last 1 h and human sessions 12 h.
+The exchange checks the token as follows:
+- algorithm RS256 (2,048 to 8,192 bits), ES256 (P-256) or EdDSA (Ed25519); `none`,
+  HMAC and every other `alg`, and any `crit` header, are refused at parse time;
+- the token is at most 16 KiB;
+- the key comes from the issuer's JWKS, with `use` equal to `sig` and a matching
+  `alg` if present. A token without `kid` is tried only when exactly one key fits;
+- `iss` exactly equals an issuer registered for the tenant (and is in the operator
+  allowlist when one is set);
+- `aud` is `oxabl-cache:<tenant>`, or a one-element array of it;
+- `exp`, `iat` and `sub` are required and `nbf` is optional, all within 60 s of skew.
+
+Then:
+- **Workload session (1 h).** The token's scalar claims (strings, whole numbers,
+  booleans) are matched against the tenant's workload policies; every condition of a
+  policy must hold. Several matching policies give the union of their grants, and
+  the oldest one is the session's principal.
+- **Human session (12 h).** Otherwise, a registered, enabled user with that issuer
+  and subject gets a session with their standing grants.
+- **401.** Anything else, including an unknown tenant or one with no issuers. Every
+  token failure gets the same 401 and the same message. A suspended tenant gets 403
+  `tenant_suspended`.
+
+Key sets are found through `<issuer>/.well-known/openid-configuration`, whose
+`issuer` must equal the registered string, and then its `jwks_uri`. They are cached
+per issuer URL for at most 1 h and shared by tenants, with one fetch at a time per
+issuer. An unknown `kid` forces one refetch, unless the set was fetched less than
+1 s ago. That cooldown means a stream of bad tokens cannot drive a fetch per
+request, while a key rotation is still picked up within a second. A failed refetch
+after the hour leaves no keys (fail closed). A failed forced refetch keeps the
+still-valid set, and the token is refused.
 
 `DELETE /v1/auth/session` revokes the calling session (204).
 
@@ -161,8 +189,12 @@ Needs `write:trusted` or `write:personal`, matching `namespace`.
  "packs": [{"client_ref": "9f3c…(32 hex)", "size": 13107200, "sha256": "base64…"}]}
 ```
 
-`sha256` is required only when `store.checksum_sha256` is true. The response, in
-request order:
+When the cache info reports `store.checksum_sha256: true`, `sha256` is **required**
+for every pack, and the server signs it into the PUT URL, so the store refuses
+different bytes. Today the server still accepts a reservation without it and then
+signs no checksum header; the next server change refuses such a reservation with
+400. When the capability is false, `sha256` is ignored. The response, in request
+order:
 
 ```json
 {"packs": [
@@ -257,11 +289,21 @@ size.
 | `GET, POST /v1/tenant/tokens`; `DELETE /v1/tenant/tokens/{id}` | The secret is returned once on creation. |
 | `GET, POST /v1/tenant/users`; `DELETE /v1/tenant/users/{id}` | Human principals, keyed by issuer and subject. Deleting a user revokes their sessions. |
 | `GET, PUT /v1/tenant/grants` | Principal × cache × scopes. |
-| `GET, POST, DELETE /v1/tenant/oidc/issuers`, `…/oidc/policies` | Issuer allowlist and workload trust policies (exact claim conditions, scopes). A new issuer must pass the SSRF guard and, on the hosted service, the operator allowlist (security.md). Registering an issuer declares its immutable id claims; GitHub- and GitLab-shaped issuers get theirs by default. Any policy without an exact match on one of them is refused with 400, whatever the issuer. A workload policy may grant only `read`, `write:personal` and `write:trusted`. |
+| `GET, POST, DELETE /v1/tenant/oidc/issuers` | The tenant's issuers. POST `{"issuer": "https://…", "shape": "github" \| "gitlab" \| "custom", "id_claims": ["…"]}` (`shape` defaults to `custom`; `id_claims` is required for `custom`). 201 when new, 200 when identical, 409 for the same issuer with another shape or claims, 400 when the SSRF guard or the operator allowlist refuses it (one generic message). DELETE `{"issuer": "…"}` returns 204 and revokes every session opened through its policies and users. |
+| `GET, POST, DELETE /v1/tenant/oidc/policies` | Workload trust policies. POST `{"name": "…", "issuer": "…", "claims": {"repository_id": 123456789, "ref": "refs/heads/main"}, "grants": [{"cache": "c_…", "scopes": ["read", "write:trusted"]}]}`. Claim values are a string, an integer or a boolean, compared as text, and stored only as keyed hashes. 201, 200 for an identical policy, 409 for the same name with other content. 400 when no immutable id claim is matched, when an admin scope is requested (only `read`, `write:personal`, `write:trusted`), or when the issuer is not registered. 501 `not_configured` without `[keys] claim_hash_key_file`. GET lists names, issuers, claim names and grants, never values. DELETE `{"name": "…"}` returns 204 and revokes the policy's sessions. |
 | `GET /v1/tenant/usage?month=2026-10` | The tenant's own usage. |
 
 Creates use natural keys (name, issuer URL): re-posting identical content returns
 200, and different content returns 409.
+
+Immutable id claims by issuer shape. A policy must match at least one of these
+exactly:
+
+| Shape | Immutable id |
+| --- | --- |
+| `github` | `repository_id`, or `repository_owner_id` together with `repository` |
+| `gitlab` | `project_id`, or `namespace_id` together with `project_path` |
+| `custom` | one of the claims declared in `id_claims` at registration (at least one) |
 
 ## Operator administration
 
@@ -271,6 +313,7 @@ A separate listener (default `127.0.0.1:9091`) with operator tokens:
 | --- | --- |
 | `GET, POST /admin/v1/tenants`; `PATCH, DELETE /admin/v1/tenants/{t}` | Create, suspend or resume, delete. |
 | `PUT /admin/v1/tenants/{t}/quota` | Live-byte quotas (soft and hard), monthly egress, rate. |
+| `POST /admin/v1/tenants/{t}/admins` | `{"issuer": "https://…", "subject": "…"}` makes that OIDC subject the tenant's administrator, with a tenant-wide `tenant:admin` grant. 201 `{"id": …}` when new, 200 with the same id when it already is, 409 if that subject exists with another role. An issuer not yet registered for the tenant is vetted (SSRF guard, operator allowlist; 400 if refused) and registered as `custom` with `sub` as its id claim. Operator tokens only; a tenant token gets 401. |
 | `POST /admin/v1/tenants/{t}/tokens` | Create a `tenant:admin` token for the tenant; the secret is returned once (`oxabl-cache-admin tenant bootstrap-admin` and `token create --tenant`). |
 | `GET /admin/v1/usage?month=2026-10&format=csv` | One row per tenant, cache and metric: `month,tenant,cache,metric,value`. |
 | `POST /admin/v1/caches/{c}/scrub` | Re-verify every pack of a cache now. |

@@ -213,11 +213,78 @@ subset. The black-box suite runs in full against both.
 - SQLite (WAL, `synchronous=FULL`) keeps the single binary self-contained for a team
   that runs one node on local disk.
 - Postgres is what stateless API nodes share. Its transactional inserts and
-  `= ANY($1)` index probes answer a 10,000-id lookup in tens of milliseconds.
+  `= ANY($1)` index probes answer a 10,000-id lookup in tens of milliseconds, with
+  one statement and no chunking.
 - redb is rejected: a key-value store needs a second, hand-written query layer with
   no SQL parity to Postgres. Postgres-only is rejected because the single binary
   would then need a database server. SQLite-only is rejected because nodes cannot
   share it.
+
+### The port and its transactions
+
+`MetadataStore` offers three calls:
+- `read(f)` runs `f` on a snapshot and must not write. Postgres runs it as
+  `REPEATABLE READ READ ONLY` with no lock; SQLite as a transaction.
+- `transact_in(scope, f)` runs `f` as one write transaction in a `TxScope`.
+- `transact(f)` is `transact_in(TxScope::Global, f)`.
+
+The closure is synchronous, and the object store is never called inside it. Every
+use case picks the narrowest scope that covers what it writes:
+
+| Scope | Use cases |
+| --- | --- |
+| `Cache(c)` | commit, purge, report verification, roster and dictionary put, retention, eviction, compaction, access-day flush (one transaction per cache), scrub queueing |
+| `TenantCache(t, c)` | upload reservation (tenant quota admission reads the tenant's other caches), owner keys |
+| `Tenant(t)` | users, grants, tokens, sessions, cache creation, OIDC issuers and policies, tenant bootstrap |
+| `Ledger` | usage flush, day roll-up, stored-bytes snapshot |
+| `Independent` | node heartbeat, session revoke |
+| `Global` | tenant create and status, GC mark, GC sweep, taking queued scrubs, and any use case without an explicit scope (correct, but it blocks every writer) |
+
+Reads (lookup, authentication, cache info, roster and dictionary GET, URL refresh,
+the object route, listings, usage export, and the read halves of commit, purge and
+verification) use `read`.
+
+**Concurrency on Postgres: scoped advisory locks and READ COMMITTED, not
+SERIALIZABLE.** The closure cannot be re-run after a serialization failure. The core's
+read-check-write logic (quota admission, first-write-wins, live-byte accounting)
+assumes it is the only writer of a cache for the whole transaction. So writers take
+advisory transaction locks in a fixed order: the global lock, then the tenant lock,
+then the cache lock. Each lock key is a 64-bit BLAKE3 hash of a domain tag and the id.
+- `Global` takes the global lock exclusive and excludes everything.
+- Scoped writers hold the global lock shared. Transactions on different caches run
+  side by side; those on one cache run one at a time.
+- A hash collision only serializes two scopes that could have run together.
+
+The residual: a scoped transaction's reads outside its scope are not isolated from
+concurrent writers there. That covers the tenant's other caches' byte totals during
+admission, and stored bytes in the ledger snapshot. Tenant quota is therefore exact
+among reservations, which share the tenant lock, but approximate by in-flight commits
+and GC in the tenant's other caches.
+
+On SQLite the scope is ignored, because SQLite has one writer (`BEGIN IMMEDIATE`).
+
+**Batch inserts.** `insert_segments` and `insert_entries` default to a loop of single
+inserts, and Postgres overrides each with one statement. A 2,000-entry commit through
+the real server on loopback takes 115 ms (770 ms with single inserts, 90 ms on
+SQLite). Over a real network, single inserts would cost thousands of round trips.
+
+**Failure handling on Postgres:**
+- A constraint violation is `Internal` (no values in the message). Every other
+  database error is `Unavailable`, which clients see as 503 and treat as a miss.
+- A closure that returned `Ok` after one of its statements failed is refused, and
+  `Internal` is returned rather than a COMMIT that Postgres would turn into a
+  ROLLBACK.
+- A connection whose transaction state is unknown (failed COMMIT, failed ROLLBACK,
+  panic) is closed, never reused.
+- A commit whose COMMIT acknowledgement was lost has an unknown outcome and reports
+  `Unavailable`. The client's retry is then answered from the recorded commit.
+
+**Migrations** (0001 to 0003, the same tables, checks, foreign keys and unique
+constraints on both databases) run at startup, in one transaction, under an advisory
+lock, so nodes that start together migrate once. A database with a newer schema than
+the binary is refused.
+
+### Growth
 
 Growth from one node to many is `oxabl-cache-server migrate --from a.toml --to b.toml`.
 It runs offline and copies metadata (SQLite to Postgres) and packs (disk to S3),
@@ -227,8 +294,13 @@ types (ids are bytes or text, times are integer seconds), so nothing is converte
 During the window, builds see misses, never errors. The path has its own black-box
 test. ADR: [0003](adr/0003-metadata-sqlite-and-postgres.md).
 
+### Tables
+
 Core tables: `tenants`, `caches`, `cache_owner_keys`, `users`, `grants`, `tokens`
-and `token_grants`, `sessions` and `session_grants`, `workload_policies`,
+and `token_grants`, `sessions` and `session_grants`, `oidc_issuers` and
+`oidc_issuer_claims` (the declared immutable id claims), `workload_policies` with
+`workload_policy_claims` (keyed hashes of the expected values) and
+`workload_policy_grants`,
 `rosters` and `roster_signers` (the public keys and roles of the current roster),
 `dictionary_pointers`, `packs`, `segments`, `entries`, `entry_access`,
 `usage_ledger`, `ledger_nodes`, `ledger_days`, `nodes`, `scrub_queue`,
@@ -368,8 +440,23 @@ sweep of the corrupt dictionary.
 
 ## Garbage collection, compaction and retention
 
-GC runs inside the server, on one node at a time, elected with a Postgres advisory
-lock (with SQLite, the single process runs it). ADR: [0006](adr/0006-gc-leases-grace.md).
+GC runs inside the server, on one node at a time. ADR: [0006](adr/0006-gc-leases-grace.md).
+
+**Leader election.** On Postgres, each node holds a dedicated connection and polls a
+session-level `pg_try_advisory_lock` every second. The node that holds the lock is
+the leader. The database releases the lock when that connection ends, process death
+included. The GC loop checks leadership before every tick and runs jobs only while
+it leads; `oxabl_cache_gc_leader` reports it. A node that cannot reach the database is
+never the leader. With SQLite, the single process is always the leader.
+
+**Fencing is not strict yet.** A partitioned leader keeps collecting until its next
+poll fails, and its database session may outlive the partition by the keepalive
+time (30 s). GC transactions are scoped and re-validate under their locks:
+compaction relocates only live segments still in the source pack, and the sweep
+re-reads before deleting. So two leaders race harmlessly in every case the code
+handles, but no test proves it. **The next server change adds a leader epoch,**
+raised on each acquisition and checked inside every GC transaction. A transaction
+from a deposed leader then aborts instead of relying on re-validation.
 
 - **Retention.** An entry whose `access_day` is older than the cache's retention
   (default 30 days) is deleted. Lookup hits set `entry_access.access_day` at most

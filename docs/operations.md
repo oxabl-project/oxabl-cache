@@ -25,8 +25,8 @@ a customer key; everything below works on ciphertext and account data.
   leader, and migrations run at startup under the same lock.
 - **Hosted service.** One deployment per data region (North America by default, EU
   for EU tenants), each with its own R2 bucket (EU jurisdiction for EU) and Postgres
-  primary plus streaming replica on Hetzner nodes. A tenant is pinned to a region at
-  creation.
+  primary plus streaming replica on Hetzner nodes. A tenant is pinned to a region by
+  being created through that region's admin endpoint.
 - **Upgrades.** Rolling. A release's migrations are additive, so the previous release
   keeps working during the rollout. Destructive schema steps ship one release later.
 
@@ -51,8 +51,12 @@ cert_file = "/etc/oxabl-cache/tls.crt"
 key_file = "/etc/oxabl-cache/tls.key"
 
 [metadata]
-url = "sqlite:///var/lib/oxabl-cache/meta.db"   # or postgres://user@host/db
-password_file = "/run/secrets/db-password"   # postgres only
+url = "sqlite:///var/lib/oxabl-cache/meta.db"
+# Postgres instead:
+# url = "postgres://oxabl@db.internal/oxabl_cache"  # never a password in the URL
+# password_file = "/run/secrets/db-password"
+# ca_file = "/etc/oxabl-cache/db-ca.pem"             # private CA; default: web roots
+# max_connections = 16
 
 [store]
 kind = "fs"                                   # or "s3"
@@ -91,6 +95,29 @@ extra_ca_file = ""
 level = "info"
 format = "json"
 ```
+
+`[metadata]` rules:
+- SQLite-only keys are refused on a Postgres URL, and the other way round.
+- A `postgres://` URL that carries a password is refused ("use password_file").
+- TLS to Postgres (rustls) is required unless the URL says `sslmode=disable`. A URL
+  without `sslmode`, or with `prefer`, still requires it, so the default fails closed.
+  The server trusts the web roots, or only `ca_file` when it is set.
+- `max_connections` sizes the server's own pool (default 16).
+- Fixed per connection: statement timeout 120 s, idle-in-transaction timeout 60 s,
+  TCP keepalives 30 s.
+- The database is opened first, so an unreachable database stops startup before
+  anything else. Migrations run at startup in one transaction under an advisory lock
+  (architecture.md, "The port and its transactions").
+
+`[keys] claim_hash_key_file` holds 64 hex characters, and `init` creates it. Without
+it, creating a workload policy answers 501 `not_configured`, while the OIDC exchange
+still opens human sessions.
+
+`[oidc]` is live:
+- `dns_servers` takes `ip` or `ip:port` (default port 53), queried over UDP;
+  truncated answers are refused.
+- `extra_ca_file` is a PEM bundle added to the system roots, read at start.
+- `allowed_private_ranges` takes CIDR blocks or single addresses.
 
 The URL key may list two keys during rotation; both are accepted and the first signs.
 The claim-hash key is stable: rotating it means re-entering trust policies.
@@ -164,18 +191,42 @@ record or roster bytes. A canary test enforces this (testing.md).
 
 ## Tenant administration
 
-`oxabl-cache-admin` talks to the admin listener with an operator token (`--token-file`).
+`oxabl-cache-admin` talks to one deployment's admin listener with an operator token.
+A region is a separate deployment with its own admin endpoint, so there is no region
+flag: the operator points `--server` at that region's admin listener. A tenant lives
+in the region whose admin endpoint created it.
 
 ```
-oxabl-cache-admin tenant create acme --region na --hard-quota 20GiB --egress 500GiB
+oxabl-cache-admin tenant create acme --hard-quota 20GiB --egress 500GiB
 oxabl-cache-admin tenant list | show <t> | suspend <t> | resume <t> | delete <t>
-oxabl-cache-admin tenant quota <t> --hard-quota 50GiB --rate 100
+oxabl-cache-admin tenant quota <t> --hard-quota 50GiB --rate 100 --egress none
 oxabl-cache-admin tenant bootstrap-admin <t> --issuer https://idp.example --subject <sub>
 oxabl-cache-admin token create --tenant <t> --scopes tenant:admin --expires 30d
 oxabl-cache-admin usage export --month 2026-10 --format csv > usage-2026-10.csv
 oxabl-cache-admin cache scrub <c>
 oxabl-cache-admin health
 ```
+
+Settings and conventions:
+- `--server`, or `OXABL_CACHE_ADMIN_SERVER`.
+- `--token-file`, or `OXABL_CACHE_ADMIN_TOKEN_FILE`: always a path, never the token
+  itself. There is no token flag, and the token never appears in output or in the
+  process's arguments.
+- `--ca-file` adds a CA to the system roots. `--json` gives machine-readable
+  output.
+- `<t>` is a tenant id or name, resolved through `GET /admin/v1/tenants`.
+- Sizes take binary units only (`20GiB`), or `none` to clear a limit.
+- `tenant quota` re-sends the current value of every flag left out.
+- `token create` accepts only `--scopes tenant:admin`.
+- `tenant bootstrap-admin` calls `POST /admin/v1/tenants/{t}/admins`.
+- `usage export` writes CSV `month,tenant,cache,metric,value`, sorted by tenant,
+  cache and metric. The CLI validates the header and every row, and refuses a
+  malformed answer rather than printing it.
+- Redirects are never followed, so the bearer never travels to another host.
+- Exit codes: 0 success; 1 the server refused (`code: message` from the envelope);
+  2 usage or configuration error; 3 server unreachable (connect, TLS or transport).
+
+Operator token revocation, `migrate` and `backup` have no CLI yet.
 
 Customers then manage their own caches, tokens, users, grants and OIDC policies
 through the tenant API (protocol.md) or the `oxabl-cache` CLI.

@@ -19,16 +19,61 @@ and the storage attacks below use it, so it also checks the spec.
   `target/e2e-tmp/<test>-<pid>/`. It reads the bound address from the server's
   `{"ready": …}` stdout line. The timers are plain configuration; the server has no
   test hooks.
-- **Backends.** Every scenario runs twice through a macro: `fs + sqlite` and
-  `s3 + postgres`.
+- **Backends and targets.** Each scenario file is written once and included by
+  `#[path]` into one test target per backend; a `BACKEND` constant selects the
+  backend.
+
+  | Target | Store | Metadata | Notes |
+  | --- | --- | --- | --- |
+  | `single_node` | fs | SQLite | |
+  | `single_node_postgres` | fs | Postgres | |
+  | `s3_garage` | Garage | SQLite | |
+  | `s3_garage_postgres` | Garage | Postgres | plus the multi-node scenarios |
+  | `s3_versitygw` | versitygw | SQLite | |
+  | `oidc`, `oidc_postgres` | fs | SQLite, Postgres | the OIDC suite |
+
+  Each Postgres target has a guard test that fails when a module of its SQLite
+  target is missing. `single_node_postgres` also reads `schema_migrations` from the
+  database in the server's configuration, so a target that quietly ran on SQLite
+  goes red. The core `behaviour` suite picks its database from
+  `OXABL_CACHE_TEST_BACKEND` (`sqlite` by default, or `postgres`).
+  `oxabl-cache-meta-postgres` has its own port-level tests:
+  - a scope matrix of which scopes overlap and which serialise, with a
+    deterministic rendezvous so "overlap" cannot pass by luck;
+  - nodes migrating at once, and a newer schema refused;
+  - TLS required;
+  - constraint errors, and refusal of a swallowed failed statement;
+  - leader election and failover.
+- **Multi-node scenarios** (`s3_garage_postgres`):
+  - Two nodes commit the same keys at the same instant. Every pack is won whole by
+    exactly one node, and both nodes serve the winner.
+  - Exactly one node is the GC leader. When it is `SIGKILL`ed, the other takes over
+    and sweeps.
+  - After the 10 s refresh, each node admits about half of a tenant's burst.
+  - The Postgres cluster is killed mid-commit and restarted. The commit gets 503,
+    no partial rows remain, and the retry commits everything without a server
+    restart.
 - **S3: Garage** (nixpkgs `garage`, 1.3.1) is the primary store, run as a child
   process from the repo's devshell (`nix develop`). There is one single-node
   instance per test binary, with each test on its own bucket and random ports.
   **versitygw** (nixpkgs `versitygw`, POSIX backend) is the second, independent
   implementation. The full S3 suite runs against both on every pull request, so the
   portable subset never drifts toward one server's behaviour. Optional capabilities
-  (`If-None-Match`, checksum headers) are tested where a server has them and skipped
-  with a logged reason where it does not. MinIO is not used: nixpkgs marks it
+  differ per server, and `s3_suite/capabilities.rs` pins them, so an upgrade that
+  changes one fails and says so:
+
+  | Server | `If-None-Match: *` on PUT | `x-amz-checksum-sha256` |
+  | --- | --- | --- |
+  | Garage 1.3.1 | no (a second PUT overwrites) | yes (a wrong digest is refused) |
+  | versitygw (POSIX) | yes (412) | yes |
+
+  A capability's scenarios run where the server has it, and are skipped with a
+  logged reason where it does not. On Garage, a stale PUT overwrites a committed
+  pack. The commit retry then gets `pack_changed`, a scrub removes the entry, and
+  nothing is served. The two servers already caught one drift: versitygw answers
+  `DeleteObjects` without the XML namespace, so the adapter parses that answer with
+  its own namespace-tolerant parser. That parser still fails closed on anything that
+  is not a `DeleteResult`. MinIO is not used: nixpkgs marks it
   insecure. The real R2 bucket is exercised by the prototype, outside this suite.
 - **Postgres 18** (nixpkgs `postgresql`): `initdb` and `postgres -k <dir> -p <port>`
   from the same devshell, one cluster per test binary, one database per test.
@@ -49,12 +94,19 @@ and the storage attacks below use it, so it also checks the spec.
   point.
 - **Fake IdP.** A test tool that serves discovery and JWKS and mints ID tokens
   shaped like those of GitHub Actions and GitLab CI. It also serves a GitHub-style
-  token request endpoint that records the audience each client asks for. OIDC tests
-  run the server, the fake IdP and a fake DNS server inside an unprivileged user and
-  network namespace (`unshare --user --map-root-user --net`). There, the IdP
-  listens on port 443 at addresses the test chooses, with a test CA the server
-  trusts. The server is configured with that DNS server and with
-  `allowed_private_ranges` covering only the IdP's "public" address.
+  token request endpoint that records the audience each client asks for. It can sign
+  RS256, ES256 and EdDSA, rotate keys, redirect discovery, and pad or stall the key
+  set. The OIDC tests (target `tests/e2e/tests/oidc`) run the server, the fake IdP
+  and a fake DNS server, whose answers change at run time or alternate per query,
+  inside an unprivileged user and network namespace. Each test enters its own
+  namespace (`netns::enter`). The launcher configures the namespace as root, then
+  runs the test as the invoking uid (`unshare --user --map-user`, with
+  `ip_unprivileged_port_start=0` so the IdP can bind 443), because Postgres refuses
+  to run as root. The IdP listens at `10.99.0.10:443`, the only allowed range, with a
+  test CA the server trusts. **Decoy listeners** sit on every address that must stay
+  unreachable: `127.0.0.1`, `::1`, `10.0.0.5`, `172.16.0.1`, `192.168.1.1`,
+  `100.64.0.1` and `169.254.169.254`. A refusal is therefore proven by "no
+  connection reached the decoy", not by "connect failed".
 - **Break it once.** Every scenario and adversarial test below is first run against a
   deliberately broken server or client build (the protecting check removed) and must
   fail, naming its assertion. The break is recorded in the pull request that adds the
@@ -83,8 +135,8 @@ Each test names the behaviour it protects.
 | Compaction | A churn-heavy workload leaves packs under 50% live. After compaction every live entry still installs correctly and stored bytes drop. |
 | Rotation | After `member remove`, the removed identity cannot open new-epoch records. Clients pinned to the new `min_roster_version` refuse the old roster. |
 | OIDC | A matching policy yields a session with the policy's scopes. A wrong `aud`, an expired token, `alg: none`, an HMAC algorithm, an unknown `kid` or an unmatched claim gets 401. A policy with only `environment` (no immutable id claim) is refused with 400 on a GitHub-shaped issuer, on a GitLab-shaped one, and on a generic issuer registered with `sub` as its id claim. A token from another repository with the same environment name gets 401. A workload policy granting `cache:admin` or `tenant:admin` is refused. |
-| Issuer SSRF | Registering issuers at `https://127.0.0.1`, at a private address, at a name that resolves to a private address, and at a public URL that redirects to a private one: every case is refused, and the harness's listener on the private address sees no request. With an issuer allowlist configured, an unlisted public issuer is refused. |
-| DNS rebinding | The issuer's name resolves to its allowed address at registration. The fake DNS then answers with a private address for the periodic JWKS refetch, and again for a refetch on an unknown `kid`, and then alternates answers between the check and the connect. The listener on the private address never sees a connection, the refetch fails, and the IdP's own listener sees only connections whose SNI is the issuer name. |
+| Issuer SSRF | Registering issuers at `https://127.0.0.1`, at a private address, at a name that resolves to a private address, and at a public URL that redirects to a private one: every case is refused, and no decoy listener sees a connection. With an issuer allowlist configured, an unlisted public issuer is refused. |
+| DNS rebinding | The issuer's name resolves to its allowed address at registration. The fake DNS then answers with a private address for the periodic JWKS refetch, and again for a refetch on an unknown `kid`, and then alternates answers between the check and the connect. No decoy listener ever sees a connection, the refetch fails, and the IdP's own listener sees only connections whose SNI is the issuer name. |
 | Roster checks | A `cache:admin` token's PUT of an unsigned roster, a roster signed by an unregistered key, or one with epoch `current + 2` gets 400, and clients keep working. A roster signed by both the old and the new owner key opens for clients pinned to either. |
 | Tokens | A revoked or expired token gets 401 on the next call, mid-session included. |
 | Tenancy | Tenant B's token on tenant A's cache gets 404. |
