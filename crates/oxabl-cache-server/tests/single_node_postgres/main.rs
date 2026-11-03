@@ -34,6 +34,8 @@ mod scopes;
 mod shutdown_upload;
 #[path = "../single_node/support/mod.rs"]
 mod support;
+#[path = "../single_node/teardown.rs"]
+mod teardown;
 #[path = "../single_node/tls_listener.rs"]
 mod tls_listener;
 

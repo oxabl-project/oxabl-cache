@@ -13,7 +13,7 @@ impl TenantsTx for SqliteTx<'_> {
         self.conn
             .prepare_cached(
                 "SELECT tenant_id, name, status, hard_bytes, egress_bytes, rate, burst, created_at
-                 FROM tenants WHERE tenant_id = ?1",
+                 FROM tenants WHERE tenant_id = ?1 AND deleted_at IS NULL",
             )
             .db()?
             .query_row([id.as_bytes().as_slice()], |row| {
@@ -65,7 +65,7 @@ impl TenantsTx for SqliteTx<'_> {
         let changed = self
             .conn
             .execute(
-                "UPDATE tenants SET status = ?2 WHERE tenant_id = ?1",
+                "UPDATE tenants SET status = ?2 WHERE tenant_id = ?1 AND deleted_at IS NULL",
                 params![
                     id.as_bytes().as_slice(),
                     i64::from(status == TenantStatus::Suspended)
@@ -79,7 +79,7 @@ impl TenantsTx for SqliteTx<'_> {
         self.conn
             .prepare_cached(
                 "SELECT COALESCE(SUM(live_bytes), 0), COALESCE(SUM(pending_bytes), 0)
-                 FROM caches WHERE tenant_id = ?1",
+                 FROM caches WHERE tenant_id = ?1 AND deleted_at IS NULL",
             )
             .db()?
             .query_row([tenant.as_bytes().as_slice()], |row| {

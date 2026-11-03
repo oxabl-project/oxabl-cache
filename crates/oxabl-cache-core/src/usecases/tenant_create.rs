@@ -47,11 +47,7 @@ where
         let id = tenant.id;
         self.meta
             .transact(move |tx| {
-                if tx
-                    .all_tenants()?
-                    .iter()
-                    .any(|existing| existing.name == tenant.name)
-                {
+                if tx.tenant_name_taken(&tenant.name)? {
                     return Err(Error::Conflict(Conflict::Exists));
                 }
                 if tx.insert_tenant(&tenant)? {

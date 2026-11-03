@@ -54,11 +54,7 @@ where
         let keys = spec.owner_keys;
         self.meta
             .transact_in(TxScope::Tenant(cache.tenant), move |tx| {
-                if tx
-                    .caches_of(&cache.tenant)?
-                    .iter()
-                    .any(|existing| existing.display_name == cache.display_name)
-                {
+                if tx.cache_name_taken(&cache.tenant, &cache.display_name)? {
                     return Err(Error::Conflict(Conflict::Exists));
                 }
                 if !tx.insert_cache(&cache)? {

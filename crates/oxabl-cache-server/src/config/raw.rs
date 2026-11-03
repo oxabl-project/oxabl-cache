@@ -79,6 +79,7 @@ pub(crate) struct Gc {
     pub interval: Option<String>,
     pub compaction_live_ratio: Option<f64>,
     pub orphan_scan: Option<String>,
+    pub batch: Option<usize>,
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -4,5 +4,7 @@ pub mod fixture;
 pub mod frames;
 pub mod http;
 pub mod objects;
+pub mod party;
+pub mod rows;
 pub mod server;
 pub mod tls;

@@ -30,7 +30,7 @@ impl AdminTx for SqliteTx<'_> {
             .conn
             .prepare_cached(
                 "SELECT tenant_id, name, status, hard_bytes, egress_bytes, rate, burst, created_at
-                 FROM tenants ORDER BY tenant_id",
+                 FROM tenants WHERE deleted_at IS NULL ORDER BY tenant_id",
             )
             .db()?;
         let rows = statement
@@ -59,7 +59,7 @@ impl AdminTx for SqliteTx<'_> {
             .conn
             .prepare_cached(
                 "UPDATE tenants SET hard_bytes = ?2, egress_bytes = ?3, rate = ?4, burst = ?5
-                 WHERE tenant_id = ?1",
+                 WHERE tenant_id = ?1 AND deleted_at IS NULL",
             )
             .db()?
             .execute(params![

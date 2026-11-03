@@ -51,7 +51,10 @@ impl CachesTx for PgTx<'_> {
 
     fn cache(&self, tenant: &TenantId, id: &CacheId) -> Result<Option<Cache>> {
         self.query_opt(
-            &format!("SELECT {CACHE_COLUMNS} FROM caches WHERE cache_id = $1 AND tenant_id = $2"),
+            &format!(
+                "SELECT {CACHE_COLUMNS} FROM caches
+                 WHERE cache_id = $1 AND tenant_id = $2 AND deleted_at IS NULL"
+            ),
             args![id.as_bytes().as_slice(), tenant.as_bytes().as_slice()],
         )?
         .as_ref()
@@ -61,7 +64,7 @@ impl CachesTx for PgTx<'_> {
 
     fn cache_tenant(&self, id: &CacheId) -> Result<Option<TenantId>> {
         self.query_opt(
-            "SELECT tenant_id FROM caches WHERE cache_id = $1",
+            "SELECT tenant_id FROM caches WHERE cache_id = $1 AND deleted_at IS NULL",
             args![id.as_bytes().as_slice()],
         )?
         .map(|row| Ok(TenantId::from_bytes(row.blob(0)?)))
@@ -70,7 +73,9 @@ impl CachesTx for PgTx<'_> {
 
     fn all_caches(&self) -> Result<Vec<Cache>> {
         self.query(
-            &format!("SELECT {CACHE_COLUMNS} FROM caches ORDER BY cache_id"),
+            &format!(
+                "SELECT {CACHE_COLUMNS} FROM caches WHERE deleted_at IS NULL ORDER BY cache_id"
+            ),
             args![],
         )?
         .iter()

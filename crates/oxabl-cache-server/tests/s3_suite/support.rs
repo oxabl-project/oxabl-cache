@@ -10,5 +10,9 @@ pub mod frames;
 pub mod http;
 #[path = "../single_node/support/objects.rs"]
 pub mod objects;
+#[path = "../single_node/support/party.rs"]
+pub mod party;
+#[path = "../single_node/support/rows.rs"]
+pub mod rows;
 #[path = "../single_node/support/server.rs"]
 pub mod server;

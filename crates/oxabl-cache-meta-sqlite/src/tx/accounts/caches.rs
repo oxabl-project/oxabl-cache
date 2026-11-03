@@ -55,7 +55,8 @@ impl CachesTx for SqliteTx<'_> {
     fn cache(&self, tenant: &TenantId, id: &CacheId) -> Result<Option<Cache>> {
         self.conn
             .prepare_cached(&format!(
-                "SELECT {CACHE_COLUMNS} FROM caches WHERE cache_id = ?1 AND tenant_id = ?2"
+                "SELECT {CACHE_COLUMNS} FROM caches
+                 WHERE cache_id = ?1 AND tenant_id = ?2 AND deleted_at IS NULL"
             ))
             .db()?
             .query_row(
@@ -68,7 +69,9 @@ impl CachesTx for SqliteTx<'_> {
 
     fn cache_tenant(&self, id: &CacheId) -> Result<Option<TenantId>> {
         self.conn
-            .prepare_cached("SELECT tenant_id FROM caches WHERE cache_id = ?1")
+            .prepare_cached(
+                "SELECT tenant_id FROM caches WHERE cache_id = ?1 AND deleted_at IS NULL",
+            )
             .db()?
             .query_row([id.as_bytes().as_slice()], |row| {
                 Ok(TenantId::from_bytes(row.blob(0)?))
@@ -81,7 +84,7 @@ impl CachesTx for SqliteTx<'_> {
         let mut statement = self
             .conn
             .prepare_cached(&format!(
-                "SELECT {CACHE_COLUMNS} FROM caches ORDER BY cache_id"
+                "SELECT {CACHE_COLUMNS} FROM caches WHERE deleted_at IS NULL ORDER BY cache_id"
             ))
             .db()?;
         let rows = statement.query_map([], cache_of).db()?;

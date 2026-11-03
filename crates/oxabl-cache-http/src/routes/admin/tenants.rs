@@ -4,7 +4,7 @@
 use crate::app::{App, Backend};
 use crate::auth::Operator;
 use crate::error::ApiError;
-use crate::json::{json_response, read_json};
+use crate::json::{empty, json_response, read_json};
 use crate::path::tenant_id;
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -137,16 +137,14 @@ pub(crate) async fn patch<B: Backend>(
     Ok(json_response(StatusCode::OK, &tenant_json(&found)))
 }
 
-/// Deleting a tenant needs the asynchronous teardown of its caches, which this build lacks.
+/// Deletes a tenant: 202 once it is tombstoned, the removal of its caches follows asynchronously.
 pub(crate) async fn delete<B: Backend>(
-    State(_app): State<Arc<App<B>>>,
+    State(app): State<Arc<App<B>>>,
     _operator: Operator,
     Path(tenant): Path<String>,
 ) -> Result<Response, ApiError> {
-    tenant_id(&tenant)?;
-    Err(ApiError::not_implemented(
-        "deleting a tenant is not implemented in this build",
-    ))
+    app.engine.delete_tenant(tenant_id(&tenant)?).await?;
+    Ok(empty(StatusCode::ACCEPTED))
 }
 
 pub(crate) async fn quota<B: Backend>(

@@ -9,6 +9,7 @@ mod oidc;
 mod packs;
 mod roster;
 mod segments;
+mod teardown;
 
 use rusqlite::Connection;
 

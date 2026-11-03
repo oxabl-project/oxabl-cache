@@ -30,7 +30,9 @@ pub(in crate::tx) fn tenant_of(row: &Row) -> Result<Tenant> {
 impl TenantsTx for PgTx<'_> {
     fn tenant(&self, id: &TenantId) -> Result<Option<Tenant>> {
         self.query_opt(
-            &format!("SELECT {TENANT_COLUMNS} FROM tenants WHERE tenant_id = $1"),
+            &format!(
+                "SELECT {TENANT_COLUMNS} FROM tenants WHERE tenant_id = $1 AND deleted_at IS NULL"
+            ),
             args![id.as_bytes().as_slice()],
         )?
         .as_ref()
@@ -62,7 +64,7 @@ impl TenantsTx for PgTx<'_> {
 
     fn set_tenant_status(&mut self, id: &TenantId, status: TenantStatus) -> Result<bool> {
         let changed = self.execute(
-            "UPDATE tenants SET status = $2 WHERE tenant_id = $1",
+            "UPDATE tenants SET status = $2 WHERE tenant_id = $1 AND deleted_at IS NULL",
             args![
                 id.as_bytes().as_slice(),
                 i64::from(status == TenantStatus::Suspended)
@@ -74,7 +76,7 @@ impl TenantsTx for PgTx<'_> {
     fn tenant_bytes(&self, tenant: &TenantId) -> Result<(u64, u64)> {
         let row = self.query_one(
             "SELECT COALESCE(SUM(live_bytes), 0)::bigint, COALESCE(SUM(pending_bytes), 0)::bigint
-             FROM caches WHERE tenant_id = $1",
+             FROM caches WHERE tenant_id = $1 AND deleted_at IS NULL",
             args![tenant.as_bytes().as_slice()],
         )?;
         Ok((row.unsigned(0)?, row.unsigned(1)?))

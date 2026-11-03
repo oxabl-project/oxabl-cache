@@ -44,6 +44,11 @@ pub struct Server {
 
 impl Server {
     pub fn start(name: &str, tls: bool) -> Self {
+        Self::start_with(name, tls, "")
+    }
+
+    /// Like [`Server::start`] with `extra` appended to the configuration.
+    pub fn start_with(name: &str, tls: bool, extra: &str) -> Self {
         let bin = server_binary();
         let dir =
             Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}-{}", std::process::id()));
@@ -68,6 +73,7 @@ impl Server {
                 "[tls]\ncert_file = \"{shown}/tls.crt\"\nkey_file = \"{shown}/tls.key\"\n"
             ));
         }
+        config.push_str(extra);
         let config_path = dir.join("server.toml");
         fs::write(&config_path, config).expect("config");
         let init = Command::new(&bin)

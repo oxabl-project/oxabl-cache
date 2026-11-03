@@ -22,6 +22,8 @@ pub struct Options {
     pub tls: bool,
     /// Replaces the generated `[metadata] url`.
     pub metadata_url: Option<String>,
+    /// Freezes the server's clock at the moment it starts.
+    pub frozen_clock: bool,
 }
 
 impl Default for Options {
@@ -35,6 +37,7 @@ impl Default for Options {
             extra: "",
             tls: false,
             metadata_url: None,
+            frozen_clock: false,
         }
     }
 }
@@ -50,6 +53,7 @@ pub struct Server {
     pub operator: String,
     config: PathBuf,
     runs: u32,
+    frozen_clock: bool,
 }
 
 const BIN: &str = env!("CARGO_BIN_EXE_oxabl-cache-server");
@@ -126,6 +130,7 @@ impl Server {
             operator,
             config,
             runs: 0,
+            frozen_clock: options.frozen_clock,
         };
         server.spawn();
         server
@@ -138,15 +143,20 @@ impl Server {
     fn spawn(&mut self) {
         self.runs += 1;
         let stderr = File::create(self.stderr_path(self.runs)).expect("stderr file");
-        let mut child = Command::new(BIN)
+        let mut command = Command::new(BIN);
+        command
             .arg("-c")
             .arg(&self.config)
             .arg("serve")
             .process_group(0)
             .stdout(Stdio::piped())
-            .stderr(Stdio::from(stderr))
-            .spawn()
-            .expect("spawn server");
+            .stderr(Stdio::from(stderr));
+        if self.frozen_clock {
+            command.envs(oxabl_cache_e2e::faketime::environment(
+                &oxabl_cache_e2e::faketime::frozen_now(),
+            ));
+        }
+        let mut child = command.spawn().expect("spawn server");
         let stdout = child.stdout.take().expect("stdout");
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
@@ -210,6 +220,14 @@ impl Server {
         self.sigterm();
         self.wait_exit(Duration::from_secs(20))
             .expect("the server exits after SIGTERM")
+    }
+
+    /// Kills the process without letting it shut down.
+    pub fn kill(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            child.kill().expect("kill");
+            let _ = child.wait();
+        }
     }
 
     pub fn restart(&mut self) {

@@ -21,20 +21,34 @@ fn target_dir() -> PathBuf {
     )
 }
 
-/// Builds the server binary, once per run. Call outside the namespace.
+/// Builds the server and the operator command line, once per run. Call outside the namespace.
 pub fn ensure_built() {
     BUILD.call_once(|| {
         let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
         let status = Command::new(cargo)
-            .args(["build", "-p", "oxabl-cache-server", "--locked"])
+            .args([
+                "build",
+                "-p",
+                "oxabl-cache-server",
+                "-p",
+                "oxabl-cache-admin",
+                "--locked",
+            ])
             .status()
             .expect("run cargo");
-        assert!(status.success(), "building oxabl-cache-server failed");
+        assert!(
+            status.success(),
+            "building the server and the admin tool failed"
+        );
     });
 }
 
 fn binary() -> PathBuf {
     target_dir().join("debug/oxabl-cache-server")
+}
+
+fn admin_binary() -> PathBuf {
+    target_dir().join("debug/oxabl-cache-admin")
 }
 
 /// An answer: status and body text.
@@ -197,6 +211,22 @@ impl CacheServer {
         body: Option<&Value>,
     ) -> Reply {
         self.send(&self.admin, token, method, path, body).await
+    }
+
+    /// Runs `oxabl-cache-admin` against this server's operator listener.
+    pub fn admin_cli(&self, args: &[&str]) -> std::process::Output {
+        use std::os::unix::fs::PermissionsExt;
+        let token_file = self.dir.path().join("operator.token");
+        fs::write(&token_file, &self.operator).expect("token file");
+        fs::set_permissions(&token_file, fs::Permissions::from_mode(0o600)).expect("mode");
+        Command::new(admin_binary())
+            .arg("--server")
+            .arg(format!("http://{}", self.admin))
+            .arg("--token-file")
+            .arg(&token_file)
+            .args(args)
+            .output()
+            .expect("run oxabl-cache-admin")
     }
 
     /// Everything the server wrote to stdout and stderr.

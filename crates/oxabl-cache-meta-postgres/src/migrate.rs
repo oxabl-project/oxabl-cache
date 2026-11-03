@@ -13,6 +13,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (2, include_str!("../schema/0002_operator_tokens.sql")),
     (3, include_str!("../schema/0003_oidc.sql")),
     (4, include_str!("../schema/0004_gc_leader.sql")),
+    (5, include_str!("../schema/0005_tombstones.sql")),
 ];
 
 /// Applies every migration newer than the database in one transaction. A

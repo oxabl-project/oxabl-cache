@@ -24,6 +24,7 @@ mod round_trip;
 mod scopes;
 mod shutdown_upload;
 mod support;
+mod teardown;
 mod tls_listener;
 
 use support::backend::Backend;

@@ -206,3 +206,22 @@ fn a_wildcard_listener_needs_a_public_url_and_check_store_reports_the_capabiliti
     assert_eq!(capabilities["kind"], "fs");
     assert_eq!(capabilities["if_none_match"], false);
 }
+
+#[test]
+fn the_gc_batch_must_be_a_positive_number() {
+    let zero = run(
+        "config-gc-batch",
+        &format!("{BASE}[gc]\nbatch = 0\n"),
+        &["check-store"],
+        &[],
+    );
+    assert!(!zero.status.success());
+    assert!(stderr(&zero).contains("gc.batch"), "{}", stderr(&zero));
+    let fine = run(
+        "config-gc-batch-ok",
+        &format!("{BASE}[gc]\nbatch = 25\n"),
+        &["init"],
+        &[],
+    );
+    assert!(fine.status.success(), "{}", stderr(&fine));
+}

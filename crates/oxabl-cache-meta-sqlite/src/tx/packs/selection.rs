@@ -40,6 +40,7 @@ impl PackSelectionTx for SqliteTx<'_> {
                 "SELECT {PACK_COLUMNS} FROM packs
                  WHERE state = 1 AND dead_since IS NULL AND live_bytes > 0
                    AND created_at <= ?1 AND size >= ?2 AND live_bytes * 1000 < size * ?3
+                   AND cache_id NOT IN (SELECT cache_id FROM caches WHERE deleted_at IS NOT NULL)
                  ORDER BY created_at LIMIT ?4"
             ))
             .db()?;

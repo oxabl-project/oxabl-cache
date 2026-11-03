@@ -120,6 +120,23 @@ impl World {
         self.reserve_digest(client, namespace, bytes.len(), &Sha256::digest(bytes))
     }
 
+    /// [`World::reserve_bytes`] in another cache of the server.
+    pub fn reserve_bytes_in(
+        &self,
+        client: &Client,
+        cache: &str,
+        namespace: &str,
+        bytes: &[u8],
+    ) -> Response {
+        self.reserve_at(
+            client,
+            &format!("/v1/caches/{cache}"),
+            namespace,
+            bytes.len(),
+            &Sha256::digest(bytes),
+        )
+    }
+
     fn reserve_digest(
         &self,
         client: &Client,
@@ -127,9 +144,20 @@ impl World {
         size: usize,
         digest: &[u8],
     ) -> Response {
+        self.reserve_at(client, &self.path(""), namespace, size, digest)
+    }
+
+    fn reserve_at(
+        &self,
+        client: &Client,
+        cache_path: &str,
+        namespace: &str,
+        size: usize,
+        digest: &[u8],
+    ) -> Response {
         client.json(
             "POST",
-            &self.path("/uploads"),
+            &format!("{cache_path}/uploads"),
             Some(&json!({
                 "namespace": namespace,
                 "packs": [{

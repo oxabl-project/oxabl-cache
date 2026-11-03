@@ -14,6 +14,7 @@ mod packs;
 mod roster;
 mod scrub_queue;
 mod segments;
+mod teardown;
 mod tenants;
 mod users;
 
@@ -31,6 +32,7 @@ pub use packs::{PacksTx, RecordedCommit};
 pub use roster::RosterTx;
 pub use scrub_queue::ScrubQueueTx;
 pub use segments::SegmentsTx;
+pub use teardown::TeardownTx;
 pub use tenants::TenantsTx;
 pub use users::{User, UsersTx};
 
@@ -56,6 +58,7 @@ pub trait MetaTx:
     + EntriesTx
     + LedgerTx
     + FenceTx
+    + TeardownTx
 {
 }
 
@@ -76,6 +79,7 @@ impl<T> MetaTx for T where
         + EntriesTx
         + LedgerTx
         + FenceTx
+        + TeardownTx
 {
 }
 

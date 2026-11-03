@@ -36,6 +36,7 @@ tokio-rustls = { workspace = true, features = ["aws_lc_rs"] }
 toml.workspace = true
 
 [dev-dependencies]
+rusqlite = { workspace = true, features = ["bundled"] }
 base64.workspace = true
 sha2.workspace = true
 oxabl-cache-e2e.workspace = true

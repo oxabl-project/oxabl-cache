@@ -15,7 +15,9 @@ use oxabl_cache_core::ports::metadata::{AdminTx, User};
 impl AdminTx for PgTx<'_> {
     fn all_tenants(&self) -> Result<Vec<Tenant>> {
         self.query(
-            &format!("SELECT {TENANT_COLUMNS} FROM tenants ORDER BY tenant_id"),
+            &format!(
+                "SELECT {TENANT_COLUMNS} FROM tenants WHERE deleted_at IS NULL ORDER BY tenant_id"
+            ),
             args![],
         )?
         .iter()
@@ -26,7 +28,7 @@ impl AdminTx for PgTx<'_> {
     fn set_tenant_limits(&mut self, id: &TenantId, limits: &TenantLimits) -> Result<bool> {
         let changed = self.execute(
             "UPDATE tenants SET hard_bytes = $2, egress_bytes = $3, rate = $4, burst = $5
-             WHERE tenant_id = $1",
+             WHERE tenant_id = $1 AND deleted_at IS NULL",
             args![
                 id.as_bytes().as_slice(),
                 limits.hard_bytes.map(int),
@@ -40,7 +42,10 @@ impl AdminTx for PgTx<'_> {
 
     fn caches_of(&self, tenant: &TenantId) -> Result<Vec<Cache>> {
         self.query(
-            &format!("SELECT {CACHE_COLUMNS} FROM caches WHERE tenant_id = $1 ORDER BY cache_id"),
+            &format!(
+                "SELECT {CACHE_COLUMNS} FROM caches
+                 WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY cache_id"
+            ),
             args![tenant.as_bytes().as_slice()],
         )?
         .iter()

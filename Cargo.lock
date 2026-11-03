@@ -2170,6 +2170,7 @@ dependencies = [
  "oxabl-cache-store-fs",
  "oxabl-cache-store-s3",
  "rcgen",
+ "rusqlite",
  "rustls",
  "serde",
  "serde_json",

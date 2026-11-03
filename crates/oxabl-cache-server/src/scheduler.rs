@@ -127,6 +127,7 @@ async fn gc_tick(app: &App<Prod>) {
     step!(app, "mark", app.engine.gc_mark());
     let compacted = step!(app, "compaction", app.engine.gc_compaction());
     let swept = step!(app, "sweep", app.engine.gc_sweep());
+    let torn_down = step!(app, "teardown", app.engine.gc_teardown());
     step!(app, "queued_scrubs", app.engine.run_queued_scrubs());
     step!(app, "close_ledger_days", app.engine.close_ledger_days());
     step!(
@@ -147,11 +148,13 @@ async fn gc_tick(app: &App<Prod>) {
     app.metrics
         .set("oxabl_cache_gc_last_run_timestamp", &[], now as f64);
     publish_pack_bytes(app).await;
+    let removed = torn_down.map_or(0, |report| report.caches + report.tenants);
     let changed = [
         retired.unwrap_or(0),
         evicted.unwrap_or(0),
         swept.unwrap_or(0),
         compacted.map_or(0, |report| report.packs),
+        removed,
     ];
     if changed.iter().any(|count| *count > 0) {
         emit(
@@ -162,6 +165,7 @@ async fn gc_tick(app: &App<Prod>) {
                 ("evicted_entries", Value::from(changed[1])),
                 ("swept_packs", Value::from(changed[2])),
                 ("compacted_packs", Value::from(changed[3])),
+                ("removed_tenants_and_caches", Value::from(changed[4])),
             ],
         );
     }
