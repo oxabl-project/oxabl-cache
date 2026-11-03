@@ -36,8 +36,12 @@ mod roster_rules;
 mod round_trip;
 #[path = "../single_node/scopes.rs"]
 mod scopes;
+#[path = "../single_node/secret_modes.rs"]
+mod secret_modes;
 #[path = "../single_node/shutdown_upload.rs"]
 mod shutdown_upload;
+#[path = "../single_node/store_root.rs"]
+mod store_root;
 #[path = "../single_node/support/mod.rs"]
 mod support;
 #[path = "../single_node/teardown.rs"]

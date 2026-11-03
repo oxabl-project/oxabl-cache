@@ -150,4 +150,11 @@ impl<S: ObjectStore> ObjectStore for MeteredStore<S> {
         self.record("list", started, &outcome);
         outcome
     }
+
+    async fn check(&self) -> Result<()> {
+        let started = Instant::now();
+        let outcome = self.inner.check().await;
+        self.record("check", started, &outcome);
+        outcome
+    }
 }

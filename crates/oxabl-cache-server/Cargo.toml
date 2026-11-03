@@ -27,6 +27,7 @@ oxabl-cache-store-s3.workspace = true
 axum.workspace = true
 blake3.workspace = true
 getrandom.workspace = true
+nix = { workspace = true, features = ["user"] }
 hyper-util = { workspace = true, features = ["http1", "http2", "server-auto", "server-graceful", "service", "tokio"] }
 rustls = { workspace = true, features = ["std", "aws_lc_rs"] }
 serde = { workspace = true, features = ["derive"] }

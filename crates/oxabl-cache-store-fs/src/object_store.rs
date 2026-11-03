@@ -155,4 +155,9 @@ impl ObjectStore for FsStore {
         })
         .await
     }
+
+    async fn check(&self) -> Result<()> {
+        let store = self.clone();
+        blocking(move || store.check_writable()).await
+    }
 }

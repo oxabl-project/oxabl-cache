@@ -223,6 +223,37 @@ fn the_gc_batch_must_be_a_positive_number() {
 }
 
 #[test]
+fn the_gc_grace_must_exceed_the_url_lifetime() {
+    let with = |name: &str, lifetime: &str, grace: &str| {
+        let server = format!("listen = \"127.0.0.1:0\"\nurl_lifetime = \"{lifetime}\"\n");
+        let text = BASE.replacen("listen = \"127.0.0.1:0\"\n", &server, 1);
+        run(
+            name,
+            &format!("{text}[gc]\ngrace = \"{grace}\"\n"),
+            &["init"],
+            &[],
+        )
+    };
+    for (name, lifetime, grace) in [
+        ("grace-shorter", "15m", "10m"),
+        ("grace-equal", "5s", "5s"),
+        ("grace-just-short", "5s", "5500ms"),
+    ] {
+        let refused = with(name, lifetime, grace);
+        assert!(!refused.status.success(), "{lifetime} against {grace}");
+        let message = stderr(&refused);
+        assert!(
+            message.contains("gc.grace") && message.contains("server.url_lifetime"),
+            "{message}"
+        );
+    }
+    let fine = with("grace-just-enough", "5s", "6s");
+    assert!(fine.status.success(), "{}", stderr(&fine));
+    let defaults = run("grace-defaults", BASE, &["init"], &[]);
+    assert!(defaults.status.success(), "{}", stderr(&defaults));
+}
+
+#[test]
 fn backup_is_refused_on_postgres_metadata_with_a_pointer_to_base_backups() {
     let postgres = BASE.replace(
         "url = \"sqlite://{dir}/meta.db\"",

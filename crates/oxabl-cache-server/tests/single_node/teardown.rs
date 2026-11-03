@@ -19,12 +19,12 @@ const CACHE_TABLES: [&str; 5] = [
 ];
 const WAIT: Duration = Duration::from_secs(60);
 
-/// Short grace, long leases and URLs: a slow machine must not expire what a test still holds.
+/// Short grace and URL lifetime, long leases: a slow machine must not expire what a test still holds.
 fn options(grace: &'static str) -> Options {
     Options {
         grace,
         lease: "60s",
-        url_lifetime: "60s",
+        url_lifetime: "5s",
         ..Options::default()
     }
 }
@@ -323,7 +323,7 @@ fn a_crash_in_the_middle_of_a_teardown_resumes_where_it_stopped() {
         "delete-resume",
         Options {
             extra: "batch = 2",
-            ..options("2s")
+            ..options("6s")
         },
     );
     let doomed = Party::on(&world.tenant, &world.admin, "doomed");

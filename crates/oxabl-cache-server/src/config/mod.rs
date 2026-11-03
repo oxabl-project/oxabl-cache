@@ -25,6 +25,10 @@ pub(crate) enum Transport {
     Plaintext,
 }
 
+/// The least `gc.grace` must exceed `server.url_lifetime` by: the signed expiry has whole-second
+/// resolution. Deployments keep the default gap of many hours.
+const MIN_GRACE_MARGIN: Duration = Duration::from_secs(1);
+
 /// Garbage-collection timers.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Gc {
@@ -156,12 +160,24 @@ fn transport(
 impl Config {
     /// Reads, overlays with the environment and validates the file at `path`.
     pub(crate) fn load(path: &Path) -> Result<Self, String> {
+        Self::read(path, true)
+    }
+
+    /// Reads and validates the file at `path` without the environment overlay, for a
+    /// command that reads two configurations and so cannot tell which one a variable is for.
+    pub(crate) fn load_file(path: &Path) -> Result<Self, String> {
+        Self::read(path, false)
+    }
+
+    fn read(path: &Path, overlay: bool) -> Result<Self, String> {
         let text = std::fs::read_to_string(path)
             .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
         let mut table: toml::Table = text
             .parse()
             .map_err(|error| format!("{}: {error}", path.display()))?;
-        env::overlay(&mut table, std::env::vars())?;
+        if overlay {
+            env::overlay(&mut table, std::env::vars())?;
+        }
         let raw: raw::Raw = table
             .try_into()
             .map_err(|error| format!("{}: {error}", path.display()))?;
@@ -221,6 +237,13 @@ impl Config {
         let shutdown_timeout = time(&raw.server.shutdown_timeout, "10s")?;
         if interval.is_zero() || url_lifetime.is_zero() || lease.is_zero() {
             return Err("gc.interval, gc.lease and server.url_lifetime must be positive".into());
+        }
+        if grace < url_lifetime + MIN_GRACE_MARGIN {
+            return Err(format!(
+                "gc.grace must exceed server.url_lifetime by at least {}s: an upload URL issued \
+                 before a deletion could otherwise land after the teardown",
+                MIN_GRACE_MARGIN.as_secs()
+            ));
         }
         let mut core = CoreConfig {
             url_lifetime_secs: seconds(url_lifetime)?,

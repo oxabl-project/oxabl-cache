@@ -1,9 +1,10 @@
 //! Secrets read from files named in the configuration, never from its text.
 
+use nix::unistd::{Gid, getegid, getgroups};
 use oxabl_cache_core::domain::claim_key::ClaimKey;
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
 fn decode(text: &str) -> Option<[u8; 32]> {
@@ -30,10 +31,26 @@ pub(crate) fn read_url_keys(path: &Path) -> Result<Vec<[u8; 32]>, String> {
     Ok(keys)
 }
 
-/// Warns through `warn` when a secret file can be read by other users.
+/// Whether a file with this mode and group can be read by anyone but its owner, apart from
+/// the group the process itself runs in: mode 0440 with `fsGroup` is how a Kubernetes Secret
+/// volume reaches a non-root container.
+fn exposed(mode: u32, group: u32) -> bool {
+    match mode & 0o077 {
+        0 => false,
+        0o040 => !runs_in(group),
+        _ => true,
+    }
+}
+
+fn runs_in(group: u32) -> bool {
+    let group = Gid::from_raw(group);
+    getegid() == group || getgroups().is_ok_and(|groups| groups.contains(&group))
+}
+
+/// Warns through `warn` when a secret file can be read by users other than the process's own.
 pub(crate) fn check_permissions(path: &Path, warn: impl FnOnce(String)) {
     if let Ok(meta) = fs::metadata(path)
-        && meta.permissions().mode() & 0o077 != 0
+        && exposed(meta.permissions().mode(), meta.gid())
     {
         warn(format!(
             "{} is readable by other users; chmod 600 it",

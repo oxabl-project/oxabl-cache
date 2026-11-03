@@ -82,7 +82,7 @@ url_key_file = "/run/secrets/url-key"         # HMAC for local-disk object URLs
 claim_hash_key_file = "/run/secrets/claim-key" # keyed hashes of OIDC policy claims
 
 [gc]
-grace = "24h"
+grace = "24h"                                 # at least url_lifetime + 1s; keep hours of gap
 lease = "1h"
 interval = "10m"
 compaction_live_ratio = 0.5
@@ -138,6 +138,9 @@ still opens human sessions.
 - `allowed_private_ranges` takes CIDR blocks or single addresses.
 
 The URL key may list two keys during rotation; both are accepted and the first signs.
+The server warns at start (`readable by other users; chmod 600 it`) when the URL key file can be read by anyone
+but its owner and the process's own group: mode 0440 with the process's group, as a Kubernetes Secret volume
+with `fsGroup` has, passes; any other group, world or group-write bit warns.
 The claim-hash key is stable: rotating it means re-entering trust policies.
 
 `public_url` defaults to `http(s)://<bound address>`, which is what makes
@@ -162,9 +165,14 @@ Subcommands:
   An existing target is refused. On Postgres it refuses, naming base backups and
   WAL archiving instead.
 - `migrate --from a.toml --to b.toml` moves a single node to Postgres and S3
-  (architecture.md, "Growth"). The metadata copy, verified table by table with a row
-  count and digest, is built. The config-file form and pack copying are in progress;
-  the current build takes database URLs and copies metadata only.
+  (architecture.md, "Growth"). `a.toml` is the SQLite deployment, `b.toml` the empty
+  Postgres one, each a full server configuration read without the environment
+  overlay. Stop the server first. Every committed pack is verified against its
+  segment ids and footer and copied to the target store, then the metadata is copied
+  and checked table by table with a row count and digest; the metadata commits last.
+  A damaged or missing pack refuses the migration, naming it, and leaves the target
+  without a metadata row. Packs written to a target store before a refusal are
+  orphans, which the orphan scan removes.
 - `scrub [--cache c_…]` prints one JSON line per cache.
 - `check-store` runs the S3 probe and prints the capabilities.
 
@@ -194,11 +202,12 @@ Subcommands:
 
 Probes, all on the metrics listener (never on the public one):
 - `GET /livez` answers 200 while the process is up.
-- `GET /readyz` checks the metadata store (live node count) and the object store (a
-  `HEAD` of a random key), in parallel, each within 2 s. It answers 200, or 503
-  `unavailable` naming what failed, with `Retry-After`. The local-disk store's
-  `HEAD` of a missing key succeeds even when the root directory is gone, so
-  `/readyz` cannot see an unmounted volume.
+- `GET /readyz` checks the metadata store (live node count) and the object store, in
+  parallel, each within 2 s. It answers 200, or 503 `unavailable` naming what
+  failed, with `Retry-After`. An S3 store is checked with a `HEAD` of a random key.
+  The local-disk store is checked by creating and removing a file in its `tmp`
+  directory, so a missing or unmounted root, or one that cannot be written, fails
+  readiness. No user data is written.
 
 `GET /v1/health` on the public listener is process-only (204, no credential, no
 dependency; protocol.md "Health"). It is for load balancers, not for readiness.

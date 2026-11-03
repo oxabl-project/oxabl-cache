@@ -11,6 +11,9 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - "deploy/container/**"
+      - "deploy/lib/**"
+      - "flake.nix"
+      - "flake.lock"
       - ".github/workflows/image.yml"
 
 env:
@@ -56,6 +59,11 @@ jobs:
           cache-to: type=gha,scope=${{ matrix.suffix }},mode=max
       - name: Smoke test
         run: deploy/container/smoke.sh oxabl-cache-server:smoke
+      - uses: cachix/install-nix-action@v31
+        if: matrix.suffix == 'amd64'
+      - name: Two nodes on Postgres and S3
+        if: matrix.suffix == 'amd64'
+        run: nix develop --command deploy/container/cluster-smoke.sh oxabl-cache-server:smoke
       - name: Log in to the registry
         if: github.event_name != 'pull_request' && vars.PUBLISH_IMAGE == 'true'
         uses: docker/login-action@v4

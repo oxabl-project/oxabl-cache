@@ -44,12 +44,14 @@ impl S3Store {
     /// Connects to the bucket and runs the conformance probe. A bucket that fails a
     /// required check, or cannot be reached, gives an error and no store.
     pub async fn open(config: &S3Config) -> Result<Self> {
-        let mut store = Self::unprobed(config)?;
+        let mut store = Self::open_unprobed(config)?;
         store.optional = probe::run(&store).await?;
         Ok(store)
     }
 
-    fn unprobed(config: &S3Config) -> Result<Self> {
+    /// Connects without the conformance probe, so nothing is written to the bucket. The
+    /// store reads and lists; its capabilities are unknown.
+    pub fn open_unprobed(config: &S3Config) -> Result<Self> {
         if !matches!(config.endpoint.scheme(), "http" | "https") {
             return Err(Error::bad_request("store.endpoint is an http or https URL"));
         }
