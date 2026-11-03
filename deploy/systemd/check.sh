@@ -12,6 +12,11 @@ rm -rf "$root"
 mkdir -p "$root/etc/systemd/system" "$root/usr/local/bin"
 install -m 0755 /dev/null "$root/usr/local/bin/oxabl-cache-server"
 cp "$here"/*.service "$root/etc/systemd/system/"
+# --root hides the analyzer's own units; give it the targets every service depends on.
+units="$(dirname "$(readlink -f "$(command -v systemd-analyze)")")/../example/systemd/system"
+[ -f "$units/sysinit.target" ] || fail "no systemd unit directory next to $(command -v systemd-analyze); run inside nix develop"
+mkdir -p "$root/usr/lib/systemd/system"
+cp "$units"/*.target "$units"/*.slice "$root/usr/lib/systemd/system/"
 root="$(cd "$root" && pwd)"
 
 for unit in oxabl-cache.service oxabl-cache-init.service; do

@@ -138,6 +138,6 @@ jobs:
           digest="$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest}}' | jq -r .digest)"
           [ -n "$digest" ] && [ "$digest" != null ] || exit 1
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-      - uses: sigstore/cosign-installer@v4
+      - uses: sigstore/cosign-installer@v4.1.2
       - name: Sign the image (keyless)
         run: cosign sign --yes "${IMAGE}@${{ steps.digest.outputs.digest }}"
