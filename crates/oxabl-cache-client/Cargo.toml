@@ -13,3 +13,27 @@ workspace = true
 
 [dependencies]
 oxabl-cache-crypto.workspace = true
+oxabl-cache-format.workspace = true
+base64.workspace = true
+bytes.workspace = true
+blake3.workspace = true
+cap-std.workspace = true
+futures-core.workspace = true
+getrandom.workspace = true
+nix = { workspace = true, features = ["fs"] }
+reqwest = { workspace = true, features = ["json", "rustls"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+toml.workspace = true
+tracing.workspace = true
+url.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+oxabl-cache-e2e = { path = "../../tests/e2e" }
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["http1", "server"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+nix = { workspace = true, features = ["resource"] }
