@@ -28,6 +28,7 @@ oxabl-cache-store-fs = { path = "crates/oxabl-cache-store-fs" }
 oxabl-cache-store-s3 = { path = "crates/oxabl-cache-store-s3" }
 oxabl-cache-oidc = { path = "crates/oxabl-cache-oidc" }
 oxabl-cache-http = { path = "crates/oxabl-cache-http" }
+oxabl-cache-e2e = { path = "tests/e2e" }
 
 age = { version = "0.12", default-features = false }
 anyhow = "1"
@@ -43,6 +44,7 @@ hmac = "0.13"
 http-body-util = "0.1"
 hyper = "1"
 hyper-util = "0.1"
+jiff = { version = "0.2", default-features = false }
 rcgen = { version = "0.14", default-features = false }
 rusqlite = "0.41"
 rustls = { version = "0.23", default-features = false }
