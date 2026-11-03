@@ -24,12 +24,14 @@ Status: accepted
   no added safety once keys are single-use.
 - Convergent encryption: r-code is not deterministic, so it buys no dedupe, and it
   reveals equality.
-- An OIDC-bound unwrap service: whoever runs it can read the data. Customer KMS
-  support comes through age plugins.
+- An OIDC-bound unwrap service: whoever runs it can read the data. Customer KMS or
+  hardware-token key release (age plugin recipients) needs a later member-descriptor
+  version; format version 1 carries X25519 recipients only.
 - Power-of-two padding: 47% overhead.
 
 ## Consequences
 
 The whole security stack costs under 5% of wall-clock time on a 1 Gbit/s link, and
-about 15% of client CPU on a same-region 10 Gbit/s link. Records carry no per-file
+about 19% of client CPU on a same-region 10 Gbit/s link (with the strict Ed25519
+verifier, ~50 µs per record). Records carry no per-file
 hashes; the zstd frame checksum guards against decompressor faults.

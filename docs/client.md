@@ -181,7 +181,11 @@ error, a transient one as a warning.
    - the commitment and AEAD;
    - the signature transcript, and that the signer is accepted for the namespace
      (see "Modes and trust");
-   - the roster version;
+   - the roster version. A record naming a roster version above the client's current
+     roster is `RosterVersionAhead`: a miss for now. The client then refetches the
+     roster once (verified as at open), and retries the lookup of those keys once
+     with the newer roster. A record that is still ahead after that stays a miss;
+   - for `personal` records, that the reading member is listed in the current roster;
    - the path rules: no duplicates within the set, and the total path bytes within
      the limit;
    - `expect`;
@@ -255,7 +259,10 @@ A final path never holds a partial or unverified file.
    Each matching set is compressed (zstd level 3 by default, with the cache dictionary
    if one is published, frame checksum on), padded, sealed, and appended to the open
    pack. A pack is closed at 16 MiB or 2,000 segments, and a
-   segment over 16 MiB gets its own pack.
+   segment over 16 MiB gets its own pack. The client uses a published dictionary only
+   if its `OXDP` pointer verifies: signed by a `ci` or `owner` key of the current
+   roster, with an epoch equal to the roster's epoch. Otherwise it compresses without
+   a dictionary.
 3. Each closed pack goes through `uploads` (with a `client_ref`), `PUT`, then
    `commit`, with up to 8 packs in flight. Records are signed with the member's key.
    Uploads therefore overlap compiling.
@@ -323,7 +330,7 @@ Mode, credentials and identity come from the environment or from the caller's fl
 | `OXABL_CACHE_MODE` | `ci`, `developer` or `read-only` |
 | `OXABL_CACHE_TOKEN` | API token. It takes precedence over OIDC and login. |
 | `OXABL_CACHE_IDENTITY` | The member identity string (CI) |
-| `OXABL_CACHE_IDENTITY_FILE` | Path to an identity file; default `~/.config/oxabl-cache/identity` |
+| `OXABL_CACHE_IDENTITY_FILE` | Path to an identity file; default `~/.config/oxabl-cache/identity`. The file holds the identity string age-encrypted to a passphrase (scrypt); plaintext identity files are not read |
 | `OXABL_CACHE_SERVER` | Server URL override |
 | `OXABL_CACHE_ID_TOKEN` | A GitLab CI ID token from the job's `id_tokens` |
 
@@ -353,7 +360,7 @@ The `oxabl-cache` binary (crate `oxabl-cache-cli`) is built on the same public A
 
 | Command | Purpose |
 | --- | --- |
-| `identity new [--plugin <name>]` | Create a member identity; print its public descriptor. |
+| `identity new` | Create a member identity, write it passphrase-encrypted, and print its public descriptor. |
 | `init --cache c_… --label <me>` | Create the owner identity, epoch 1, roster v1; print the `cache.toml` block and the owner key for cache creation. |
 | `member add <descriptor> --label <l> --role ci\|developer\|reader` | Re-wrap the root key; publish roster `v+1`. |
 | `member remove <label>` | Rotate to a new epoch without the member; publish; print the new `min_roster_version`. |

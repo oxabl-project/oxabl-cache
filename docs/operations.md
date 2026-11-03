@@ -40,9 +40,11 @@ secret written inline in the file.
 ```toml
 [server]
 listen = "0.0.0.0:8443"
-admin_listen = "127.0.0.1:9091"
-metrics_listen = "127.0.0.1:9090"
-public_url = "https://cache.example.com"
+admin_listen = "127.0.0.1:9091"                # default
+metrics_listen = "127.0.0.1:9090"              # default
+public_url = "https://cache.example.com"       # optional; required for a wildcard listen
+url_lifetime = "15m"                           # presigned and object-URL lifetime
+shutdown_timeout = "10s"                       # drain bound on SIGTERM/SIGINT
 
 [tls]
 cert_file = "/etc/oxabl-cache/tls.crt"
@@ -93,10 +95,24 @@ format = "json"
 The URL key may list two keys during rotation; both are accepted and the first signs.
 The claim-hash key is stable: rotating it means re-entering trust policies.
 
-Subcommands: `serve`, `init` (create the schema and print the first operator token
-once), `migrate --from a.toml --to b.toml`, `backup --to <file>` (SQLite online
-backup), `scrub [--cache c_…]`, `check-store` (run the S3 probe and print the
-capabilities).
+`public_url` defaults to `http(s)://<bound address>`, which is what makes
+`listen = "127.0.0.1:0"` usable in tests. A wildcard listen address (`0.0.0.0`,
+`[::]`) needs an explicit `public_url`, because no URL can be derived from it.
+
+Subcommands:
+
+- `init` is the bootstrap command. It creates missing key files (mode 0600), migrates
+  the schema, and prints the first operator token once, on stdout. It refuses if an
+  operator token already exists.
+- `serve` binds the three listeners, then prints one ready line on stdout:
+  `{"ready":{"listen":"…","admin_listen":"…","metrics_listen":"…","public_url":"…"}}`.
+  stdout carries nothing else, so a supervisor or test harness can read the first
+  line. On SIGTERM or SIGINT it stops accepting, drains requests for up to
+  `server.shutdown_timeout`, stops background jobs, flushes access days and usage,
+  and exits 0.
+- The others: `migrate --from a.toml --to b.toml`, `backup --to <file>` (SQLite
+  online backup), `scrub [--cache c_…]`, `check-store` (run the S3 probe and print
+  the capabilities).
 
 ## Backup and restore
 
@@ -138,8 +154,11 @@ Tenant and cache ids are not metric labels; per-tenant figures live in the usage
 ledger. Suggested alerts: any confirmed report; no GC leader for 30 min; store error
 rate above 1%; pending packs older than twice the lease; p99 lookup above 1 s.
 
-Logs are JSON lines on stdout with `ts`, `level`, `request_id`, `route`, `status`,
-`duration_ms`, `tenant`, `cache`, `principal`, counts and byte sizes. Never logged:
+Logs are JSON lines on **stderr** (stdout belongs to the ready line and to `init`'s
+token). Fields: `ts` (unix ms), `level`, `event`, `request_id`, `method`, `route`
+(the route template, never the concrete path), `status`, `duration_ms`, `tenant`,
+`cache`, `principal`, and counts and sizes (`ids`, `hits`, `entries`, `packs`,
+`bytes_in`, `bytes_out`). Never logged:
 tokens, session ids, JWTs, OIDC claims, URL query strings, lookup ids, segment ids,
 record or roster bytes. A canary test enforces this (testing.md).
 

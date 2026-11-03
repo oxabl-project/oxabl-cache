@@ -35,16 +35,22 @@ Every non-2xx response, binary endpoints included, is JSON:
 {"error": {"code": "quota_exceeded", "message": "cache over hard quota", "retryable": false, "request_id": "01jc4z5a9r0d6e7f8g9h0k1m2n"}}
 ```
 
+A 409 also carries `error.reason`, which names the conflict: `pack_closed`,
+`pack_changed`, `pack_incomplete` or `exists`. Clients act on `reason`, never on
+`message`.
+
 | Status | `code` | Retry |
 | --- | --- | --- |
-| 400 | `bad_request`, `unsupported_version` | no |
+| 400 | `bad_request`, `unsupported_version`. Also returned for a missing `If-Match` where one is required (roster and dictionary PUT), and for a binary endpoint called without `content-type: application/vnd.oxabl-cache.v1` | no |
 | 401 | `unauthenticated` (missing, expired or revoked credential) | after re-authenticating |
-| 403 | `forbidden` (scope), `tenant_suspended` | no |
+| 403 | `forbidden` (scope; also a bad or expired object-URL signature, with one generic message), `tenant_suspended` | no |
 | 404 | `not_found` (also for another tenant's cache) | no |
-| 409 | `conflict` (natural-key clash) | no |
+| 409 | `conflict` (natural-key clash, or a pack conflict named in `reason`) | no |
 | 412 | `precondition_failed` (`If-Match` on roster or dictionary) | after re-reading |
 | 413 | `too_large` | no |
+| 416 | `bad_request` (a `Range` outside the object, an end past the last byte, or several ranges) | no |
 | 429 | `rate_limited`, with `Retry-After` | yes |
+| 501 | `not_configured`: a feature this deployment has not configured, such as `POST /v1/auth/oidc` with no identity verifier, or an OIDC issuer or policy route | no |
 | 503 | `unavailable` (metadata or store down), with `Retry-After` | yes |
 | 500 | `internal` | yes, with backoff |
 
@@ -64,7 +70,7 @@ path as a miss.
 | Plaintext per artifact set (client-enforced on decode) | 64 MiB default, configurable up to 1 GiB |
 | JSON body; roster | 1 MiB; 1 MiB and 1,000 members |
 | Presigned URL lifetime; pending pack lease | 15 min; 1 h |
-| Rate per tenant (default) | 50 requests/s sustained, burst 200, on `/v1` API routes. Object routes are excluded; their signed URLs are the limit. |
+| Rate per tenant (default) | 50 requests/s sustained, burst 200, on `/v1` API routes. Object routes are excluded; their signed URLs are the limit. Unauthenticated requests are outside it (no tenant is known yet); a front proxy or the platform limits them. |
 
 ## Authentication
 
@@ -117,7 +123,8 @@ verify the signature against their own pinned keys.
 The `OXDP` pointer. PUT needs `write:trusted` and `If-Match: "v<current>"`, where
 version 0 means no pointer yet (GET answers 404). The pointer's rules:
 - its version must be `current + 1`;
-- its epoch must equal the cache's current epoch;
+- its epoch must equal the cache's current epoch, which is the current roster's
+  epoch (clients check the same);
 - its signer must be a `ci` or `owner` key of the current roster, so a pointer needs
   a roster first;
 - the named segment must be a live (`dead_since IS NULL`) `dictionary` segment of
@@ -235,8 +242,11 @@ returns 202 `{"entries_marked": 10342}`.
 four fields are joined with a newline byte (0x0A): `method` in upper case, `path`
 without the query, `exp` and the content length in decimal ASCII. For GET the
 content length is the empty string, so the message ends with `\n`. The separators
-keep the digits of `exp` and the length apart. GET
-honours a single `Range: bytes=a-b` (206) and answers 416 outside the object.
+keep the digits of `exp` and the length apart. A bad signature or an expired URL
+gets 403 `forbidden`. GET honours a single `Range: bytes=a-b` (206); a range outside
+the object, an end past the last byte, or several ranges get 416 with code
+`bad_request`. A PUT must carry the signed `Content-Length`, equal to the reserved
+size.
 
 ## Tenant administration (JSON, scope `tenant:admin`)
 
@@ -261,6 +271,7 @@ A separate listener (default `127.0.0.1:9091`) with operator tokens:
 | --- | --- |
 | `GET, POST /admin/v1/tenants`; `PATCH, DELETE /admin/v1/tenants/{t}` | Create, suspend or resume, delete. |
 | `PUT /admin/v1/tenants/{t}/quota` | Live-byte quotas (soft and hard), monthly egress, rate. |
+| `POST /admin/v1/tenants/{t}/tokens` | Create a `tenant:admin` token for the tenant; the secret is returned once (`oxabl-cache-admin tenant bootstrap-admin` and `token create --tenant`). |
 | `GET /admin/v1/usage?month=2026-10&format=csv` | One row per tenant, cache and metric: `month,tenant,cache,metric,value`. |
 | `POST /admin/v1/caches/{c}/scrub` | Re-verify every pack of a cache now. |
 | `GET /admin/v1/health` | Store, metadata and GC leader status. |
@@ -390,6 +401,16 @@ Plaintext `OXEP`:
 The server sees member labels and public keys. Labels are customer-chosen and need
 not be names.
 
+Clients also refuse a roster that breaks any of these rules:
+- at least one member;
+- at least one signing key and at least one age recipient per member;
+- labels unique, signing keys unique and recipients unique, across the whole
+  roster;
+- every recipient an X25519 age recipient (`age1…`).
+
+Among the signatures, those by unpinned keys and pinned ones that fail to verify are
+ignored. At least one valid signature by a pinned owner key is required.
+
 ### `OXDP` dictionary pointer
 
 `OXDP`, 1, 0, `bytes16 cache_id`, `u32 epoch`, `u64 version`, `bytes32 dict_segment_id`,
@@ -403,3 +424,8 @@ A member identity is Bech32 with HRP `oxabl-cache-identity-` and payload
 `u8 1 ‖ x25519_secret ‖ ed25519_seed`. A member public descriptor (for
 `member add`) uses HRP `oxabl-cache-member-` and payload
 `u8 1 ‖ ed25519_public ‖ x25519_public`.
+
+The identity string is emitted in upper case (`OXABL-CACHE-IDENTITY-1…`), and the
+member descriptor in lower case (`oxabl-cache-member-1…`). Parsers accept either in
+upper or lower case (Bech32 forbids mixed case). The `x25519_public` field is a raw
+32-byte key, so a descriptor of this version names an X25519 recipient only.
