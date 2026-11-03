@@ -22,6 +22,12 @@
             pkgs.libfaketime
             pkgs.cargo-fuzz
             pkgs.rustup
+            pkgs.kubernetes-helm
+            pkgs.kubeconform
+            pkgs.opentofu
+            pkgs.tflint
+            pkgs.kind
+            pkgs.kubectl
           ];
         };
       });
