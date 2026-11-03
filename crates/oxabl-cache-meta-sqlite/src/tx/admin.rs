@@ -75,7 +75,7 @@ impl AdminTx for SqliteTx<'_> {
 
     fn caches_of(&self, tenant: &TenantId) -> Result<Vec<Cache>> {
         Ok(
-            oxabl_cache_core::ports::metadata::AccountsTx::all_caches(self)?
+            oxabl_cache_core::ports::metadata::CachesTx::all_caches(self)?
                 .into_iter()
                 .filter(|cache| cache.tenant == *tenant)
                 .collect(),
