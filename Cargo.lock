@@ -2161,6 +2161,7 @@ dependencies = [
  "ed25519-dalek",
  "getrandom 0.4.3",
  "hyper-util",
+ "nix",
  "oxabl-cache-core",
  "oxabl-cache-e2e",
  "oxabl-cache-format",

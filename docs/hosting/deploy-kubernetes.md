@@ -116,9 +116,9 @@ to go NotReady without restarting, then Ready again once the directory is back.
 - **Upgrade:** `helm upgrade` with a new `image.tag`. Cluster mode rolls with `maxUnavailable: 0`; migrations
   are additive, so the old and new pods run side by side during the roll-out.
 - **Logs:** JSON lines on stderr (`kubectl logs`). Tokens, query strings, ids and claims are never logged.
-  A line `readable by other users; chmod 600 it` about the URL key is expected on Kubernetes: a Secret volume with
-  `fsGroup` is group-readable (mode 0440) for the pod's own group, which is the only way a non-root container can
-  read it.
+  The server accepts the 0440 mode of a Secret volume without a warning when the file's group is the pod's
+  own group (the chart sets `runAsGroup` and `fsGroup` to 65532). Any other readable bit, such as a world-read
+  or group-write bit, or a group the process is not in, logs `readable by other users; chmod 600 it`.
 - **Metrics and alerts:** scrape `-metrics:9090`; the series and suggested alerts are in operations.md,
   "Observability".
 - **Backups:** Postgres base backups and WAL archiving (CloudNativePG does this to a bucket), as in operations.md.

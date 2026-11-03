@@ -138,6 +138,9 @@ still opens human sessions.
 - `allowed_private_ranges` takes CIDR blocks or single addresses.
 
 The URL key may list two keys during rotation; both are accepted and the first signs.
+The server warns at start (`readable by other users; chmod 600 it`) when the URL key file can be read by anyone
+but its owner and the process's own group: mode 0440 with the process's group, as a Kubernetes Secret volume
+with `fsGroup` has, passes; any other group, world or group-write bit warns.
 The claim-hash key is stable: rotating it means re-entering trust policies.
 
 `public_url` defaults to `http(s)://<bound address>`, which is what makes

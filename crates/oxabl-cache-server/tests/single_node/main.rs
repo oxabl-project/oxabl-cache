@@ -25,6 +25,7 @@ mod operator_tokens;
 mod roster_rules;
 mod round_trip;
 mod scopes;
+mod secret_modes;
 mod shutdown_upload;
 mod store_root;
 mod support;
