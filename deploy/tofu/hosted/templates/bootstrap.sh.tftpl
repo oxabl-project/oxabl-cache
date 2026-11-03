@@ -27,6 +27,10 @@ chmod 0600 /etc/oxabl-cache/secrets/*
 sysctl -w net.ipv4.ip_unprivileged_port_start=443
 %{ endif ~}
 %{ endif ~}
+%{ if role == "database" ~}
+chown 999:999 /etc/oxabl-cache/secrets/db-server.key
+chmod 0600 /etc/oxabl-cache/secrets/*
+%{ endif ~}
 %{ if floating_ip != "" ~}
 dev="$(ip -4 route show default | awk '{print $5; exit}')"
 cat > /etc/netplan/60-floating-ip.yaml <<EOF

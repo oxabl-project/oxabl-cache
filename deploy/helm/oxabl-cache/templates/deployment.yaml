@@ -147,6 +147,15 @@ spec:
                   items:
                     - key: {{ .Values.metadata.postgres.passwordSecret.key }}
                       path: db-password
+              {{- with .Values.metadata.postgres.caSecret }}
+              {{- if .name }}
+              - secret:
+                  name: {{ .name }}
+                  items:
+                    - key: {{ .key }}
+                      path: db-ca.pem
+              {{- end }}
+              {{- end }}
               - secret:
                   name: {{ .Values.store.s3.credentialsSecret.name }}
                   items:

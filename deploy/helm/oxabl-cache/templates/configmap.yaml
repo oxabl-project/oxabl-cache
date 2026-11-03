@@ -35,6 +35,12 @@ data:
     {{- else }}
     url = {{ .Values.metadata.postgres.url | quote }}
     password_file = "{{ $secrets }}/db-password"
+    {{- if .Values.metadata.postgres.caSecret.name }}
+    ca_file = "{{ $secrets }}/db-ca.pem"
+    {{- end }}
+    {{- with .Values.metadata.postgres.maxConnections }}
+    max_connections = {{ . | int }}
+    {{- end }}
     {{- end }}
 
     [store]

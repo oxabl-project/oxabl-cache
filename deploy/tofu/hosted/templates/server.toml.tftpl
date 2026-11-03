@@ -15,6 +15,7 @@ url = "sqlite:///var/lib/oxabl-cache/meta.db"
 %{ else ~}
 url = "postgres://oxabl_cache@${database_host}:5432/oxabl_cache"
 password_file = "/run/secrets/oxabl-cache/db-password"
+ca_file = "/run/secrets/oxabl-cache/db-ca.pem"
 %{ endif ~}
 
 [store]

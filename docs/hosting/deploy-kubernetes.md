@@ -8,8 +8,8 @@ The chart renders no Secret: it names the Secrets you create, and mounts their f
 | `cluster` (default) | 2 or more, HPA on CPU | Postgres | S3-compatible bucket | Deployment, rolling update, `PodDisruptionBudget` `minAvailable: 1` |
 | `single-node` | 1 | SQLite on a PVC | local directory on the same PVC | Deployment with `Recreate`, PVC kept on uninstall |
 
-Cluster mode needs the Postgres and S3 support described in operations.md. Single-node mode works with the
-server as built today. There are no CronJobs: garbage collection and compaction run in the pods under a
+Postgres connections always use TLS: set `metadata.postgres.caSecret` when the database uses a private CA
+(CloudNativePG does), otherwise the server trusts the web roots. There are no CronJobs: garbage collection and compaction run in the pods under a
 Postgres advisory-lock leader, and migrations run at startup under the same lock.
 
 ## Prerequisites
@@ -85,7 +85,7 @@ reaches the admin listener through the ClusterIP Service, never through the Ingr
 
 ```sh
 kubectl -n oxabl-cache port-forward svc/oxabl-cache-admin 9091:9091
-oxabl-cache-admin --token-file token tenant create acme --region na --hard-quota 20GiB
+oxabl-cache-admin --server http://127.0.0.1:9091 --token-file token tenant create acme --hard-quota 20GiB
 ```
 
 ## What the chart creates
@@ -104,9 +104,8 @@ oxabl-cache-admin --token-file token tenant create acme --region na --hard-quota
 | `NetworkPolicy` | Optional (`networkPolicy.enabled`). The public port accepts `publicFrom` (any source when empty); the admin and metrics ports accept only the sources you list. |
 | `PersistentVolumeClaim` | Single-node only; annotated `helm.sh/resource-policy: keep`, so `helm uninstall` leaves the data. |
 
-Probes use the metrics listener (`GET /metrics` on port 9090). The server binds the listeners before it has
-reached its database, and starts answering only afterwards, so the probe means "serving", not "listening".
-Probes do not use the public listener (it has no unauthenticated route) or the admin health route (it needs the
+Probes use the metrics listener (`GET /metrics` on port 9090). The server opens its database first and binds the
+listeners only afterwards, so a pod that answers is one that reached its database. Probes do not use the public listener (it has no unauthenticated route) or the admin health route (it needs the
 operator token).
 
 ## Operating it

@@ -17,6 +17,9 @@ metadata:
     passwordSecret:
       name: oxabl-cache-pg
       key: password
+    caSecret:
+      name: oxabl-cache-pg-ca
+      key: ca.crt
 
 store:
   s3:

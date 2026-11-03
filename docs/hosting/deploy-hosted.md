@@ -121,15 +121,16 @@ Outputs give `public_ipv4` and the next steps.
 6. **First tenant.** From operations.md, "Tenant administration", on the node:
 
    ```sh
-   oxabl-cache-admin --token-file /run/secrets/operator-token tenant create acme --region na --hard-quota 20GiB
-   oxabl-cache-admin --token-file /run/secrets/operator-token token create --tenant <t> --scopes tenant:admin --expires 30d
+   oxabl-cache-admin tenant create acme --hard-quota 20GiB
+   oxabl-cache-admin token create --tenant <t> --scopes tenant:admin --expires 30d
    ```
 
    Hand the tenant admin token to the customer through a secure channel. They create caches, tokens and OIDC
-   policies themselves (protocol.md). `oxabl-cache-admin` is the operator CLI in operations.md; check
-   `oxabl-cache-admin --help` for the commands this build supports.
-7. **Backups.** The metadata is what matters; packs are reproducible. `oxabl-cache-server backup` is not
-   implemented in this build, so for the prototype set `server_backups = true` (adds 20% to the server) or snapshot
+   policies themselves (protocol.md). A region is its own deployment, so there is no region flag: the helper
+   points at this node's admin listener (`OXABL_CACHE_ADMIN_SERVER`) and reads the token from
+   `/etc/oxabl-cache/operator-token`.
+7. **Backups.** The metadata is what matters; packs are reproducible. `oxabl-cache-server backup` has no
+   implementation yet, so for the prototype set `server_backups = true` (adds 20% to the server) or snapshot
    the volume from the Hetzner console before risky changes. Production uses Postgres base backups and WAL
    archiving (operations.md, "Backup and restore").
 
@@ -137,8 +138,8 @@ Outputs give `public_ipv4` and the next steps.
 
 `examples/region` is the same module in `cluster` mode: two API nodes behind a floating IP, a Postgres node with
 a volume, an R2 bucket per data region (`r2_jurisdiction = "eu"` and `location = "fsn1"` for the EU), and
-`tls_mode = "certificate"`. It uses the Postgres and S3 support in operations.md, which the single-node server
-build does not accept yet. The module does not provision a Postgres replica, WAL archiving or failover of the
+`tls_mode = "certificate"`. The module generates a private CA and a server certificate for Postgres, which is
+served over TLS 1.3 on the private network only. The module does not provision a Postgres replica, WAL archiving or failover of the
 floating IP between API nodes; plan those as follow-up work. Run `tofu plan` for each region in its own state.
 
 ## Cost

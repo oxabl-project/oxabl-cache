@@ -137,10 +137,17 @@ The unit leaves outbound traffic open because OIDC issuers are fetched over HTTP
 `AmbientCapabilities=CAP_NET_BIND_SERVICE` and `CapabilityBoundingSet=CAP_NET_BIND_SERVICE`, or keep 8443 and
 forward.
 
+## Two nodes on Postgres and S3
+
+`deploy/container/cluster-smoke.sh` starts two containers of the image against one TLS Postgres (`ca_file`) and
+one Garage bucket, the shape of the Kubernetes and hosted deployments. It checks that both become ready, that
+`init` and `check-store` work, that the admin health route reports the database and the store, and that exactly
+one node holds the garbage-collection lease.
+
 ## Backups and upgrades
 
 - **What matters** is the metadata (SQLite file). Packs are reproducible, and CI rebuilds them at the cost of a
-  cold cache. `oxabl-cache-server backup` is documented in operations.md and is not implemented in this build, so
+  cold cache. `oxabl-cache-server backup` has no implementation yet, so
   until it is, snapshot the volume while the server is stopped, or use filesystem snapshots (WAL mode makes a
   crash-consistent snapshot recoverable).
 - **Packs on local disk** are immutable: `rsync` without `--delete` or a filesystem snapshot is consistent.

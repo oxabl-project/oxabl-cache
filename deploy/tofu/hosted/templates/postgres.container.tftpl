@@ -13,8 +13,10 @@ Environment=POSTGRES_DB=oxabl_cache
 Environment=POSTGRES_PASSWORD_FILE=/run/secrets/db-password
 Environment=POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256
 Volume=/etc/oxabl-cache/secrets/db-password:/run/secrets/db-password:ro
+Volume=/etc/oxabl-cache/secrets/db-server.crt:/run/secrets/db-server.crt:ro
+Volume=/etc/oxabl-cache/secrets/db-server.key:/run/secrets/db-server.key:ro
 Volume=${data_mount}:/var/lib/postgresql
-Exec=postgres -c listen_addresses=${private_ip} -c password_encryption=scram-sha-256
+Exec=postgres -c listen_addresses=${private_ip} -c password_encryption=scram-sha-256 -c ssl=on -c ssl_cert_file=/run/secrets/db-server.crt -c ssl_key_file=/run/secrets/db-server.key -c ssl_min_protocol_version=TLSv1.3
 
 [Service]
 Restart=always

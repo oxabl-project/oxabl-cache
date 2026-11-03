@@ -29,12 +29,17 @@ keys:
   urlKeyKey: url-key
   claimKeyKey: claim-key
 
+# The Postgres connection always uses TLS. Without caSecret the server trusts the web roots.
 metadata:
   postgres:
     url: ""
+    maxConnections: 16
     passwordSecret:
       name: ""
       key: password
+    caSecret:
+      name: ""
+      key: ca.crt
 
 store:
   s3:

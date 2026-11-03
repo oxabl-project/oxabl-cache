@@ -15,6 +15,7 @@ locals {
     } : {},
     local.single ? {} : {
       "db-password" = "${random_password.database[0].result}\n"
+      "db-ca.pem"   = tls_self_signed_cert.database_ca[0].cert_pem
     },
     var.tls_mode == "certificate" ? {
       "tls.crt" = var.tls_certificate_pem
@@ -58,20 +59,24 @@ locals {
           path        = "/usr/local/sbin/oxabl-cache-init"
           permissions = "0750"
           content = templatefile("${path.module}/templates/helper.sh.tftpl", {
-            description = "Creates the schema and prints the first operator token once."
-            image       = var.image
-            data_mount  = local.single ? local.data_mount_single : ""
-            entrypoint  = ""
+            description  = "Creates the schema and prints the first operator token once."
+            image        = var.image
+            data_mount   = local.single ? local.data_mount_single : ""
+            entrypoint   = ""
+            admin_server = ""
+            add_host     = ""
           })
         },
         {
           path        = "/usr/local/sbin/oxabl-cache-admin"
           permissions = "0750"
           content = templatefile("${path.module}/templates/helper.sh.tftpl", {
-            description = "Runs oxabl-cache-admin against this node; --token-file /run/secrets/operator-token reads /etc/oxabl-cache/operator-token."
-            image       = var.image
-            data_mount  = ""
-            entrypoint  = "/usr/local/bin/oxabl-cache-admin"
+            description  = "Runs oxabl-cache-admin against this node, authenticated with /etc/oxabl-cache/operator-token."
+            image        = var.image
+            data_mount   = ""
+            entrypoint   = "/usr/local/bin/oxabl-cache-admin"
+            admin_server = var.tls_mode == "certificate" ? "https://${var.domain}:9091" : "http://127.0.0.1:9091"
+            add_host     = var.tls_mode == "certificate" ? var.domain : ""
           })
         },
         {
@@ -111,6 +116,16 @@ locals {
       path        = "/etc/oxabl-cache/secrets/db-password"
       permissions = "0600"
       content     = "${random_password.database[0].result}\n"
+    },
+    {
+      path        = "/etc/oxabl-cache/secrets/db-server.crt"
+      permissions = "0600"
+      content     = tls_locally_signed_cert.database[0].cert_pem
+    },
+    {
+      path        = "/etc/oxabl-cache/secrets/db-server.key"
+      permissions = "0600"
+      content     = tls_private_key.database[0].private_key_pem
     },
     {
       path        = "/etc/containers/systemd/postgres.container"

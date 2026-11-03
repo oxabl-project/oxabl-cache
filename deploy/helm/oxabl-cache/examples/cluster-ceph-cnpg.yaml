@@ -1,6 +1,7 @@
 # Two or more replicas on a CloudNativePG cluster and an in-cluster S3 store (Ceph RGW or Garage).
-# CloudNativePG creates the Secret oxabl-cache-pg-app (keys username, password) for the app
-# user; the S3 credentials Secret and the keys Secret are created by the operator.
+# For a CloudNativePG cluster named oxabl-cache-pg, the operator creates the Secrets
+# oxabl-cache-pg-app (username, password) and oxabl-cache-pg-ca (ca.crt). The S3 credentials
+# Secret and the keys Secret are created by the operator.
 mode: cluster
 
 image:
@@ -18,6 +19,10 @@ metadata:
     passwordSecret:
       name: oxabl-cache-pg-app
       key: password
+    # CloudNativePG signs the server certificate with its own CA.
+    caSecret:
+      name: oxabl-cache-pg-ca
+      key: ca.crt
 
 store:
   s3:

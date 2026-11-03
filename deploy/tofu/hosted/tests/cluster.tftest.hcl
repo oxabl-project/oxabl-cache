@@ -91,4 +91,13 @@ run "cluster_has_two_api_nodes_and_a_private_database" {
     ])
     error_message = "the database password is a mode 0600 file on every API node"
   }
+  assert {
+    condition     = strcontains(base64decode(regex("path: /etc/containers/systemd/postgres.container\n    permissions: \"0644\"\n    owner: root:root\n    encoding: b64\n    content: (\\S+)", hcloud_server.database[0].user_data)[0]), "ssl=on") && strcontains(hcloud_server.database[0].user_data, "path: /etc/oxabl-cache/secrets/db-server.key\n    permissions: \"0600\"")
+    error_message = "Postgres serves TLS and its key is a mode 0600 file"
+  }
+
+  assert {
+    condition     = strcontains(base64decode(regex("path: /etc/oxabl-cache/server.toml\n    permissions: \"0644\"\n    owner: root:root\n    encoding: b64\n    content: (\\S+)", hcloud_server.api[0].user_data)[0]), "ca_file = \"/run/secrets/oxabl-cache/db-ca.pem\"")
+    error_message = "API nodes verify the database with the generated CA"
+  }
 }
