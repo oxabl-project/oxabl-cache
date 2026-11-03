@@ -29,6 +29,8 @@ pub enum Error {
     Unavailable(String),
     /// A recorded invariant does not hold.
     Internal(String),
+    /// The feature needs settings this deployment lacks.
+    NotConfigured(&'static str),
 }
 
 /// The reason for a [`Error::Conflict`].
@@ -81,6 +83,7 @@ impl fmt::Display for Error {
             }
             Self::Unavailable(why) => write!(f, "unavailable: {why}"),
             Self::Internal(why) => write!(f, "internal: {why}"),
+            Self::NotConfigured(what) => write!(f, "not configured: {what}"),
         }
     }
 }

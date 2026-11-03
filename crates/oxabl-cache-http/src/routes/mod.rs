@@ -90,15 +90,15 @@ pub fn public_router<B: Backend>(app: Arc<App<B>>) -> Router {
         )
         .route(
             "/v1/tenant/oidc/issuers",
-            get(tenant::oidc::not_configured::<B>)
-                .post(tenant::oidc::not_configured::<B>)
-                .delete(tenant::oidc::not_configured::<B>),
+            get(tenant::oidc::list_issuers::<B>)
+                .post(tenant::oidc::add_issuer::<B>)
+                .delete(tenant::oidc::delete_issuer::<B>),
         )
         .route(
             "/v1/tenant/oidc/policies",
-            get(tenant::oidc::not_configured::<B>)
-                .post(tenant::oidc::not_configured::<B>)
-                .delete(tenant::oidc::not_configured::<B>),
+            get(tenant::oidc::list_policies::<B>)
+                .post(tenant::oidc::add_policy::<B>)
+                .delete(tenant::oidc::delete_policy::<B>),
         )
         .route("/v1/tenant/usage", get(tenant::usage::get::<B>));
     wrap(routes, app)
@@ -122,6 +122,10 @@ pub fn admin_router<B: Backend>(app: Arc<App<B>>) -> Router {
         .route(
             "/admin/v1/tenants/{tenant}/tokens",
             post(admin::tenants::token::<B>),
+        )
+        .route(
+            "/admin/v1/tenants/{tenant}/admins",
+            post(admin::admins::post::<B>),
         )
         .route("/admin/v1/usage", get(admin::usage::get::<B>))
         .route(

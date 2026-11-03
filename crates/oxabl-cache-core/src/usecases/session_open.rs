@@ -45,6 +45,16 @@ where
         tenant: TenantId,
         user: PrincipalId,
     ) -> Result<NewCredential> {
+        self.user_session(tenant, user)
+            .await
+            .map(|(credential, _)| credential)
+    }
+
+    pub(crate) async fn user_session(
+        &self,
+        tenant: TenantId,
+        user: PrincipalId,
+    ) -> Result<(NewCredential, Vec<Grant>)> {
         let grants = self
             .meta
             .transact(move |tx| match tx.user(&user)? {
@@ -54,8 +64,10 @@ where
                 _ => Err(Error::NotFound),
             })
             .await?;
-        self.open_session(tenant, user, grants, USER_SESSION_SECS, "user")
-            .await
+        let credential = self
+            .open_session(tenant, user, grants.clone(), USER_SESSION_SECS, "user")
+            .await?;
+        Ok((credential, grants))
     }
 
     async fn open_session(

@@ -4,6 +4,7 @@ mod accounts;
 mod admin;
 mod entries;
 mod ledger;
+mod oidc;
 mod packs;
 mod roster;
 mod segments;

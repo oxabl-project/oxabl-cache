@@ -9,6 +9,7 @@ pub(crate) use store::StoreConfig;
 
 use oxabl_cache_core::Config as CoreConfig;
 use oxabl_cache_http::log::Level;
+use oxabl_cache_oidc::{Cidr, OidcSettings, Resolver};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -47,7 +48,7 @@ pub(crate) struct Config {
     pub default_rate: u32,
     pub default_burst: u32,
     pub log_level: Level,
-    pub warnings: Vec<&'static str>,
+    pub oidc: OidcSettings,
 }
 
 fn address(name: &str, text: &str) -> Result<SocketAddr, String> {
@@ -79,6 +80,44 @@ fn sqlite_path(url: &str) -> Result<PathBuf, String> {
         return Err("postgres metadata is not available in this build".to_owned());
     }
     Err(format!("metadata url `{url}` is not sqlite://<path>"))
+}
+
+fn dns_server(text: &str) -> Result<std::net::SocketAddr, String> {
+    text.parse()
+        .or_else(|_| text.parse::<std::net::IpAddr>().map(|ip| (ip, 53).into()))
+        .map_err(|_| format!("oidc.dns_servers entry `{text}` is not an address"))
+}
+
+fn oidc_settings(raw: &raw::Oidc) -> Result<OidcSettings, String> {
+    let resolver = if raw.dns_servers.is_empty() {
+        Resolver::System
+    } else {
+        Resolver::Servers(
+            raw.dns_servers
+                .iter()
+                .map(|text| dns_server(text))
+                .collect::<Result<_, _>>()?,
+        )
+    };
+    let extra_ca_pem = match raw.extra_ca_file.as_deref().filter(|path| !path.is_empty()) {
+        Some(path) => Some(
+            std::fs::read(path)
+                .map_err(|error| format!("cannot read oidc.extra_ca_file {path}: {error}"))?,
+        ),
+        None => None,
+    };
+    Ok(OidcSettings {
+        issuer_allowlist: raw.issuer_allowlist.clone(),
+        allowed_private_ranges: raw
+            .allowed_private_ranges
+            .iter()
+            .map(|text| {
+                Cidr::parse(text).map_err(|error| format!("oidc.allowed_private_ranges: {error}"))
+            })
+            .collect::<Result<_, _>>()?,
+        resolver,
+        extra_ca_pem,
+    })
 }
 
 fn transport(
@@ -172,15 +211,7 @@ impl Config {
         if raw.metadata.password_file.is_some() {
             return Err("metadata.password_file applies to postgres only".to_owned());
         }
-        let mut warnings = Vec::new();
-        let oidc = &raw.oidc;
-        if !(oidc.issuer_allowlist.is_empty()
-            && oidc.allowed_private_ranges.is_empty()
-            && oidc.dns_servers.is_empty()
-            && oidc.extra_ca_file.is_none())
-        {
-            warnings.push("[oidc] settings are ignored: OIDC is not available in this build");
-        }
+        let oidc = oidc_settings(&raw.oidc)?;
         let store = store::parse(raw.store)?;
         if raw
             .log
@@ -244,7 +275,7 @@ impl Config {
             default_rate: raw.defaults.rate.unwrap_or(50),
             default_burst: raw.defaults.burst.unwrap_or(200),
             log_level,
-            warnings,
+            oidc,
         })
     }
 }

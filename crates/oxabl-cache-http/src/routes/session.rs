@@ -3,14 +3,15 @@
 use crate::app::{App, Backend};
 use crate::auth::bearer;
 use crate::error::ApiError;
-use crate::json::{empty, read_json};
+use crate::json::{empty, json_response, read_json};
+use crate::routes::tenant::tokens::grants_json;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use oxabl_cache_core::Error;
-use oxabl_cache_core::ports::IdentityVerifier;
 use serde::Deserialize;
+use serde_json::json;
 use std::sync::Arc;
 
 #[derive(Deserialize)]
@@ -20,8 +21,8 @@ struct OidcBody {
     id_token: String,
 }
 
-/// Exchanges an identity token for a session. A verified identity still needs a
-/// matching trust policy; this build registers none, so none matches.
+/// Exchanges an identity token for a session. Every refusal is the same 401, so a
+/// caller learns nothing about which check failed.
 pub(crate) async fn oidc<B: Backend>(
     State(app): State<Arc<App<B>>>,
     body: Body,
@@ -35,14 +36,31 @@ pub(crate) async fn oidc<B: Backend>(
         app.metrics
             .inc("oxabl_cache_oidc_exchanges_total", &[("result", result)], 1);
     };
-    match app.verifier.verify(&tenant, &body.id_token).await {
-        Err(Error::Unavailable(_)) => {
-            count("not_configured");
-            Err(ApiError::not_implemented(
-                "OIDC is not configured on this server",
+    match app
+        .engine
+        .exchange_identity(&app.verifier, tenant, &body.id_token)
+        .await
+    {
+        Ok(exchanged) => {
+            count("accepted");
+            Ok(json_response(
+                StatusCode::OK,
+                &json!({
+                    "token": exchanged.session.secret,
+                    "expires_at": exchanged.session.expires_at,
+                    "grants": grants_json(&exchanged.grants),
+                }),
             ))
         }
-        Err(_) | Ok(_) => {
+        Err(Error::Unavailable(detail)) => {
+            count("unavailable");
+            Err(Error::Unavailable(detail).into())
+        }
+        Err(Error::TenantSuspended) => {
+            count("rejected");
+            Err(Error::TenantSuspended.into())
+        }
+        Err(_) => {
             count("rejected");
             Err(Error::Unauthenticated.into())
         }

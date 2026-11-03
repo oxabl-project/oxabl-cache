@@ -1,9 +1,13 @@
 //! Black-box test environment: supervised child processes, S3 servers, Postgres and a fault proxy.
 
+pub mod cache_server;
 pub mod cli;
+pub mod fake_dns;
 pub mod fault_proxy;
 pub mod garage;
+pub mod idp;
 pub mod keeper;
+pub mod netns;
 pub mod pdeathsig;
 pub mod ports;
 pub mod postgres;
