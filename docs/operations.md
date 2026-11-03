@@ -284,6 +284,9 @@ Settings and conventions:
 - `usage export` writes CSV `month,tenant,cache,metric,value`, sorted by tenant,
   cache and metric. The CLI validates the header and every row, and refuses a
   malformed answer rather than printing it.
+  `--format json` prints `{"month": …, "usage": [{tenant, cache, metric, value}, …]}`
+  in the same order. The global `--json` means `--format json`; `--json --format csv`
+  is a usage error (exit 2).
 - Redirects are never followed, so the bearer never travels to another host.
 - Exit codes: 0 success; 1 the server refused (`code: message` from the envelope);
   2 usage or configuration error; 3 server unreachable (connect, TLS or transport).

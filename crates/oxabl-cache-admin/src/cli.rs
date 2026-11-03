@@ -151,8 +151,9 @@ pub enum UsageCommand {
         /// Calendar month in UTC, YYYY-MM.
         #[arg(long)]
         month: String,
-        #[arg(long, value_enum, default_value = "csv")]
-        format: Format,
+        /// Output format; defaults to csv, or json with the global `--json`.
+        #[arg(long, value_enum)]
+        format: Option<Format>,
     },
 }
 

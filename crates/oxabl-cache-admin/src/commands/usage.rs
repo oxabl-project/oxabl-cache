@@ -10,7 +10,25 @@ use serde_json::Value;
 
 const HEADER: &str = "month,tenant,cache,metric,value";
 
-pub fn export(admin: &Admin, month: &str, format: Format) -> Result<(), Failure> {
+/// `--json` means JSON; it conflicts with an explicit `--format csv`.
+fn choose(format: Option<Format>, json: bool) -> Result<Format, Failure> {
+    match (format, json) {
+        (Some(Format::Csv), true) => Err(Failure::usage(
+            "--json conflicts with --format csv: drop one of them",
+        )),
+        (Some(format), _) => Ok(format),
+        (None, true) => Ok(Format::Json),
+        (None, false) => Ok(Format::Csv),
+    }
+}
+
+pub fn export(
+    admin: &Admin,
+    month: &str,
+    format: Option<Format>,
+    json: bool,
+) -> Result<(), Failure> {
+    let format = choose(format, json)?;
     check_month(month)?;
     match format {
         Format::Csv => {
