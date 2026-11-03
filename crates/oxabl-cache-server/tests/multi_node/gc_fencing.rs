@@ -68,6 +68,7 @@ fn a_frozen_leader_that_lost_leadership_is_refused_on_resume_and_deletes_nothing
         "gc-fencing",
         Options {
             metadata_url: Some(through_proxy),
+            lease: "8s",
             ..Options::default()
         },
     );
@@ -94,14 +95,15 @@ fn a_frozen_leader_that_lost_leadership_is_refused_on_resume_and_deletes_nothing
         .reserve_bytes(&world.ci, "trusted", &pack.bytes)
         .json()["packs"][0]
         .clone();
+    proxy.set(Direction::Reply, Fault::Delay(Duration::from_millis(1500)));
     assert_eq!(world.put_slot(&slot, &pack.bytes).status, 200);
     let pack_id = slot["pack_id"].as_str().expect("id").to_owned();
 
-    proxy.set(Direction::Reply, Fault::Delay(Duration::from_millis(1500)));
     std::thread::sleep(Duration::from_secs(5));
     let leader_pid = world.server.pid();
     signal(leader_pid, "STOP");
     terminate_leader_session(&direct);
+    wait_until(Duration::from_secs(4), || leads(&rival.metrics));
     signal(leader_pid, "CONT");
     assert!(
         wait_until(WAIT, || leads(&rival.metrics)),
