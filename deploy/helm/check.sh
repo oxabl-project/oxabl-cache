@@ -26,6 +26,10 @@ for values in "$chart"/examples/*.yaml; do
       '- ALL' 'type: RuntimeDefault'; do
     printf '%s\n' "$deployment" | grep -q -- "$needle" || fail "$name: pod lacks $needle"
   done
+  for probe in startupProbe readinessProbe; do
+    printf '%s\n' "$deployment" | grep -A3 "$probe:" | grep -q 'path: /readyz' || fail "$name: $probe is not /readyz"
+  done
+  printf '%s\n' "$deployment" | grep -A3 'livenessProbe:' | grep -q 'path: /livez' || fail "$name: livenessProbe is not /livez"
   echo "ok $name"
 done
 

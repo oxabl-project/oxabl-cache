@@ -78,19 +78,19 @@ spec:
               protocol: TCP
           startupProbe:
             httpGet:
-              path: /metrics
+              path: /readyz
               port: metrics
             periodSeconds: 2
             failureThreshold: 60
           readinessProbe:
             httpGet:
-              path: /metrics
+              path: /readyz
               port: metrics
             periodSeconds: 5
             timeoutSeconds: 3
           livenessProbe:
             httpGet:
-              path: /metrics
+              path: /livez
               port: metrics
             periodSeconds: 10
             timeoutSeconds: 3
