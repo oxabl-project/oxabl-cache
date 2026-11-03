@@ -1,7 +1,7 @@
 //! Scrubbing: re-verifying packs on request or from the queue.
 
 use crate::engine::Engine;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::ids::CacheId;
 use crate::ports::{Clock, MetadataStore, ObjectStore, PackAssembler, TxScope};
 use crate::usecases::pack_verify::VerifyOutcome;
@@ -28,8 +28,16 @@ where
         Ok(total)
     }
 
-    /// Verifies every pack of a cache now.
+    /// Verifies every pack of a cache now; a cache that does not exist is not found.
     pub async fn scrub_cache(&self, cache: CacheId) -> Result<VerifyOutcome> {
+        let exists = self
+            .meta
+            .read(move |tx| tx.cache_tenant(&cache))
+            .await?
+            .is_some();
+        if !exists {
+            return Err(Error::NotFound);
+        }
         self.scrub(cache, false).await
     }
 

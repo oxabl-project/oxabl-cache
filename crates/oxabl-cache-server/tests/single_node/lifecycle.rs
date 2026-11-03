@@ -62,6 +62,11 @@ fn the_scrub_subcommand_finds_corruption_and_removes_the_entries_that_name_it() 
     );
     let unknown = world.server.cli(&["scrub", "--cache", "nonsense"]);
     assert!(!unknown.status.success());
+    let absent = world
+        .server
+        .cli(&["scrub", "--cache", "c_7q8dcbd9e0yesqy0ae5pxmz84w"]);
+    assert_eq!(absent.status.code(), Some(1));
+    assert!(absent.stdout.is_empty());
 
     world.server.restart();
     world.reconnect();

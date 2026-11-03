@@ -186,6 +186,10 @@ fn scrub_and_health_report_the_server() {
     assert_eq!(health.json()["gc_leader"], true);
     assert!(run(&server, &["health"]).stdout().contains("store"));
     assert_eq!(run(&server, &["cache", "scrub", "../x"]).code(), 2);
+    let absent = run(&server, &["cache", "scrub", "c_7q8dcbd9e0yesqy0ae5pxmz84w"]);
+    assert_eq!(absent.code(), 1);
+    assert!(absent.stdout().is_empty(), "{}", absent.stdout());
+    assert!(absent.stderr().contains("not_found"), "{}", absent.stderr());
 }
 
 #[test]
