@@ -102,6 +102,44 @@ fn uploads_over_the_hard_quota_or_the_pack_limit_are_refused() {
 }
 
 #[test]
+fn concurrent_reservations_never_admit_more_than_the_hard_quota() {
+    let world = World::build(
+        "quota-race",
+        Options::default(),
+        json!({}),
+        json!({"hard_bytes": 1_048_576}),
+    );
+    let statuses: Vec<String> = std::thread::scope(|scope| {
+        let attempts: Vec<_> = (0..24)
+            .map(|_| scope.spawn(|| world.reserve(&world.ci, "trusted", 300_000)))
+            .collect();
+        attempts
+            .into_iter()
+            .map(|attempt| {
+                let answer = attempt.join().expect("reservation");
+                assert_eq!(answer.status, 200);
+                answer.json()["packs"][0]["status"]
+                    .as_str()
+                    .expect("status")
+                    .to_owned()
+            })
+            .collect()
+    });
+    let admitted = statuses.iter().filter(|status| *status == "ok").count();
+    assert_eq!(
+        admitted, 3,
+        "three packs of 300,000 fit a quota of 1,048,576: {statuses:?}"
+    );
+    assert!(
+        statuses
+            .iter()
+            .all(|status| status == "ok" || status == "quota_exceeded"),
+        "{statuses:?}"
+    );
+    assert_eq!(world.info(&world.ci)["quota"]["pending_bytes"], 900_000);
+}
+
+#[test]
 fn api_routes_are_rate_limited_per_tenant_and_object_routes_are_not() {
     let world = World::build(
         "rate-limit",

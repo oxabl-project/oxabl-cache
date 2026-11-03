@@ -108,14 +108,15 @@ impl Deref for Lease {
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        if let Some(conn) = self.conn.take() {
-            if self.reusable && !conn.client.is_closed() {
-                self.pool
-                    .idle
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .push(conn);
-            }
+        if let Some(conn) = self.conn.take()
+            && self.reusable
+            && !conn.client.is_closed()
+        {
+            self.pool
+                .idle
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .push(conn);
         }
     }
 }

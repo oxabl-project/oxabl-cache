@@ -77,14 +77,14 @@ pub(crate) enum Election {
     /// The only process of a SQLite deployment.
     Single,
     /// One of several nodes on a shared Postgres.
-    Postgres(LeaderSession),
+    Postgres(Box<LeaderSession>),
 }
 
 impl Election {
     pub(crate) fn new(metadata: &Metadata) -> Result<Self, String> {
         match postgres_options(metadata)? {
             Some(options) => LeaderSession::new(&options)
-                .map(Self::Postgres)
+                .map(|session| Self::Postgres(Box::new(session)))
                 .map_err(|error| format!("cannot prepare the leader election: {error}")),
             None => Ok(Self::Single),
         }

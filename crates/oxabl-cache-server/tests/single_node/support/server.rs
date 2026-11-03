@@ -20,6 +20,8 @@ pub struct Options {
     pub shutdown_timeout: &'static str,
     pub extra: &'static str,
     pub tls: bool,
+    /// Replaces the generated `[metadata] url`.
+    pub metadata_url: Option<String>,
 }
 
 impl Default for Options {
@@ -32,6 +34,7 @@ impl Default for Options {
             shutdown_timeout: "1s",
             extra: "",
             tls: false,
+            metadata_url: None,
         }
     }
 }
@@ -88,8 +91,15 @@ impl Server {
             fs::write(dir.join("tls.key"), issued.signing_key.serialize_pem()).expect("key file");
         }
         let objects = Objects::open(crate::STORE, &dir);
-        let metadata_url = backend::metadata_url(&dir);
-        fs::write(&config, config_text(&dir, &metadata_url, &objects, &options)).expect("config");
+        let metadata_url = options
+            .metadata_url
+            .clone()
+            .unwrap_or_else(|| backend::metadata_url(&dir));
+        fs::write(
+            &config,
+            config_text(&dir, &metadata_url, &objects, &options),
+        )
+        .expect("config");
         let init = Command::new(BIN)
             .arg("-c")
             .arg(&config)
