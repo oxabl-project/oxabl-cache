@@ -28,6 +28,16 @@ fn pack_rows(url: &str, pack: &str) -> (i64, i64, i64) {
     (rows[0].get(0), rows[0].get(1), rows[0].get(2))
 }
 
+/// Whether a server connection has already run its segment insert.
+fn segments_written(url: &str) -> bool {
+    !sql(
+        url,
+        "SELECT 1 FROM pg_stat_activity
+         WHERE application_name = 'oxabl-cache-server' AND query LIKE '%INTO segments%'",
+    )
+    .is_empty()
+}
+
 #[test]
 fn a_database_crash_during_a_commit_is_an_error_to_clients_and_leaves_no_half_pack() {
     let runtime = tokio::runtime::Runtime::new().expect("runtime");
@@ -53,6 +63,7 @@ fn a_database_crash_during_a_commit_is_an_error_to_clients_and_leaves_no_half_pa
         "database-crash",
         Options {
             metadata_url: Some(through_proxy),
+            lease: "1h",
             ..Options::default()
         },
     );
@@ -70,10 +81,13 @@ fn a_database_crash_during_a_commit_is_an_error_to_clients_and_leaves_no_half_pa
     let pack_id = slot["pack_id"].as_str().expect("pack id").to_owned();
     let frame = frames::commit(TRUSTED, &pack, &entries);
 
-    proxy.set(Direction::Reply, Fault::Delay(Duration::from_millis(5)));
+    proxy.set(Direction::Reply, Fault::Delay(Duration::from_millis(300)));
     let first = std::thread::scope(|scope| {
         let commit = scope.spawn(|| world.commit(&world.ci, &pack_id, &frame));
-        std::thread::sleep(Duration::from_millis(800));
+        assert!(
+            wait_until(Duration::from_secs(30), || segments_written(&direct)),
+            "the commit reached its segment insert"
+        );
         database.crash();
         let outcome = commit.join().expect("commit thread");
         let during = fetch_status(&world, &world.reader, &keys);
