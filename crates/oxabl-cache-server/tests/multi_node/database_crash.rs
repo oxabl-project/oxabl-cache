@@ -28,12 +28,14 @@ fn pack_rows(url: &str, pack: &str) -> (i64, i64, i64) {
     (rows[0].get(0), rows[0].get(1), rows[0].get(2))
 }
 
-/// Whether a server connection has already run its segment insert.
+/// Whether the commit has written its segments: a server connection holds a
+/// transaction id (its transaction wrote), or the segments are already visible.
 fn segments_written(url: &str) -> bool {
     !sql(
         url,
         "SELECT 1 FROM pg_stat_activity
-         WHERE application_name = 'oxabl-cache-server' AND query LIKE '%INTO segments%'",
+         WHERE application_name = 'oxabl-cache-server' AND backend_xid IS NOT NULL
+         UNION ALL SELECT 1 FROM segments",
     )
     .is_empty()
 }
