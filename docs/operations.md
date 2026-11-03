@@ -9,10 +9,14 @@ Step-by-step guides:
 - [Kubernetes](hosting/deploy-kubernetes.md): the Helm chart.
 - [Hosted](hosting/deploy-hosted.md): Cloudflare R2 and Hetzner, with OpenTofu.
 
-The image (`ghcr.io/oxabl-project/oxabl-cache-server`) is built and smoke-tested on
-every pull request. It is pushed, as a multi-arch manifest signed with cosign
-keyless, from `main` and `v*` tags, but only while the repository variable
-`PUBLISH_IMAGE` is `true`. Forks and fresh clones therefore never try to publish.
+The image is built and smoke-tested on every pull request; the amd64 build also runs
+the two-node Postgres and S3 smoke test (`deploy/container/cluster-smoke.sh`). From
+`main` and `v*` tags it is pushed to `ghcr.io/oxabl-project/oxabl-cache-server`, as a
+multi-arch manifest signed with cosign keyless, but only while the repository
+variable `PUBLISH_IMAGE` is `true`. That variable is not set yet, so no image is
+published: build one with `docker build -f deploy/container/Containerfile -t oxabl-cache-server .` and use
+that tag wherever the guides name the ghcr image. Forks and fresh clones never try to
+publish.
 
 ## Deployment shapes
 
@@ -140,7 +144,8 @@ still opens human sessions.
 The URL key may list two keys during rotation; both are accepted and the first signs.
 The server warns at start (`readable by other users; chmod 600 it`) when the URL key file can be read by anyone
 but its owner and the process's own group: mode 0440 with the process's group, as a Kubernetes Secret volume
-with `fsGroup` has, passes; any other group, world or group-write bit warns.
+with `fsGroup` has, passes; any other group, world or group-write bit warns. The
+0440-with-a-foreign-group case is not covered by a test yet (testing.md).
 The claim-hash key is stable: rotating it means re-entering trust policies.
 
 `public_url` defaults to `http(s)://<bound address>`, which is what makes
@@ -205,6 +210,9 @@ Probes, all on the metrics listener (never on the public one):
 - `GET /readyz` checks the metadata store (live node count) and the object store, in
   parallel, each within 2 s. It answers 200, or 503 `unavailable` naming what
   failed, with `Retry-After`. An S3 store is checked with a `HEAD` of a random key.
+  Some stores answer that `HEAD` the same way for a deleted bucket as for a missing
+  key, so readiness may stay 200 after the bucket is deleted; the bucket probe at
+  startup and the store error metrics catch it.
   The local-disk store is checked by creating and removing a file in its `tmp`
   directory, so a missing or unmounted root, or one that cannot be written, fails
   readiness. No user data is written.

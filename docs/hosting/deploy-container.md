@@ -1,13 +1,15 @@
 # Deploy as a container or a single binary
 
 One node, SQLite for metadata and a local directory for packs. This is the shape for a team on one VM
-(operations.md, "Deployment shapes"). Everything below works with the server as built today (`store.kind =
-"fs"`, `sqlite://`). Postgres and S3 settings follow operations.md and are used by the Kubernetes and hosted
-guides.
+(operations.md, "Deployment shapes"): `store.kind = "fs"` and SQLite metadata. Postgres and S3 settings follow
+operations.md; the two-node section below and the Kubernetes and hosted guides use them.
 
 ## What the image is
 
-`ghcr.io/oxabl-project/oxabl-cache-server`, built from `deploy/container/Containerfile`:
+`ghcr.io/oxabl-project/oxabl-cache-server`, built from `deploy/container/Containerfile`. **It is not published
+yet:** publishing waits for the repository variable `PUBLISH_IMAGE` (below). Until then build it yourself with
+`docker build -f deploy/container/Containerfile -t oxabl-cache-server .` and use `oxabl-cache-server` where the commands below say
+`ghcr.io/oxabl-project/oxabl-cache-server:latest`. The image is:
 
 - static musl binaries `oxabl-cache-server` and `oxabl-cache-admin` on `gcr.io/distroless/static`, with CA roots
   and no shell or package manager;

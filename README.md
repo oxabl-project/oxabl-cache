@@ -23,7 +23,9 @@ One image, one Helm chart, one systemd unit and one OpenTofu module run every sh
 | A cluster: Helm chart on Postgres and an S3-compatible bucket | [deploy-kubernetes](docs/hosting/deploy-kubernetes.md), `deploy/helm/oxabl-cache` |
 | The hosted service: Cloudflare R2 and Hetzner Cloud | [deploy-hosted](docs/hosting/deploy-hosted.md), `deploy/tofu/hosted` |
 
-The image is `ghcr.io/oxabl-project/oxabl-cache-server` (static, distroless, non-root, read-only root, signed).
+The image (static, distroless, non-root, read-only root) will be published, signed, as
+`ghcr.io/oxabl-project/oxabl-cache-server`. Publishing is off until the repository variable `PUBLISH_IMAGE` is
+`true`, so nothing is on ghcr yet: build it with `docker build -f deploy/container/Containerfile -t oxabl-cache-server .`.
 `nix develop -c deploy/check.sh` lints the chart, validates it against the Kubernetes schemas, validates and tests
 the OpenTofu module, and verifies and scores the systemd units.
 

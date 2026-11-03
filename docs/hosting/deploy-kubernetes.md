@@ -17,7 +17,10 @@ Postgres advisory-lock leader, and migrations run at startup under the same lock
 - Kubernetes 1.27 or later, Helm 3 or 4, a way to reach the public listener (an Ingress controller or a
   `LoadBalancer` Service) with TLS.
 - The image `ghcr.io/oxabl-project/oxabl-cache-server` (`image.tag`, or `image.digest` to pin). The chart's
-  default tag is its `appVersion`; set `image.tag` explicitly until releases are cut.
+  default tag is its `appVersion`; set `image.tag` explicitly until releases are cut. Nothing is published to ghcr
+  until the repository variable `PUBLISH_IMAGE` is `true`: until then, build the image (deploy-container.md),
+  push it to a registry the cluster can pull from, and set `image.repository` to it (`kind-smoke.sh` loads it
+  into kind instead).
 - Cluster mode: a Postgres database and user, and a bucket with its credentials.
 
 ## Secrets you create
