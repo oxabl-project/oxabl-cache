@@ -13,7 +13,10 @@ const WAIT: Duration = Duration::from_secs(30);
 fn an_uncommitted_pack_is_swept_after_its_lease_and_its_reservation_is_released() {
     let world = World::start("lease-sweep", Options::default());
     let pack = frames::pack(world.cache_bytes, &[4_000]);
-    let slot = world.reserve(&world.ci, "trusted", pack.bytes.len()).json()["packs"][0].clone();
+    let slot = world
+        .reserve_bytes(&world.ci, "trusted", &pack.bytes)
+        .json()["packs"][0]
+        .clone();
     assert_eq!(world.put_slot(&slot, &pack.bytes).status, 200);
     let pack_id = slot["pack_id"].as_str().expect("id").to_owned();
     assert!(world.object_exists(&pack_id));

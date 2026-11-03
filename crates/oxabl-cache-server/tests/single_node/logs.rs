@@ -11,7 +11,10 @@ fn logs_never_carry_tokens_signatures_query_strings_or_lookup_ids() {
     let world = World::start("log-canary", Options::default());
     let pack = frames::pack(world.cache_bytes, &[4_000]);
     let key = frames::lookup_id();
-    let reserved = world.reserve(&world.ci, "trusted", pack.bytes.len()).json()["packs"][0].clone();
+    let reserved = world
+        .reserve_bytes(&world.ci, "trusted", &pack.bytes)
+        .json()["packs"][0]
+        .clone();
     let url = reserved["url"].as_str().expect("url").to_owned();
     assert_eq!(world.put_object(&url, &pack.bytes).status, 200);
     let frame = frames::commit(format::Namespace::Trusted, &pack, &[Entry::new(key, 0)]);

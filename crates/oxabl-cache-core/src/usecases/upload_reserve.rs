@@ -20,7 +20,7 @@ pub struct PackRequest {
     pub client_ref: ClientRef,
     /// Exact size of the pack object.
     pub size: u64,
-    /// SHA-256 of the pack, required only when the store verifies checksums.
+    /// SHA-256 of the pack; required when the store verifies checksums.
     pub sha256: Option<[u8; 32]>,
 }
 
@@ -72,7 +72,13 @@ where
             NamespaceKind::Trusted => Scope::WriteTrusted,
             NamespaceKind::Personal => Scope::WritePersonal,
         };
+        let checksums = self.store.capabilities().checksum_sha256;
         for pack in &packs {
+            if checksums && pack.sha256.is_none() {
+                return Err(Error::bad_request(
+                    "sha256 is required: the store verifies checksums",
+                ));
+            }
             if pack.size > PACK_BYTES {
                 return Err(Error::TooLarge);
             }

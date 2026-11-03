@@ -77,7 +77,7 @@ fn a_database_crash_during_a_commit_is_an_error_to_clients_and_leaves_no_half_pa
         .map(|(index, key)| Entry::new(*key, index as u32))
         .collect();
     let pack = frames::pack(world.cache_bytes, &vec![1_000; KEYS]);
-    let reserved = world.reserve(&world.ci, "trusted", pack.bytes.len());
+    let reserved = world.reserve_bytes(&world.ci, "trusted", &pack.bytes);
     let slot = reserved.json()["packs"][0].clone();
     assert_eq!(world.put_slot(&slot, &pack.bytes).status, 200);
     let pack_id = slot["pack_id"].as_str().expect("pack id").to_owned();

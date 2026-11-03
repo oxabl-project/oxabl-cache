@@ -92,3 +92,39 @@ fn the_capabilities_the_probe_found_are_reported_and_signed_into_put_urls() {
         );
     }
 }
+
+#[test]
+fn a_reservation_without_a_digest_is_refused_where_the_store_verifies_checksums() {
+    let world = World::start("s3-digest-required", Options::default());
+    assert_eq!(
+        world.info(&world.reader)["store"]["checksum_sha256"],
+        true,
+        "this store verifies checksums"
+    );
+    let pack = frames::pack(world.cache_bytes, &[4_000]);
+    let refused = world.ci.json(
+        "POST",
+        &world.path("/uploads"),
+        Some(&json!({
+            "namespace": "trusted",
+            "packs": [
+                {"client_ref": hex(&frames::random(16)), "size": pack.bytes.len(),
+                 "sha256": base64::engine::general_purpose::STANDARD.encode(Sha256::digest(&pack.bytes))},
+                {"client_ref": hex(&frames::random(16)), "size": pack.bytes.len()},
+            ],
+        })),
+    );
+    assert_eq!(refused.status, 400);
+    assert_eq!(refused.error_code(), "bad_request");
+    assert_eq!(
+        world.info(&world.reader)["quota"]["pending_bytes"],
+        0,
+        "a refused request reserves nothing, not even for the packs that carried a digest"
+    );
+    assert_eq!(
+        world
+            .reserve_bytes(&world.ci, "trusted", &pack.bytes)
+            .status,
+        200
+    );
+}

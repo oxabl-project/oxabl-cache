@@ -90,7 +90,10 @@ fn a_frozen_leader_that_lost_leadership_is_refused_on_resume_and_deletes_nothing
     );
 
     let pack = frames::pack(world.cache_bytes, &[4_000]);
-    let slot = world.reserve(&world.ci, "trusted", pack.bytes.len()).json()["packs"][0].clone();
+    let slot = world
+        .reserve_bytes(&world.ci, "trusted", &pack.bytes)
+        .json()["packs"][0]
+        .clone();
     assert_eq!(world.put_slot(&slot, &pack.bytes).status, 200);
     let pack_id = slot["pack_id"].as_str().expect("id").to_owned();
 
