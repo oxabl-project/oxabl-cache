@@ -103,4 +103,15 @@ pub trait ObjectStore: Send + Sync + 'static {
 
     /// Lists the objects under a cache prefix.
     fn list(&self, cache: &CacheId) -> impl Future<Output = Result<Vec<ObjectInfo>>> + Send;
+
+    /// Fails unless the store can serve and take objects right now. Writes no user data.
+    fn check(&self) -> impl Future<Output = Result<()>> + Send {
+        async {
+            let probe = ObjectKey {
+                cache: CacheId::random(),
+                pack: PackId::random(),
+            };
+            self.head(&probe).await.map(|_| ())
+        }
+    }
 }

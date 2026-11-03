@@ -63,7 +63,9 @@ and the storage attacks below use it, so it also checks the spec.
     The session termination is limited to the test's own database, because the
     Postgres cluster is shared with the other tests of the binary.
   - **Readiness.** `/readyz` answers 503 while Postgres is stopped and 200 after it
-    restarts, while `/livez` and `/v1/health` stay up.
+    restarts, while `/livez` and `/v1/health` stay up. With the local-disk store,
+    removing the store root under a running server makes `/readyz` answer 503 naming
+    the store, and recreating it brings 200 back.
   - **Postgres timeouts.** With `statement_timeout = "1s"`, a request blocked on a
     table lock answers 503 well before the lock is released. With
     `idle_in_transaction_timeout = "1s"` and a delayed reply, the session is ended and

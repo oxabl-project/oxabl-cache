@@ -26,6 +26,7 @@ mod roster_rules;
 mod round_trip;
 mod scopes;
 mod shutdown_upload;
+mod store_root;
 mod support;
 mod teardown;
 mod tls_listener;

@@ -194,11 +194,12 @@ Subcommands:
 
 Probes, all on the metrics listener (never on the public one):
 - `GET /livez` answers 200 while the process is up.
-- `GET /readyz` checks the metadata store (live node count) and the object store (a
-  `HEAD` of a random key), in parallel, each within 2 s. It answers 200, or 503
-  `unavailable` naming what failed, with `Retry-After`. The local-disk store's
-  `HEAD` of a missing key succeeds even when the root directory is gone, so
-  `/readyz` cannot see an unmounted volume.
+- `GET /readyz` checks the metadata store (live node count) and the object store, in
+  parallel, each within 2 s. It answers 200, or 503 `unavailable` naming what
+  failed, with `Retry-After`. An S3 store is checked with a `HEAD` of a random key.
+  The local-disk store is checked by creating and removing a file in its `tmp`
+  directory, so a missing or unmounted root, or one that cannot be written, fails
+  readiness. No user data is written.
 
 `GET /v1/health` on the public listener is process-only (204, no credential, no
 dependency; protocol.md "Health"). It is for load balancers, not for readiness.

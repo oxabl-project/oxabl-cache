@@ -106,4 +106,11 @@ impl ObjectStore for AnyStore {
             Self::S3(store) => store.list(cache).await,
         }
     }
+
+    async fn check(&self) -> Result<()> {
+        match self {
+            Self::Fs(store) => store.check().await,
+            Self::S3(store) => store.check().await,
+        }
+    }
 }

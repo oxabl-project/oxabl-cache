@@ -7,7 +7,7 @@ use crate::writer::ObjectWriter;
 use oxabl_cache_core::ids::{CacheId, PackId};
 use oxabl_cache_core::ports::ObjectKey;
 use oxabl_cache_core::{Error, Result};
-use std::fs;
+use std::fs::{self, File};
 use std::path::PathBuf;
 
 /// The parts of a request to the object route that its signature covers.
@@ -56,6 +56,28 @@ impl FsStore {
             public_url: public_url.trim_end_matches('/').to_owned(),
             url_keys,
         })
+    }
+
+    /// Fails unless the root is a directory in which a file can be created and removed.
+    pub(crate) fn check_writable(&self) -> Result<()> {
+        let unavailable = |error: &std::io::Error| match io_error(error) {
+            Error::NotFound => Error::unavailable("object store: root is missing"),
+            other => other,
+        };
+        if !fs::metadata(&self.root)
+            .map_err(|e| unavailable(&e))?
+            .is_dir()
+        {
+            return Err(Error::unavailable("object store: root is not a directory"));
+        }
+        let mut name = [0u8; 8];
+        getrandom::fill(&mut name).map_err(|e| Error::internal(format!("randomness: {e}")))?;
+        let probe = tmp_dir(&self.root).join(format!(
+            "ready-{}",
+            oxabl_cache_core::encoding::hex_encode(&name)
+        ));
+        File::create_new(&probe).map_err(|e| unavailable(&e))?;
+        fs::remove_file(&probe).map_err(|e| unavailable(&e))
     }
 
     /// Starts a durable write of one object; used by the object PUT route.
