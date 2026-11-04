@@ -5,7 +5,7 @@ use oxabl_cache_format::pack_header::PACK_HEADER_LEN;
 use oxabl_cache_format::pack_trailer::PACK_TRAILER_LEN;
 use oxabl_cache_format::{
     CacheId, CommitEntry, CommitRequest, CommitSegment, Namespace, PackFooter, PackHeader,
-    PackSegment, SegmentKind,
+    PackSegment, SegmentId, SegmentKind,
 };
 
 use super::seal::Sealed;
@@ -23,6 +23,60 @@ pub(crate) struct BuiltPack {
     pub commit: Bytes,
 }
 
+/// The pack object holding `segments` in order, and its footer.
+fn assemble(
+    cache: CacheId,
+    segments: &[(SegmentId, &[u8])],
+) -> Result<(Vec<u8>, PackFooter), StoreFailure> {
+    let mut object = PackHeader { cache_id: cache }.encode().to_vec();
+    let mut index = Vec::with_capacity(segments.len());
+    for (segment_id, bytes) in segments {
+        index.push(PackSegment {
+            segment_id: *segment_id,
+            offset: object.len() as u64,
+            length: u32::try_from(bytes.len()).map_err(|_| StoreFailure::TooLarge)?,
+        });
+        object.extend_from_slice(bytes);
+    }
+    let footer = PackFooter { segments: index };
+    let trailer = footer
+        .trailer(|bytes| *blake3::hash(bytes).as_bytes())
+        .map_err(|_| StoreFailure::TooLarge)?;
+    object.extend_from_slice(&footer.encode().map_err(|_| StoreFailure::TooLarge)?);
+    object.extend_from_slice(&trailer.encode().map_err(|_| StoreFailure::TooLarge)?);
+    Ok((object, footer))
+}
+
+/// A trusted pack that holds one sealed dictionary segment and names no entry.
+pub(crate) fn build_dictionary(
+    cache: CacheId,
+    segment_id: SegmentId,
+    segment: &[u8],
+) -> Result<BuiltPack, StoreFailure> {
+    let (object, footer) = assemble(cache, &[(segment_id, segment)])?;
+    let commit = CommitRequest {
+        ns: Namespace::Trusted,
+        pack_size: object.len() as u64,
+        segments: footer
+            .segments
+            .iter()
+            .map(|s| CommitSegment {
+                segment_id: s.segment_id,
+                offset: s.offset,
+                length: s.length,
+                kind: SegmentKind::Dictionary,
+            })
+            .collect(),
+        entries: Vec::new(),
+    }
+    .encode()
+    .map_err(|_| StoreFailure::TooLarge)?;
+    Ok(BuiltPack {
+        object: Bytes::from(object),
+        commit: Bytes::from(commit),
+    })
+}
+
 pub(crate) fn build(
     cache: CacheId,
     namespace: Namespace,
@@ -36,22 +90,11 @@ pub(crate) fn build(
     if body + framing(sealed.len()) > PACK_BYTES {
         return Err(StoreFailure::TooLarge);
     }
-    let mut object = PackHeader { cache_id: cache }.encode().to_vec();
-    let mut index = Vec::with_capacity(sealed.len());
-    for s in sealed {
-        index.push(PackSegment {
-            segment_id: s.segment_id,
-            offset: object.len() as u64,
-            length: u32::try_from(s.segment.len()).map_err(|_| StoreFailure::TooLarge)?,
-        });
-        object.extend_from_slice(&s.segment);
-    }
-    let footer = PackFooter { segments: index };
-    let trailer = footer
-        .trailer(|bytes| *blake3::hash(bytes).as_bytes())
-        .map_err(|_| StoreFailure::TooLarge)?;
-    object.extend_from_slice(&footer.encode().map_err(|_| StoreFailure::TooLarge)?);
-    object.extend_from_slice(&trailer.encode().map_err(|_| StoreFailure::TooLarge)?);
+    let segments: Vec<(SegmentId, &[u8])> = sealed
+        .iter()
+        .map(|s| (s.segment_id, s.segment.as_slice()))
+        .collect();
+    let (object, footer) = assemble(cache, &segments)?;
 
     let commit = CommitRequest {
         ns: namespace,

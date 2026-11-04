@@ -2,30 +2,15 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use oxabl_cache_format::Limits;
 use tokio::runtime::Handle;
-use url::Url;
 
 use super::{Cache, Dictionaries, Gates, Inner, open_error, roster, view};
 use crate::api::{Api, http_client};
 use crate::auth::Authenticator;
-use crate::config::{Config, ConfigError};
+use crate::config::{Config, ConfigError, check_server};
 use crate::error::OpenError;
 use crate::progress::Progress;
 use crate::state::StateDirs;
 use crate::stats::Counters;
-
-fn check_server(url: &Url) -> Result<(), ConfigError> {
-    let loopback = match url.host() {
-        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-        Some(url::Host::Domain(name)) => name == "localhost",
-        None => false,
-    };
-    match url.scheme() {
-        "https" => Ok(()),
-        "http" if loopback => Ok(()),
-        _ => Err(ConfigError::InsecureServer),
-    }
-}
 
 pub(super) async fn open(config: Config) -> Result<Cache, OpenError> {
     check_server(&config.server)?;
@@ -37,7 +22,8 @@ pub(super) async fn open(config: Config) -> Result<Cache, OpenError> {
             .await
             .map_err(|_| OpenError::Identity("identity loading failed"))??;
 
-    let http = http_client(config.connections).map_err(|_| OpenError::Unreachable)?;
+    let roots = crate::config::roots::load(config.ca_file.as_deref())?;
+    let http = http_client(config.connections, &roots).map_err(|_| OpenError::Unreachable)?;
     let state = StateDirs::new(config.state_dir.as_deref());
     let server = config.server.as_str().trim_end_matches('/').to_owned();
     let auth = Authenticator::establish(

@@ -5,6 +5,8 @@ mod environment;
 mod error;
 mod owner_key;
 mod repo_file;
+pub(crate) mod roots;
+mod server;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -19,6 +21,8 @@ use crate::mode::Mode;
 
 pub use credentials::{Credentials, IdentitySource};
 pub use error::ConfigError;
+pub(crate) use owner_key::{owner_key_text, parse_owner_key};
+pub(crate) use server::check_server;
 
 use environment::Environment;
 use repo_file::RepoFile;
@@ -50,6 +54,7 @@ pub struct Config {
     pub(crate) identity: IdentitySource,
     pub(crate) passphrase: Option<PassphraseProvider>,
     pub(crate) state_dir: Option<PathBuf>,
+    pub(crate) ca_file: Option<PathBuf>,
     pub(crate) connections: usize,
     pub(crate) zstd_level: i32,
     pub(crate) max_plain_bytes: u64,
@@ -82,6 +87,7 @@ impl Config {
             identity: IdentitySource::Auto,
             passphrase: None,
             state_dir: None,
+            ca_file: None,
             connections: DEFAULT_CONNECTIONS,
             zstd_level: oxabl_cache_crypto::DEFAULT_ZSTD_LEVEL,
             max_plain_bytes: DEFAULT_PLAINTEXT_BYTES,
@@ -128,6 +134,13 @@ impl Config {
     /// Where the roster high-water mark lives instead of `$XDG_STATE_HOME/oxabl-cache`.
     pub fn with_state_dir(mut self, dir: PathBuf) -> Config {
         self.state_dir = Some(dir);
+        self
+    }
+
+    /// A PEM bundle of certificates to trust in addition to the system roots, for a server or an
+    /// identity provider behind a private CA.
+    pub fn with_ca_file(mut self, path: PathBuf) -> Config {
+        self.ca_file = Some(path);
         self
     }
 

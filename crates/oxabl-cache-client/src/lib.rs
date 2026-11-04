@@ -11,26 +11,46 @@ mod auth;
 mod cache;
 mod compile_key;
 mod config;
+mod dictionary;
 mod error;
 mod fetch;
+mod identity;
 mod install;
+mod login;
 mod mode;
+mod owner;
 mod progress;
 mod roster_refresh;
+mod roster_summary;
 mod state;
 mod stats;
+mod status;
 mod store;
 
 pub use artifact_path::{ArtifactPath, PathError};
 pub use cache::{Cache, Presence};
 pub use compile_key::CompileKey;
 pub use config::{Config, ConfigError, Credentials, IdentitySource};
+pub use dictionary::{
+    DictionaryError, DictionaryPublished, MIN_PUBLISH_GAIN, TrainError, Trained, TrainingOptions,
+    train_from_outputs,
+};
 pub use error::{CacheError, IdTokenError, OpenError};
 pub use fetch::{
     Fetch, FetchOptions, FetchOutcome, FetchRequest, InstalledFile, MissReason, Provenance, Tier,
 };
+pub use identity::{
+    Identity, IdentityError, create_identity_file, default_identity_path, open_identity_file,
+    signing_key_hex, signing_key_text, write_identity_secret,
+};
 pub use install::Durability;
+pub use login::{Challenge, DeviceLogin, LoginError, LoginSession, Logout, logout};
 pub use mode::Mode;
-pub use oxabl_cache_crypto::SecretString;
+pub use owner::{InitReport, InitRequest, Owner, OwnerError, Published, Purge, init};
+pub use oxabl_cache_crypto::{ExposeSecret, SecretString};
+pub use oxabl_cache_format::Role;
+pub use roster_summary::{MemberSummary, RosterSummary, role_name};
+pub use state::default_state_dir;
 pub use stats::Stats;
+pub use status::{Quota, ServerStatus, Status};
 pub use store::{ArtifactFileRef, StoreFailure, StoreOutcome, StoreReport, Uploader};

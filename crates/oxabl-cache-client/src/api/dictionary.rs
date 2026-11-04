@@ -1,9 +1,11 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+use bytes::Bytes;
 use oxabl_cache_format::PackId;
+use reqwest::header::CONTENT_TYPE;
 use serde::Deserialize;
 
-use super::{Api, ApiError};
+use super::{Api, ApiError, BINARY};
 use crate::progress::Progress;
 
 const BODY_CAP: usize = 64 * 1024;
@@ -57,5 +59,23 @@ impl Api {
             offset: raw.location.offset,
             length: raw.location.length,
         }))
+    }
+}
+
+impl Api {
+    /// Moves the dictionary pointer from version `current` (0 while there is none) to `pointer`.
+    pub async fn put_dictionary_pointer(
+        &self,
+        current: u64,
+        pointer: &Bytes,
+    ) -> Result<(), ApiError> {
+        self.call(&Progress::new(), |c| {
+            c.put(self.url("/dictionary"))
+                .header("If-Match", format!("\"v{current}\""))
+                .header(CONTENT_TYPE, BINARY)
+                .body(pointer.clone())
+        })
+        .await
+        .map(|_| ())
     }
 }

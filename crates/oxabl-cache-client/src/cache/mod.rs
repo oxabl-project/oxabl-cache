@@ -2,7 +2,7 @@
 
 mod dictionaries;
 mod gates;
-mod identity;
+pub(crate) mod identity;
 mod open;
 mod probe;
 pub(crate) mod roster;

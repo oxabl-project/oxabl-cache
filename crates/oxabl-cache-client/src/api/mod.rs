@@ -6,6 +6,7 @@ mod dictionary;
 mod error;
 mod lookup;
 mod object;
+mod purge;
 mod reports;
 mod roster;
 mod uploads;
@@ -41,15 +42,22 @@ pub(crate) struct Api {
 }
 
 /// An HTTP client for the server and the object store: TLS 1.3, no redirects, no total timeout
-/// so that a slow transfer that keeps moving is never cut off.
-pub(crate) fn http_client(connections: usize) -> Result<Client, reqwest::Error> {
-    Client::builder()
+/// so that a slow transfer that keeps moving is never cut off. `roots` are added to the
+/// system roots.
+pub(crate) fn http_client(
+    connections: usize,
+    roots: &[reqwest::Certificate],
+) -> Result<Client, reqwest::Error> {
+    let mut builder = Client::builder()
         .tls_version_min(reqwest::tls::Version::TLS_1_3)
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(CONNECT_TIMEOUT)
         .read_timeout(READ_TIMEOUT)
-        .pool_max_idle_per_host(connections)
-        .build()
+        .pool_max_idle_per_host(connections);
+    for root in roots {
+        builder = builder.add_root_certificate(root.clone());
+    }
+    builder.build()
 }
 
 #[derive(Deserialize)]

@@ -2,7 +2,7 @@
 
 mod exchange;
 mod github;
-mod id_token;
+pub(crate) mod id_token;
 
 use std::sync::Mutex;
 
@@ -15,7 +15,7 @@ use crate::config::Credentials;
 use crate::error::OpenError;
 use crate::state::StateDirs;
 
-use exchange::Exchange;
+pub(crate) use exchange::Exchange;
 use github::GitHubIssuer;
 
 /// How a session can be obtained again once it expires.
