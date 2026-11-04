@@ -14,7 +14,10 @@ fn readyz_is_503_naming_the_store_while_the_store_root_is_gone() {
         panic!("a local-store scenario ran against a bucket");
     };
     let readyz = || request(&world.server.metrics, "GET", "/readyz", &[], b"");
-    assert_eq!(readyz().status, 200);
+    assert!(
+        wait_until(Duration::from_secs(30), || readyz().status == 200),
+        "the server is ready once it has started"
+    );
 
     fs::remove_dir_all(&root).expect("remove the store root");
     assert!(

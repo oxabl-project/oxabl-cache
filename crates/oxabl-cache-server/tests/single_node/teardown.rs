@@ -19,12 +19,12 @@ const CACHE_TABLES: [&str; 5] = [
 ];
 const WAIT: Duration = Duration::from_secs(60);
 
-/// Short grace and URL lifetime, long leases: a slow machine must not expire what a test still holds.
+/// The grace is the only timer a teardown test waits for; it stays above what a loaded machine
+/// can stall a request for, and the URL lifetime stays below it.
 fn options(grace: &'static str) -> Options {
     Options {
         grace,
-        lease: "60s",
-        url_lifetime: "5s",
+        url_lifetime: "15s",
         ..Options::default()
     }
 }
@@ -38,10 +38,7 @@ fn rows_left(world: &World, party: &Party) -> i64 {
 }
 
 fn objects_left(world: &World, party: &Party, packs: &[String]) -> usize {
-    packs
-        .iter()
-        .filter(|pack| world.server.objects.exists(&party.cache, pack))
-        .count()
+    world.server.objects.present(&party.cache, packs)
 }
 
 fn get_url(party: &Party, keys: &[[u8; 32]]) -> String {
@@ -70,7 +67,7 @@ fn create_named(admin: &crate::support::server::Client, name: &str) -> u16 {
 
 #[test]
 fn a_deleted_cache_is_404_at_once_keeps_its_name_until_teardown_and_leaves_everything_else() {
-    let world = World::start("delete-cache", options("6s"));
+    let world = World::start("delete-cache", options("20s"));
     let doomed = Party::on(&world.tenant, &world.admin, "doomed");
     let sibling = Party::on(&world.tenant, &world.admin, "sibling");
     let stranger = Party::in_new_tenant(&world, "stranger");
@@ -201,7 +198,7 @@ fn a_deleted_cache_is_404_at_once_keeps_its_name_until_teardown_and_leaves_every
 
 #[test]
 fn a_deleted_tenant_loses_its_credentials_at_once_and_its_bytes_and_rows_after_the_grace() {
-    let world = World::start("delete-tenant", options("6s"));
+    let world = World::start("delete-tenant", options("20s"));
     let stranger = Party::in_new_tenant(&world, "stranger");
     let second = Party::on(&stranger.tenant, &stranger.admin, "second");
     let (first_pack, keys) = stranger.publish(&world, 3);
@@ -323,7 +320,8 @@ fn a_crash_in_the_middle_of_a_teardown_resumes_where_it_stopped() {
         "delete-resume",
         Options {
             extra: "batch = 2",
-            ..options("6s")
+            interval: "1s",
+            ..options("20s")
         },
     );
     let doomed = Party::on(&world.tenant, &world.admin, "doomed");

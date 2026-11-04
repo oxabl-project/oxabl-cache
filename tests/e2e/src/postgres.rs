@@ -52,18 +52,23 @@ impl Postgres {
         static SHARED: OnceLock<Result<Postgres, String>> = OnceLock::new();
         SHARED
             .get_or_init(|| {
-                keeper::run("postgres-shared", || wait::retry(3, Postgres::launch))
+                keeper::run("postgres-shared", Postgres::launch)
                     .map_err(|error| format!("{error:#}"))
             })
             .as_ref()
             .unwrap_or_else(|error| panic!("postgres failed to start: {error}"))
     }
 
-    /// Runs `initdb` and starts the cluster on a free loopback port.
+    /// Runs `initdb` and starts the cluster on a free loopback port, trying again on a new port
+    /// when another process took it first.
     ///
     /// The socket directory is the test directory, whose path can exceed the Unix socket limit,
     /// so Unix sockets are disabled and clients use TCP.
     pub fn launch() -> Result<Self> {
+        wait::retry(3, Self::launch_once)
+    }
+
+    fn launch_once() -> Result<Self> {
         let dir = TestDir::new("postgres")?;
         let port = ports::free_port();
         let data = dir.path().join("data");

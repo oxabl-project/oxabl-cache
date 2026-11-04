@@ -3,6 +3,8 @@
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use nix::sys::signal::{Signal, killpg};
@@ -49,9 +51,19 @@ impl Supervised {
     }
 }
 
+/// The longest a killed group may take to disappear.
+const GROUP_EXIT: Duration = Duration::from_secs(30);
+
 impl Drop for Supervised {
+    /// Kills the process group and waits until no member is left, so a restart on the same data
+    /// directory cannot meet a dying member that still holds its shared memory.
     fn drop(&mut self) {
-        let _ = killpg(Pid::from_raw(self.child.id() as i32), Signal::SIGKILL);
+        let group = Pid::from_raw(self.child.id() as i32);
+        let _ = killpg(group, Signal::SIGKILL);
         let _ = self.child.wait();
+        let deadline = Instant::now() + GROUP_EXIT;
+        while killpg(group, None).is_ok() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 }

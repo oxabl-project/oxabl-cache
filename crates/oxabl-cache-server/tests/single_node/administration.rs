@@ -1,12 +1,13 @@
 //! Tenant and operator administration over HTTP.
 
-use crate::support::fixture::{World, create_cache, owner_key};
+use crate::support::fixture::{World, create_cache, owner_key, wait_until};
 use crate::support::frames::{self, Entry};
 use crate::support::http::request;
 use crate::support::server::Options;
 use oxabl_cache_format as format;
 use serde_json::json;
 use std::process::Command;
+use std::time::Duration;
 
 fn current_month() -> String {
     let output = Command::new("date")
@@ -272,8 +273,14 @@ fn operators_manage_tenants_quotas_health_and_export_usage() {
     );
     assert_eq!(unknown.status, 404);
 
-    let health = server.admin_call("GET", "/admin/v1/health", None);
-    assert_eq!(health.status, 200);
+    let mut health = server.admin_call("GET", "/admin/v1/health", None);
+    assert!(
+        wait_until(Duration::from_secs(30), || {
+            health = server.admin_call("GET", "/admin/v1/health", None);
+            health.status == 200
+        }),
+        "the health report answers 200 once the server has started"
+    );
     assert_eq!(health.json()["gc_leader"], true);
     assert_eq!(health.json()["metadata"], "ok");
 

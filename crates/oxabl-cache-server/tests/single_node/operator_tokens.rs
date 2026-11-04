@@ -31,7 +31,7 @@ fn a_revoked_operator_token_is_401_at_once_and_the_last_valid_one_is_kept() {
     let second = created.json()["token"].as_str().expect("token").to_owned();
     let second_id = created.json()["id"].as_str().expect("id").to_owned();
     let by = |token: &str, method: &str, path: &str| call(&server.admin, token, method, path, None);
-    assert_eq!(by(&second, "GET", "/admin/v1/health").status, 200);
+    assert_eq!(by(&second, "GET", "/admin/v1/operator-tokens").status, 200);
 
     let revoked = by(
         &second,
@@ -40,7 +40,7 @@ fn a_revoked_operator_token_is_401_at_once_and_the_last_valid_one_is_kept() {
     );
     assert_eq!(revoked.status, 204);
     assert_eq!(
-        by(&first, "GET", "/admin/v1/health").status,
+        by(&first, "GET", "/admin/v1/operator-tokens").status,
         401,
         "the revoked token is refused on its next call"
     );
@@ -61,7 +61,7 @@ fn a_revoked_operator_token_is_401_at_once_and_the_last_valid_one_is_kept() {
     );
     assert_eq!(last.status, 409);
     assert_eq!(last.json()["error"]["reason"], "last_operator_token");
-    assert_eq!(by(&second, "GET", "/admin/v1/health").status, 200);
+    assert_eq!(by(&second, "GET", "/admin/v1/operator-tokens").status, 200);
 
     let tenant_token = world.admin.token.clone();
     assert_eq!(

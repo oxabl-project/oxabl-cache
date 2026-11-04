@@ -19,7 +19,13 @@ fn swept_after_the_lease(world: &World, client: &Client) -> bool {
 
 #[test]
 fn only_one_node_collects_garbage_and_another_takes_over_when_it_dies() {
-    let world = World::start("gc-leader", Options::default());
+    let world = World::start(
+        "gc-leader",
+        Options {
+            lease: "12s",
+            ..Options::default()
+        },
+    );
     let mut node_b = Node::start(&world, "b");
     let (a_metrics, b_metrics) = (world.server.metrics.clone(), node_b.metrics.clone());
     assert!(
