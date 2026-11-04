@@ -1,5 +1,5 @@
-//! Secrets come from a terminal or a file named by a flag, never from arguments or the
-//! environment.
+//! Secrets come from a terminal, a file named by a flag or the `OXABL_CACHE_*` variables the
+//! library reads, never from arguments.
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -13,23 +13,14 @@ use zeroize::Zeroizing;
 use crate::failure::Failure;
 
 const MAX_FILE_BYTES: u64 = 4096;
-const SECRET_VARIABLES: [(&str, &str); 3] = [
-    ("OXABL_CACHE_TOKEN", "--token-file"),
-    ("OXABL_CACHE_IDENTITY", "--identity-file"),
-    ("OXABL_CACHE_IDENTITY_PASSPHRASE", "--passphrase-file"),
-];
+const PASSPHRASE_VARIABLE: &str = "OXABL_CACHE_IDENTITY_PASSPHRASE";
 
-/// Refuses to run while a secret sits in the environment, where child processes and process
-/// listings expose it.
-pub fn refuse_environment_secrets() -> Result<(), Failure> {
-    for (name, flag) in SECRET_VARIABLES {
-        if std::env::var_os(name).is_some_and(|v| !v.is_empty()) {
-            return Err(Failure::usage(format!(
-                "{name} is set: secrets are read from the terminal or from a file ({flag}), never from the environment"
-            )));
-        }
-    }
-    Ok(())
+/// The identity file's passphrase from the environment, if set and not empty.
+pub fn environment_passphrase() -> Option<SecretString> {
+    std::env::var(PASSPHRASE_VARIABLE)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(SecretString::from)
 }
 
 /// The content of a secret file: a regular file of at most 4 KiB that no group or other user

@@ -510,18 +510,26 @@ not by a registered owner key.
 
 ### Secrets
 
-Passphrases and tokens come from the controlling terminal (echo off) or from a file named by
-a flag: `--passphrase-file`, `--token-file`. Such a file is a regular file of at most 4 KiB
-with no group or other permission bit; anything else is a usage error. They are never
-arguments. The command line refuses to run while `OXABL_CACHE_TOKEN`, `OXABL_CACHE_IDENTITY`
-or `OXABL_CACHE_IDENTITY_PASSPHRASE` is set, naming the flag to use, and without a terminal
-or a passphrase file it fails instead of waiting. The library still reads those variables for
-CI jobs (above). Identities are unlocked from files only. A command prints no passphrase,
-token, session or identity string; `identity new --secret-out` is the only way an identity
-string leaves the process, into a mode 0600 file.
+A secret comes from a file named by a flag, from the environment variable the library reads for
+it, or for a passphrase from the controlling terminal (echo off). The first that is present wins
+and a named file is never replaced by a variable:
 
-Credentials: `--token-file`, else the stored login session, else a CI system's ID token as
-in "Configuration".
+| Secret | Flag, then | Then | Last |
+| --- | --- | --- | --- |
+| Server credential | `--token-file` | `OXABL_CACHE_TOKEN` | a CI system's ID token and the stored login session, as in "Configuration" |
+| Identity | `--identity-file` | the identity string in `OXABL_CACHE_IDENTITY` | the default identity file (`OXABL_CACHE_IDENTITY_FILE`, else `$XDG_CONFIG_HOME/oxabl-cache/identity`) |
+| Identity file passphrase | `--passphrase-file` | `OXABL_CACHE_IDENTITY_PASSPHRASE` | the terminal; without one the command fails instead of waiting |
+
+So a CI job that sets `OXABL_CACHE_TOKEN` and `OXABL_CACHE_IDENTITY` for `oxabl build` runs
+`oxabl-cache dict train --publish` the same way. An identity string needs no passphrase. `init`
+and `owner add` take an identity file only: an owner's key is not a job secret.
+
+A secret file is a regular file of at most 4 KiB with no group or other permission bit; anything
+else is a usage error. No flag takes a secret as its value: the flags that name secrets end in
+`-file`, and a secret in the arguments is an unknown argument (exit 2). A command prints no
+passphrase, token, session or identity string, in text or JSON, nor in an error, and a secret
+from the environment is never logged; `identity new --secret-out` is the only way an identity
+string leaves the process, into a mode 0600 file.
 
 ### Owners
 

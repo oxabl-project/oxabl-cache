@@ -5,6 +5,7 @@ mod support;
 
 mod dictionary;
 mod entries;
+mod environment;
 mod flow;
 mod login;
 mod owners;
