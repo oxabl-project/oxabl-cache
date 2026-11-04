@@ -1,0 +1,23 @@
+[package]
+name = "oxabl-cache-core-behaviour"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Behaviour suite of the core use cases, run against each metadata backend."
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+oxabl-cache-core.workspace = true
+oxabl-cache-e2e.workspace = true
+oxabl-cache-format.workspace = true
+oxabl-cache-meta-postgres.workspace = true
+oxabl-cache-meta-sqlite.workspace = true
+oxabl-cache-store-fs.workspace = true
+blake3.workspace = true
+ed25519-dalek.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

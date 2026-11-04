@@ -2048,13 +2048,23 @@ dependencies = [
  "blake3",
  "ed25519-dalek",
  "getrandom 0.4.3",
+ "oxabl-cache-format",
+ "sha2 0.11.1",
+ "subtle",
+]
+
+[[package]]
+name = "oxabl-cache-core-behaviour"
+version = "0.0.0"
+dependencies = [
+ "blake3",
+ "ed25519-dalek",
+ "oxabl-cache-core",
  "oxabl-cache-e2e",
  "oxabl-cache-format",
  "oxabl-cache-meta-postgres",
  "oxabl-cache-meta-sqlite",
  "oxabl-cache-store-fs",
- "sha2 0.11.1",
- "subtle",
  "tokio",
 ]
 
