@@ -7,11 +7,25 @@
   "packages": {
     "crates/oxabl-cache-format": {
       "release-type": "rust",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "/scripts/gate-fixture/Cargo.lock",
+          "jsonpath": "$.package[?(@.name.value=='oxabl-cache-format')].version"
+        }
+      ]
     },
     "crates/oxabl-cache-crypto": {
       "release-type": "rust",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "/scripts/gate-fixture/Cargo.lock",
+          "jsonpath": "$.package[?(@.name.value=='oxabl-cache-crypto')].version"
+        }
+      ]
     },
     "crates/oxabl-cache-client": {
       "release-type": "rust",

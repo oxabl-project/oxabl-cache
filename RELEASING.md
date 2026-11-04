@@ -16,6 +16,8 @@ release-please's `cargo-workspace` plugin reads every workspace member, so:
 - the unpublished crates are in the config with `skip-github-release` and `skip-changelog`: their versions move with their dependencies, but they get no tag, release or changelog;
 - the dependency graph has no cycle, dev-dependencies included. A suite that needs a crate and the crates built on it lives in its own test crate, as `tests/core-behaviour` does.
 
+The gate fixture (`scripts/gate-fixture`) is a separate workspace with its own lock file. Its entries for format and crypto are `extra-files` of those packages, so a release bumps them too. release-please parses TOML values as `{value: ...}`, so a filter compares `@.name.value`.
+
 `scripts/check-release-graph.sh` checks all three on every PR (CI job `dependency-gate`).
 
 ## Versions
