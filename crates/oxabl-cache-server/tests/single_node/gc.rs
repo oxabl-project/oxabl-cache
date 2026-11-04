@@ -8,10 +8,17 @@ use std::time::Duration;
 
 const TRUSTED: format::Namespace = format::Namespace::Trusted;
 const WAIT: Duration = Duration::from_secs(30);
+const GRACE_WAIT: Duration = Duration::from_secs(60);
 
 #[test]
 fn an_uncommitted_pack_is_swept_after_its_lease_and_its_reservation_is_released() {
-    let world = World::start("lease-sweep", Options::default());
+    let world = World::start(
+        "lease-sweep",
+        Options {
+            lease: "12s",
+            ..Options::default()
+        },
+    );
     let pack = frames::pack(world.cache_bytes, &[4_000]);
     let slot = world
         .reserve_bytes(&world.ci, "trusted", &pack.bytes)
@@ -47,7 +54,14 @@ fn an_uncommitted_pack_is_swept_after_its_lease_and_its_reservation_is_released(
 
 #[test]
 fn compaction_moves_live_segments_and_lookups_keep_returning_the_same_bytes() {
-    let world = World::start("compaction", Options::default());
+    let world = World::start(
+        "compaction",
+        Options {
+            grace: "16s",
+            url_lifetime: "15s",
+            ..Options::default()
+        },
+    );
     let sizes = [1_100_000; 4];
     let keys: Vec<[u8; 32]> = (0..5).map(|_| frames::lookup_id()).collect();
 
@@ -101,7 +115,7 @@ fn compaction_moves_live_segments_and_lookups_keep_returning_the_same_bytes() {
         assert_eq!(world.get_object(&url, Some(&range)).body, first.contents[n]);
     }
     assert!(
-        wait_until(WAIT, || !world.object_exists(&old_pack)),
+        wait_until(GRACE_WAIT, || !world.object_exists(&old_pack)),
         "the emptied pack is deleted after the grace"
     );
     assert!(world.object_exists(&pack));

@@ -14,11 +14,14 @@ and the storage attacks below use it, so it also checks the spec.
 
 - **Server under test.** The harness builds `oxabl-cache-server` once
   (`cargo build -p oxabl-cache-server --locked`) and starts it per test with a generated
-  config: `listen = 127.0.0.1:0`, short timers (grace 2 s, lease 2 s, GC interval
-  200 ms, URL lifetime 5 s), and a fresh data directory under
-  `target/e2e-tmp/<test>-<pid>/`. It reads the bound address from the server's
-  `{"ready": …}` stdout line. The timers are plain configuration; the server has no
-  test hooks.
+  config: `listen = 127.0.0.1:0`, a GC interval of 200 ms, timers a loaded machine
+  cannot outrun (lease 60 s, URL lifetime 30 s, grace 35 s), and a fresh data
+  directory under `target/e2e-tmp/<test>-<pid>/`. It reads the bound address from the
+  server's `{"ready": …}` stdout line. The timers are plain configuration; the server
+  has no test hooks. A test that waits for an expiry shortens that one timer and
+  waits on the event (the object gone, the row gone), never on a sleep. Even
+  a shortened timer stays above the seconds a request can stall under load (the
+  lease-expiry tests use 12 s).
 - **Backends and targets.** Each scenario file is written once and included by
   `#[path]` into one test target per backend; a `BACKEND` constant selects the
   backend.
@@ -103,8 +106,10 @@ and the storage attacks below use it, so it also checks the spec.
   test and S3 signatures stay inside the store's skew window. This fakes the
   environment's time; the server has no clock hook.
 - **No Docker.** Every dependency is a child process in its own process group, with
-  `PR_SET_PDEATHSIG`, killed on drop. The harness never lists, stops or creates
-  containers, so it cannot touch anyone else's.
+  `PR_SET_PDEATHSIG`, killed on drop. The drop returns only once the whole group has
+  exited, so a restart on the same data directory cannot meet a dying member. A cluster
+  that loses the race for its port to another process starts again on a new one. The
+  harness never lists, stops or creates containers, so it cannot touch anyone else's.
 - **Fixtures.** A generator makes synthetic artifact sets that look like r-code (a
   binary header, a string table, sizes log-uniform from 4 KB to 7 MB). Every file and
   path embeds a unique random canary. No Progress runtime is needed.

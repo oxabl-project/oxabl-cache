@@ -12,6 +12,8 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+/// The timers default to values a loaded machine cannot outrun; a test that waits for an
+/// expiry shortens its own.
 pub struct Options {
     pub grace: &'static str,
     pub lease: &'static str,
@@ -19,8 +21,6 @@ pub struct Options {
     pub url_lifetime: &'static str,
     pub shutdown_timeout: &'static str,
     pub extra: &'static str,
-    /// Lines added to the `[metadata]` section.
-    pub metadata_extra: &'static str,
     pub tls: bool,
     /// Replaces the generated `[metadata] url`.
     pub metadata_url: Option<String>,
@@ -31,13 +31,12 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
-            grace: "6s",
-            lease: "2s",
+            grace: "35s",
+            lease: "60s",
             interval: "200ms",
-            url_lifetime: "5s",
+            url_lifetime: "30s",
             shutdown_timeout: "1s",
             extra: "",
-            metadata_extra: "",
             tls: false,
             metadata_url: None,
             frozen_clock: false,
@@ -67,13 +66,12 @@ fn config_text(dir: &Path, metadata_url: &str, objects: &Objects, options: &Opti
     format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nadmin_listen = \"127.0.0.1:0\"\n\
          metrics_listen = \"127.0.0.1:0\"\nurl_lifetime = \"{}\"\nshutdown_timeout = \"{}\"\n\
-         [metadata]\nurl = \"{metadata_url}\"\n{}\n\
+         [metadata]\nurl = \"{metadata_url}\"\n\
          {store}\
          [keys]\nurl_key_file = \"{dir}/url.key\"\n\
          [gc]\ngrace = \"{}\"\nlease = \"{}\"\ninterval = \"{}\"\n{}\n",
         options.url_lifetime,
         options.shutdown_timeout,
-        options.metadata_extra,
         options.grace,
         options.lease,
         options.interval,

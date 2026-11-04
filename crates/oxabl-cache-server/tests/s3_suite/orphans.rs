@@ -13,6 +13,7 @@ fn the_orphan_scan_deletes_an_object_with_no_pack_row_and_keeps_everything_else(
     let world = World::start(
         "s3-orphans",
         Options {
+            lease: "12s",
             extra: "orphan_scan = \"1s\"",
             ..Options::default()
         },
@@ -30,7 +31,7 @@ fn the_orphan_scan_deletes_an_object_with_no_pack_row_and_keeps_everything_else(
     }
 
     assert!(
-        wait_until(Duration::from_secs(40), || !world
+        wait_until(Duration::from_secs(60), || !world
             .bucket_keys(&orphan_key)
             .contains(&orphan_key)),
         "the orphan is deleted once it is older than twice the lease"

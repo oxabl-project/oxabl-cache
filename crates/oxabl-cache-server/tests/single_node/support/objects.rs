@@ -94,6 +94,21 @@ impl Objects {
         }
     }
 
+    /// How many of `packs` are stored. On a bucket it is one listing, so the count is a single
+    /// snapshot even while the server deletes.
+    pub fn present(&self, cache: &str, packs: &[String]) -> usize {
+        match self {
+            Self::Fs { .. } => packs.iter().filter(|pack| self.exists(cache, pack)).count(),
+            Self::S3 { bucket } => {
+                let keys = block_on(bucket.list(&format!("v1/{cache}/"))).expect("list");
+                packs
+                    .iter()
+                    .filter(|pack| keys.contains(&Self::key(cache, pack)))
+                    .count()
+            }
+        }
+    }
+
     pub fn read(&self, cache: &str, pack: &str) -> Vec<u8> {
         match self {
             Self::Fs { root } => fs::read(Self::fs_path(root, cache, pack)).expect("object"),

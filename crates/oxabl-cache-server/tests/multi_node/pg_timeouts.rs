@@ -6,25 +6,40 @@ use crate::support::fixture::{World, wait_until};
 use crate::support::server::Options;
 use oxabl_cache_e2e::fault_proxy::{Direction, Fault, FaultProxy};
 use oxabl_cache_e2e::postgres::Postgres;
+use std::fs;
 use std::time::{Duration, Instant};
 
 fn info_status(world: &World) -> u16 {
     world.reader.json("GET", &world.path(""), None).status
 }
 
+/// Adds `setting` to the `[metadata]` section and restarts the server on it, so the setup
+/// before it runs without the setting.
+fn restart_with_metadata(world: &mut World, setting: &str) {
+    let config = world.server.dir.join("server.toml");
+    let text = fs::read_to_string(&config).expect("config");
+    let text = text.replacen("[metadata]\n", &format!("[metadata]\n{setting}\n"), 1);
+    fs::write(&config, text).expect("config");
+    world.server.restart();
+    world.reconnect();
+}
+
 #[test]
 fn a_statement_stuck_on_a_lock_is_cancelled_after_the_configured_statement_timeout() {
     let database = new_database();
     let direct = format!("{}?sslmode=disable", database.url());
-    let world = World::start(
+    let mut world = World::start(
         "pg-statement-timeout",
         Options {
             metadata_url: Some(direct.clone()),
-            metadata_extra: "statement_timeout = \"1s\"",
             ..Options::default()
         },
     );
-    assert_eq!(info_status(&world), 200);
+    restart_with_metadata(&mut world, "statement_timeout = \"1s\"");
+    assert!(
+        wait_until(Duration::from_secs(30), || info_status(&world) == 200),
+        "the server answers under the statement timeout"
+    );
 
     let holder = {
         let url = direct.clone();
@@ -85,15 +100,18 @@ fn a_session_left_idle_in_a_transaction_is_ended_after_the_configured_timeout() 
         proxy.addr().port(),
         database.name
     );
-    let world = World::start(
+    let mut world = World::start(
         "pg-idle-timeout",
         Options {
             metadata_url: Some(through_proxy),
-            metadata_extra: "idle_in_transaction_timeout = \"1s\"",
             ..Options::default()
         },
     );
-    assert_eq!(info_status(&world), 200);
+    restart_with_metadata(&mut world, "idle_in_transaction_timeout = \"1s\"");
+    assert!(
+        wait_until(Duration::from_secs(30), || info_status(&world) == 200),
+        "the server answers under the idle-in-transaction timeout"
+    );
 
     proxy.set(Direction::Reply, Fault::Delay(Duration::from_secs(4)));
     assert_eq!(
