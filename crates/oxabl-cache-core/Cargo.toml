@@ -18,10 +18,3 @@ ed25519-dalek.workspace = true
 getrandom.workspace = true
 sha2.workspace = true
 subtle.workspace = true
-
-[dev-dependencies]
-oxabl-cache-e2e.workspace = true
-oxabl-cache-meta-postgres.workspace = true
-oxabl-cache-meta-sqlite.workspace = true
-oxabl-cache-store-fs.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

@@ -38,7 +38,8 @@ and the storage attacks below use it, so it also checks the spec.
   Each Postgres target has a guard test that fails when a module of its SQLite
   target is missing. `single_node_postgres` also reads `schema_migrations` from the
   database in the server's configuration, so a target that quietly ran on SQLite
-  goes red. The core `behaviour` suite picks its database from
+  goes red. The core `behaviour` suite (crate `tests/core-behaviour`, so core has no
+  dev-dependency on its adapters) picks its database from
   `OXABL_CACHE_TEST_BACKEND` (`sqlite` by default, or `postgres`).
   `oxabl-cache-meta-postgres` has its own port-level tests:
   - a scope matrix of which scopes overlap and which serialise, with a

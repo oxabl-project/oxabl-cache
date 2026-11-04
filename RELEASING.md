@@ -8,7 +8,15 @@ Three library crates are published to crates.io so that oxabl can depend on them
 | `oxabl-cache-crypto` | Client-side cryptography |
 | `oxabl-cache-client` | Client library used by oxabl |
 
-Every other crate (server, admin, member CLI, stores, metadata, http, oidc, core, e2e) is `publish = false`. The server image and the binaries are not part of this flow.
+Every other crate (server, admin, member CLI, stores, metadata, http, oidc, core and the test crates) is `publish = false`. The server image and the binaries are not part of this flow.
+
+release-please's `cargo-workspace` plugin reads every workspace member, so:
+
+- each crate states a literal `version` (the plugin cannot read `version.workspace = true`);
+- the unpublished crates are in the config with `skip-github-release` and `skip-changelog`: their versions move with their dependencies, but they get no tag, release or changelog;
+- the dependency graph has no cycle, dev-dependencies included. A suite that needs a crate and the crates built on it lives in its own test crate, as `tests/core-behaviour` does.
+
+`scripts/check-release-graph.sh` checks all three on every PR (CI job `dependency-gate`).
 
 ## Versions
 

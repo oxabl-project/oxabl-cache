@@ -55,6 +55,8 @@ jobs:
         run: nix develop --command scripts/check-server-deps.sh
       - name: The gate rejects the fixture that does
         run: nix develop --command scripts/check-gate-fixture.sh
+      - name: release-please can read the workspace
+        run: nix develop --command scripts/check-release-graph.sh
 
   fuzz-smoke:
     name: Fuzz smoke
