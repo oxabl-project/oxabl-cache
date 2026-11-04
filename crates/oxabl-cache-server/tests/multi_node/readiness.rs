@@ -24,7 +24,10 @@ fn readyz_is_503_while_postgres_is_stopped_and_200_after_it_restarts() {
             ..Options::default()
         },
     );
-    assert_eq!(readyz(&world), 200);
+    assert!(
+        wait_until(Duration::from_secs(30), || readyz(&world) == 200),
+        "the server is ready once it has started"
+    );
 
     database.crash();
     assert!(

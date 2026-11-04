@@ -1,16 +1,23 @@
 //! Liveness, readiness and the public health answer.
 
-use crate::support::fixture::World;
+use crate::support::fixture::{World, wait_until};
 use crate::support::http::request;
 use crate::support::server::Options;
 use serde_json::json;
+use std::time::Duration;
 
 #[test]
 fn livez_and_readyz_answer_200_on_the_metrics_listener() {
     let world = World::start("health-probes", Options::default());
     for path in ["/livez", "/readyz"] {
-        let answer = request(&world.server.metrics, "GET", path, &[], b"");
-        assert_eq!(answer.status, 200, "{path}");
+        let mut answer = request(&world.server.metrics, "GET", path, &[], b"");
+        assert!(
+            wait_until(Duration::from_secs(30), || {
+                answer = request(&world.server.metrics, "GET", path, &[], b"");
+                answer.status == 200
+            }),
+            "{path} answers 200 once the server has started"
+        );
         assert!(answer.body.is_empty(), "{path}");
     }
 }

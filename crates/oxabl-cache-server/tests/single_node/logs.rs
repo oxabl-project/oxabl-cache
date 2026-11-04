@@ -1,10 +1,11 @@
 //! What the server writes to stderr and exposes as metrics.
 
-use crate::support::fixture::World;
+use crate::support::fixture::{World, wait_until};
 use crate::support::frames::{self, Entry};
 use crate::support::server::Options;
 use oxabl_cache_format as format;
 use serde_json::Value;
+use std::time::Duration;
 
 #[test]
 fn logs_never_carry_tokens_signatures_query_strings_or_lookup_ids() {
@@ -120,10 +121,8 @@ fn the_metrics_endpoint_exposes_request_lookup_and_commit_series() {
         &[Entry::new(key, 0)],
     );
     world.fetch(&world.reader, &[key, frames::lookup_id()]);
-    std::thread::sleep(std::time::Duration::from_millis(600));
 
-    let page = world.server.metrics_text();
-    for series in [
+    let series = [
         "oxabl_cache_http_requests_total{route=\"/v1/caches/{cache}/lookup\",status=\"200\"} 1",
         "oxabl_cache_lookup_ids_total{result=\"hit\"} 1",
         "oxabl_cache_lookup_ids_total{result=\"miss\"} 1",
@@ -132,7 +131,13 @@ fn the_metrics_endpoint_exposes_request_lookup_and_commit_series() {
         "# TYPE oxabl_cache_http_request_seconds histogram",
         "oxabl_cache_metadata_query_seconds_count",
         "oxabl_cache_pack_bytes{state=\"live\"} 4000",
-    ] {
-        assert!(page.contains(series), "missing `{series}` in:\n{page}");
-    }
+    ];
+    let mut page = String::new();
+    assert!(
+        wait_until(Duration::from_secs(30), || {
+            page = world.server.metrics_text();
+            series.iter().all(|series| page.contains(series))
+        }),
+        "missing a series of {series:?} in:\n{page}"
+    );
 }
