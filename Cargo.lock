@@ -1984,7 +1984,7 @@ checksum = "7e036b411754132fd6b74e94b74e9a13c5cf606fa93d1885c35860d3060820b1"
 
 [[package]]
 name = "oxabl-cache-admin"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "clap",
  "ed25519-dalek",
@@ -1998,7 +1998,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "blake3",
  "clap",
@@ -2014,7 +2014,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -2043,7 +2043,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "blake3",
  "ed25519-dalek",
@@ -2055,7 +2055,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-core-behaviour"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "blake3",
  "ed25519-dalek",
@@ -2070,7 +2070,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-crypto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "age",
  "aws-lc-rs",
@@ -2085,7 +2085,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-e2e"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
@@ -2104,14 +2104,14 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-format"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
 ]
 
 [[package]]
 name = "oxabl-cache-http"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2130,7 +2130,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-meta-postgres"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "blake3",
  "bytes",
@@ -2145,7 +2145,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-meta-sqlite"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "oxabl-cache-core",
  "rusqlite",
@@ -2154,7 +2154,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-oidc"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "aws-lc-rs",
  "base64 0.22.1",
@@ -2173,7 +2173,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-server"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2205,7 +2205,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-store-fs"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "getrandom 0.4.3",
  "hmac 0.13.0",
@@ -2217,7 +2217,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-store-s3"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.4.3",
