@@ -1,12 +1,15 @@
 [package]
 name = "oxabl-cache-format"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-publish.workspace = true
-description = "Byte formats: magic, versions, encode and decode, size limits. Handles no keys."
+description = "Byte formats for the oxabl-cache remote compile cache: frames, ids, limits."
+readme = "README.md"
+keywords = ["oxabl", "abl", "cache", "format"]
+categories = ["development-tools::build-utils"]
+exclude = ["tests/", "examples/"]
 
 [lints]
 workspace = true

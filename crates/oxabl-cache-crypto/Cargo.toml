@@ -1,18 +1,21 @@
 [package]
 name = "oxabl-cache-crypto"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-publish.workspace = true
-description = "Client-only cryptography: key hierarchy, lookup ids, seal and open, signatures, roster."
+description = "Client-side cryptography for the oxabl-cache remote compile cache: key hierarchy, seal and open, signatures."
+readme = "README.md"
+keywords = ["oxabl", "abl", "cache", "encryption"]
+categories = ["development-tools::build-utils"]
+exclude = ["tests/", "examples/"]
 
 [lints]
 workspace = true
 
 [dependencies]
-oxabl-cache-format.workspace = true
+oxabl-cache-format = { path = "../oxabl-cache-format", version = "0.1.0" }
 age.workspace = true
 aws-lc-rs.workspace = true
 blake3.workspace = true

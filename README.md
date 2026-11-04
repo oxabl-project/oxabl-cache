@@ -10,7 +10,7 @@ S3-compatible object store.
 
 Design: [architecture](docs/architecture.md), [security](docs/security.md),
 [protocol](docs/protocol.md), [client](docs/client.md),
-[operations](docs/operations.md), [testing](docs/testing.md), [decisions](docs/adr/).
+[operations](docs/operations.md), [testing](docs/testing.md), [decisions](docs/adr/), [releasing](RELEASING.md).
 
 ## Deploy
 

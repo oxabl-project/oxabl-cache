@@ -1,19 +1,22 @@
 [package]
 name = "oxabl-cache-client"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-publish.workspace = true
-description = "Public client library used by oxabl."
+description = "Client library for the oxabl-cache end-to-end encrypted remote compile cache."
+readme = "README.md"
+keywords = ["oxabl", "abl", "cache", "build"]
+categories = ["development-tools::build-utils"]
+exclude = ["tests/", "examples/"]
 
 [lints]
 workspace = true
 
 [dependencies]
-oxabl-cache-crypto.workspace = true
-oxabl-cache-format.workspace = true
+oxabl-cache-crypto = { path = "../oxabl-cache-crypto", version = "0.1.0" }
+oxabl-cache-format = { path = "../oxabl-cache-format", version = "0.1.0" }
 base64.workspace = true
 bytes.workspace = true
 blake3.workspace = true
