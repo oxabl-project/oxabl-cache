@@ -14,6 +14,7 @@ pub mod ports;
 pub mod postgres;
 pub mod random;
 pub mod s3;
+pub mod session;
 pub mod supervise;
 pub mod versitygw;
 pub mod wait;
