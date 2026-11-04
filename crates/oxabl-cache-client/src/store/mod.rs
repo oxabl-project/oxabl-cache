@@ -1,9 +1,9 @@
 //! Storing: lazy verified reads, sealing, packing, upload and commit.
 
 mod dictionary;
-mod pack_build;
+pub(crate) mod pack_build;
 mod packer;
-mod publish;
+pub(crate) mod publish;
 mod read_files;
 mod seal;
 mod shared;

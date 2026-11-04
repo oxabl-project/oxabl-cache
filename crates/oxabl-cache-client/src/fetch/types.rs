@@ -75,7 +75,6 @@ impl From<CryptoProvenance> for Provenance {
 
 /// Why a key is a miss.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum MissReason {
     /// The cache has no entry for the key.
     NotFound,

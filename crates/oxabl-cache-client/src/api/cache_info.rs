@@ -2,6 +2,7 @@ use serde::Deserialize;
 
 use super::{Api, ApiError};
 use crate::progress::Progress;
+use crate::status::Quota;
 
 const BODY_CAP: usize = 64 * 1024;
 
@@ -11,10 +12,14 @@ struct Store {
     checksum_sha256: bool,
 }
 
-/// What `GET /v1/caches/{cache}` says that the client acts on.
+/// What `GET /v1/caches/{cache}` says that the client acts on or reports.
 #[derive(Deserialize)]
 pub(crate) struct CacheInfo {
     store: Store,
+    pub epoch: u32,
+    pub roster_version: u64,
+    pub dictionary_version: u64,
+    pub quota: Quota,
 }
 
 impl CacheInfo {

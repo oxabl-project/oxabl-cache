@@ -2000,7 +2000,16 @@ dependencies = [
 name = "oxabl-cache-cli"
 version = "0.0.0"
 dependencies = [
+ "blake3",
+ "clap",
+ "getrandom 0.4.3",
+ "nix",
  "oxabl-cache-client",
+ "oxabl-cache-e2e",
+ "serde_json",
+ "tokio",
+ "url",
+ "zeroize",
 ]
 
 [[package]]
@@ -2029,6 +2038,7 @@ dependencies = [
  "tracing",
  "url",
  "zeroize",
+ "zstd",
 ]
 
 [[package]]
@@ -2628,6 +2638,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",

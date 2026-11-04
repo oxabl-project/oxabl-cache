@@ -21,6 +21,11 @@ fn root(override_dir: Option<&Path>) -> Option<PathBuf> {
     Some(base.join("oxabl-cache"))
 }
 
+/// `$XDG_STATE_HOME/oxabl-cache`, or `~/.local/state/oxabl-cache`.
+pub fn default_state_dir() -> Option<PathBuf> {
+    root(None)
+}
+
 /// The state directories of one client.
 #[derive(Debug, Clone)]
 pub(crate) struct StateDirs {

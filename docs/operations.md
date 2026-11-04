@@ -200,8 +200,7 @@ Subcommands:
 - **Customer keys** are never backed up by the operator. Customers must keep at least
   two owner identities (for example one offline). If every owner identity is lost,
   the roster can no longer change: create a new cache, set new `owner_keys`, and
-  start cold. The CLI keeps a copy of the last roster so an owner can re-publish it
-  after a server restore.
+  start cold.
 
 ## Observability
 

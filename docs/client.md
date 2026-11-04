@@ -58,6 +58,8 @@ impl Config {
     pub fn with_max_plain_bytes(self, bytes: u64) -> Config;
     /// Replaces `$XDG_STATE_HOME/oxabl-cache` (per-cache state and stored sessions).
     pub fn with_state_dir(self, dir: std::path::PathBuf) -> Config;
+    /// A PEM bundle trusted in addition to the system roots (a private CA).
+    pub fn with_ca_file(self, path: std::path::PathBuf) -> Config;
     /// Supplies the passphrase of an identity file; `None` from the callback is an error.
     pub fn with_passphrase(self, ask: impl Fn() -> Option<SecretString> + Send + Sync + 'static) -> Config;
 }
@@ -85,6 +87,10 @@ impl Cache {
 
     pub fn mode(&self) -> Mode;
     pub fn stats(&self) -> Stats;
+    /// The mode, the member, the verified roster and the server's epoch, dictionary and quota.
+    pub async fn status(&self) -> Result<Status, CacheError>;
+    /// Seals `dictionary`, commits it and moves the pointer; a `ci` member in `ci` mode only.
+    pub async fn publish_dictionary(&self, dictionary: &[u8]) -> Result<DictionaryPublished, DictionaryError>;
 }
 
 pub enum Presence { Hit, Miss }
@@ -165,7 +171,23 @@ pub enum StoreOutcome {
 pub enum StoreFailure { Rejected, TooLarge, Unreadable, QuotaExceeded, Unavailable }
 ```
 
+The command line uses the rest of the public API, which oxabl does not need:
+
+- `Owner::open(config)` opens the cache as an owner whose signing key the repository pins, and
+  `add_member`, `remove_member`, `rotate`, `add_owner` and `remove_owner` publish the next roster
+  (signed, checked against the pins, sent as `current + 1`), returning `Published`. `init(request)`
+  publishes the first roster.
+- `DeviceLogin::new(&config, issuer, client_id)` with `begin` and `finish`, and `logout(&config)`,
+  for the device grant and the stored session.
+- `create_identity_file`, `open_identity_file`, `write_identity_secret`, `default_identity_path`,
+  `signing_key_text` and `signing_key_hex` for identity files.
+- `train_from_outputs(dir, options)` for a dictionary and its measured gain, and
+  `ArtifactFileRef::from_disk` to measure a file for `put`.
+
 `FetchOptions::new(stage)` gives `Durability::PerFile` and a 30 s idle timeout.
+
+`MissReason`, `StoreOutcome` and `StoreFailure` are exhaustive, not `#[non_exhaustive]`: a new
+variant is a compile error in oxabl's adapter, which must decide what it means.
 
 `OpenError` covers:
 
@@ -440,20 +462,110 @@ drop.
 
 ## Command line (`oxabl-cache`)
 
-The `oxabl-cache` binary (crate `oxabl-cache-cli`) is built on the same public API. It is
-not implemented yet: every invocation, `--help` included, prints one line saying so and
-exits 1. The commands below are the design:
+The `oxabl-cache` binary (crate `oxabl-cache-cli`) is built on the public API above, as
+oxabl is. Exit codes: 0 done, 1 refused or failed, 2 usage or configuration error. Every
+command takes `--json`, which prints one JSON document on stdout; a failure prints its
+message on stderr (as `{"error": …, "exit": …}` with `--json`). A command that cannot
+establish what it needs fails; it never reports success for nothing.
 
 | Command | Purpose |
 | --- | --- |
-| `identity new` | Create a member identity, write it passphrase-encrypted, and print its public descriptor. |
-| `init --cache c_… --label <me>` | Create the owner identity, epoch 1, roster v1; print the `cache.toml` block and the owner key for cache creation. |
-| `member add <descriptor> --label <l> --role ci\|developer\|reader` | Re-wrap the root key; publish roster `v+1`. |
-| `member remove <label>` | Rotate to a new epoch without the member; publish; print the new `min_roster_version`. |
+| `identity new [--file <path>] [--secret-out <path>]` | Create a member identity and print its public descriptor and signing key (`ed25519:` spelling and hex). `--file` (default: the identity file path) writes the passphrase-encrypted file. `--secret-out` writes the identity string to a mode 0600 file, for a CI secret store; given alone it writes no passphrase file. An existing file is never overwritten. |
+| `init --server <url> --tenant t_… --cache c_… --label <me>` | Publish roster v1 at epoch 1 with this identity as the only owner, for a cache that exists with this identity's key registered as an owner key. Print the `cache.toml` block. |
+| `member add <descriptor> --label <l> --role ci\|developer\|reader` | Re-wrap the root key to the new member; publish roster `v+1` in the same epoch. |
+| `member remove <label> [--purge]` | Rotate to a new epoch without the member; publish; print the new `min_roster_version`. With `--purge`, entries of older epochs are marked dead. |
 | `rotate [--purge]` | New epoch for all current members; optionally purge older epochs. |
-| `owner add <key>`, `owner remove <key>` | Change the roster's signer set (security.md, "Rotation and revocation"). |
-| `login`, `logout` | Device-flow OIDC session for humans. |
-| `status` | Mode, principal, roster, epoch, quota, last errors, and why the cache is off if it is. |
-| `dict train --outputs <dir> [--publish]` | Train a 112 KiB dictionary from sampled outputs; report the ratio gain; publish as `ci`. |
-| `verify --sample <n>` | Fetch and fully verify a random sample of trusted entries into a scratch directory. |
-| `fetch`, `put` | Manual single-key operations for diagnostics. |
+| `owner add <descriptor> --label <l> --cosign-identity-file <f>` | Add an owner (below). |
+| `owner remove <label\|ed25519:key> [--purge]` | Remove an owner and start a new epoch (below). |
+| `login --issuer <url> --client-id <id>`, `logout` | Device-flow OIDC session for humans (below). |
+| `status` | Mode, principal, roster, epoch, quota, or why the cache is off. |
+| `dict train --outputs <dir> [--publish]` | Train a 112 KiB dictionary from sampled outputs, report the ratio gain, and publish it as `ci` when the gain is at least 1.3x. |
+| `verify --sample <n> --keys <file>` | Fetch and fully verify a random sample of trusted entries into a scratch directory. |
+| `fetch --key <hex> --stage <dir> [--expect <path>]…`, `put --key <hex> --file <artifact>=<path>…` | Manual single-key operations for diagnostics. |
+
+Global flags, valid on every command: `--repo <dir>` (default: the nearest `.oxabl/cache.toml`
+above the current directory), `--identity-file`, `--passphrase-file`, `--token-file`,
+`--state-dir`, `--ca-file` (extra trusted CAs, for a private CA of the server or the identity
+provider; also `Config::with_ca_file`) and `--mode ci|developer|read-only`.
+
+### Setting up a cache
+
+The server picks a cache's id and checks roster signatures against the owner keys registered
+at creation, so the owner's key exists before the cache does:
+
+1. The owner runs `identity new`, which prints the signing key.
+2. The tenant administrator creates the cache with that key (`POST /v1/tenant/caches`,
+   `owner_keys` as hex) and hands out a token with `cache:admin` for it.
+3. The owner runs `init`, which publishes roster v1 and prints the `.oxabl/cache.toml` block
+   that pins the cache. The repository commits it.
+4. The owner runs `member add` for each descriptor a member sends. A `ci` member's identity
+   string goes to the CI secret store (`identity new --secret-out`).
+
+`init` refuses a cache that has a roster, and the server refuses a roster whose signature is
+not by a registered owner key.
+
+### Secrets
+
+Passphrases and tokens come from the controlling terminal (echo off) or from a file named by
+a flag: `--passphrase-file`, `--token-file`. Such a file is a regular file of at most 4 KiB
+with no group or other permission bit; anything else is a usage error. They are never
+arguments. The command line refuses to run while `OXABL_CACHE_TOKEN`, `OXABL_CACHE_IDENTITY`
+or `OXABL_CACHE_IDENTITY_PASSPHRASE` is set, naming the flag to use, and without a terminal
+or a passphrase file it fails instead of waiting. The library still reads those variables for
+CI jobs (above). Identities are unlocked from files only. A command prints no passphrase,
+token, session or identity string; `identity new --secret-out` is the only way an identity
+string leaves the process, into a mode 0600 file.
+
+Credentials: `--token-file`, else the stored login session, else a CI system's ID token as
+in "Configuration".
+
+### Owners
+
+An owner is a roster member whose role is `owner`. It holds the root key and its signing key
+is one of the cache's owner keys (`owner_keys` in `.oxabl/cache.toml` and the server's).
+
+- `owner add` publishes roster `v+1` in the same epoch with the new owner as a member. The
+  roster is signed by the current owner and by the new owner's own key (`--cosign-identity-file`,
+  and `--cosign-passphrase-file` or a prompt), so a checkout that pins either key opens it
+  (security.md, "Planned owner-key change"). The descriptor must name the cosigning identity.
+  The command prints the `owner_keys` line and the `min_roster_version` for
+  `.oxabl/cache.toml`, and the call that registers the keys on the server
+  (`PUT /v1/tenant/caches/<c>/owner-keys`, by the tenant administrator).
+- `owner remove` names an owner by label or `ed25519:` key. Another owner signs the new roster,
+  which omits the member and starts a new epoch, as for any removal. The command prints the
+  `owner_keys` line without the key and the new `min_roster_version`. A checkout that pins only
+  the removed key refuses the new roster and runs without the cache (security.md, "Owner key
+  compromise"). The signing owner cannot remove itself, and a roster never loses its last owner.
+- `member remove` refuses an owner, and `member add` refuses the role `owner`.
+
+Only an owner whose signing key the repository pins changes the roster, and a roster without
+an owner is never signed. A change goes out as `current + 1` over the roster it was made on: if
+another roster was published first, the command fails and the change is repeated.
+
+### Login
+
+`login` runs the OAuth device authorization grant (RFC 8628) against the issuer in `--issuer`
+with the client `--client-id` (also `OXABL_CACHE_OIDC_ISSUER`, `OXABL_CACHE_OIDC_CLIENT_ID`;
+neither is secret). It reads the issuer's discovery document, which must name that issuer, asks
+for a device code with `scope=openid` and `audience=oxabl-cache:<tenant>`, and prints the
+verification page and the code on stderr. The issuer must be registered for the tenant and
+must put exactly that audience in the ID token. The client refuses any other audience before
+anything is sent to the cache server (as for every ID token), exchanges the token at
+`/v1/auth/oidc` and writes `{"token", "expires_at"}` to
+`$XDG_STATE_HOME/oxabl-cache/session/<tenant>` with mode 0600, replacing it atomically. Endpoints
+must be `https` (or loopback `http`). `logout` revokes the session with `DELETE /v1/auth/session`
+and deletes the file; it exits 1 when the server could not confirm the revocation, and the file
+is deleted anyway.
+
+### Verification and dictionaries
+
+The server has no route that lists entries, so `verify` draws its sample from a file of compile
+keys (one 64-digit hex key per line; `#` starts a comment) that the caller knows, for example
+from oxabl's plan. It fetches the sample with every check `fetch` makes into a scratch
+directory under the state directory, removes it afterwards, and exits 1 unless every sampled
+entry installs from the trusted namespace.
+
+`dict train` samples up to 2,000 regular files under the directory, trains on the first 128 KiB of
+80% of them, and measures zstd with and without the dictionary on up to 1 MiB of each of the
+other 20%. `--publish` needs `ci` mode and a `ci` identity, and publishes only when the
+measured gain is at least 1.3x.

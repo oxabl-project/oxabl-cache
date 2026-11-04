@@ -13,7 +13,7 @@ fn describe(error: Error) -> OpenError {
     }
 }
 
-fn default_file() -> Option<PathBuf> {
+pub(crate) fn default_file() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("OXABL_CACHE_IDENTITY_FILE").filter(|v| !v.is_empty()) {
         return Some(PathBuf::from(path));
     }

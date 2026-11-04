@@ -2,6 +2,7 @@
 //! key rotation and redirects, plus a decoy that only counts connections.
 
 use super::ca::TestCa;
+use super::device::{Device, DeviceGrant};
 use super::keys::SigningKey;
 use rustls::ServerConfig;
 use serde_json::json;
@@ -13,6 +14,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
+
+const MAX_BODY: usize = 16 * 1024;
 
 /// One request the provider answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +31,8 @@ struct IssuerState {
     discovery_redirect: Option<String>,
     jwks_padding: usize,
     stall_jwks: bool,
+    device: Option<DeviceGrant>,
+    claimed_issuer: Option<String>,
 }
 
 #[derive(Default)]
@@ -56,9 +61,9 @@ enum Answer {
     Stall,
 }
 
-fn route(state: &State, host: &str, path: &str) -> Answer {
-    let issuers = state.issuers.lock().expect("issuers");
-    for (prefix, issuer) in issuers.iter() {
+fn route(state: &State, host: &str, method: &str, path: &str, body: &str) -> Answer {
+    let mut issuers = state.issuers.lock().expect("issuers");
+    for (prefix, issuer) in issuers.iter_mut() {
         if path == format!("{prefix}/.well-known/openid-configuration") {
             if let Some(location) = &issuer.discovery_redirect {
                 return Answer::Bytes(respond(
@@ -67,11 +72,32 @@ fn route(state: &State, host: &str, path: &str) -> Answer {
                     "",
                 ));
             }
-            let body = json!({
-                "issuer": format!("https://{host}{prefix}"),
+            let mut document = json!({
+                "issuer": issuer
+                    .claimed_issuer
+                    .clone()
+                    .unwrap_or_else(|| format!("https://{host}{prefix}")),
                 "jwks_uri": format!("https://{host}{prefix}/jwks"),
             });
-            return Answer::Bytes(respond("200 OK", "", &body.to_string()));
+            if issuer.device.is_some() {
+                document["device_authorization_endpoint"] =
+                    json!(format!("https://{host}{prefix}/device"));
+                document["token_endpoint"] = json!(format!("https://{host}{prefix}/token"));
+            }
+            return Answer::Bytes(respond("200 OK", "", &document.to_string()));
+        }
+        if let (Some(grant), "POST") = (issuer.device.as_mut(), method) {
+            let base = format!("https://{host}{prefix}");
+            let answer = if path == format!("{prefix}/device") {
+                Some(grant.authorize(&base, body))
+            } else if path == format!("{prefix}/token") {
+                Some(grant.token(&base, body))
+            } else {
+                None
+            };
+            if let Some((status, document)) = answer {
+                return Answer::Bytes(respond(status, "", &document.to_string()));
+            }
         }
         if path == format!("{prefix}/jwks") {
             if issuer.stall_jwks {
@@ -105,13 +131,14 @@ async fn serve(state: Arc<State>, acceptor: TlsAcceptor, listener: TcpListener) 
                     Ok(n) => head.extend_from_slice(&buffer[..n]),
                 }
             }
-            let text = String::from_utf8_lossy(&head).into_owned();
-            let path = text
-                .lines()
-                .next()
-                .and_then(|line| line.split(' ').nth(1))
-                .unwrap_or("")
-                .to_owned();
+            let end = head
+                .windows(4)
+                .position(|w| w == b"\r\n\r\n")
+                .map_or(head.len(), |at| at + 4);
+            let text = String::from_utf8_lossy(&head[..end]).into_owned();
+            let mut request_line = text.lines().next().unwrap_or("").split(' ');
+            let method = request_line.next().unwrap_or("").to_owned();
+            let path = request_line.next().unwrap_or("").to_owned();
             let host = text
                 .lines()
                 .find_map(|line| {
@@ -120,12 +147,29 @@ async fn serve(state: Arc<State>, acceptor: TlsAcceptor, listener: TcpListener) 
                 })
                 .unwrap_or("")
                 .to_owned();
+            let length: usize = text
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse().ok())?
+                })
+                .unwrap_or(0)
+                .min(MAX_BODY);
+            let mut body = head[end..].to_vec();
+            while body.len() < length {
+                match tls.read(&mut buffer).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) => body.extend_from_slice(&buffer[..n]),
+                }
+            }
+            let body = String::from_utf8_lossy(&body[..length.min(body.len())]).into_owned();
             state.seen.lock().expect("seen").push(Seen {
                 sni,
                 host: host.clone(),
                 path: path.clone(),
             });
-            match route(&state, &host, &path) {
+            match route(&state, &host, &method, &path, &body) {
                 Answer::Bytes(bytes) => {
                     let _ = tls.write_all(&bytes).await;
                     let _ = tls.shutdown().await;
@@ -182,6 +226,28 @@ impl Idp {
     pub fn stall_jwks(&self, prefix: &str) {
         let mut issuers = self.state.issuers.lock().expect("issuers");
         issuers.entry(prefix.to_owned()).or_default().stall_jwks = true;
+    }
+
+    /// Makes discovery of the issuer at `prefix` name `issuer` instead of itself.
+    pub fn claim_issuer(&self, prefix: &str, issuer: &str) {
+        let mut issuers = self.state.issuers.lock().expect("issuers");
+        issuers.entry(prefix.to_owned()).or_default().claimed_issuer = Some(issuer.to_owned());
+    }
+
+    /// Makes the issuer at `prefix` serve the device authorization grant.
+    pub fn device(&self, prefix: &str, device: Device) {
+        let mut issuers = self.state.issuers.lock().expect("issuers");
+        issuers.entry(prefix.to_owned()).or_default().device = Some(DeviceGrant::new(device));
+    }
+
+    /// The bodies of the device authorization requests the issuer at `prefix` received.
+    pub fn device_requests(&self, prefix: &str) -> Vec<String> {
+        let issuers = self.state.issuers.lock().expect("issuers");
+        issuers
+            .get(prefix)
+            .and_then(|issuer| issuer.device.as_ref())
+            .map(|grant| grant.requests.clone())
+            .unwrap_or_default()
     }
 
     pub fn seen(&self) -> Vec<Seen> {

@@ -21,6 +21,13 @@ pub(crate) struct Exchange {
 #[derive(Deserialize)]
 struct Session {
     token: String,
+    expires_at: u64,
+}
+
+/// A session the server opened: its bearer and when it expires, in unix seconds.
+pub(crate) struct Opened {
+    pub token: SecretString,
+    pub expires_at: u64,
 }
 
 impl Exchange {
@@ -33,6 +40,10 @@ impl Exchange {
     }
 
     pub async fn session(&self, id_token: &SecretString) -> Result<SecretString, OpenError> {
+        self.open_session(id_token).await.map(|opened| opened.token)
+    }
+
+    pub async fn open_session(&self, id_token: &SecretString) -> Result<Opened, OpenError> {
         let body = serde_json::json!({
             "tenant": self.tenant.to_text(),
             "id_token": id_token.expose_secret(),
@@ -58,6 +69,9 @@ impl Exchange {
         }
         let session: Session =
             serde_json::from_slice(&bytes).map_err(|_| OpenError::Server(status.as_u16()))?;
-        Ok(SecretString::from(session.token))
+        Ok(Opened {
+            token: SecretString::from(session.token),
+            expires_at: session.expires_at,
+        })
     }
 }

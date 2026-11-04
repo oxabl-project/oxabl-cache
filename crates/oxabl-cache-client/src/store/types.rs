@@ -1,4 +1,9 @@
+use std::fs::OpenOptions;
+use std::io::{self, Read};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
+
+use nix::fcntl::OFlag;
 
 use crate::artifact_path::ArtifactPath;
 use crate::compile_key::CompileKey;
@@ -13,9 +18,43 @@ pub struct ArtifactFileRef {
     pub blake3: [u8; 32],
 }
 
+impl ArtifactFileRef {
+    /// Measures the file at `disk_path` and refers to it as `path`. The final component must
+    /// not be a symlink and the file must be a regular one.
+    pub fn from_disk(path: ArtifactPath, disk_path: PathBuf) -> io::Result<Self> {
+        let disk_path = std::path::absolute(disk_path)?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags((OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK).bits())
+            .open(&disk_path)?;
+        if !file.metadata()?.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "not a regular file",
+            ));
+        }
+        let mut hasher = blake3::Hasher::new();
+        let mut size = 0u64;
+        let mut buffer = vec![0u8; 64 * 1024];
+        loop {
+            let read = file.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+            size += read as u64;
+        }
+        Ok(Self {
+            path,
+            disk_path,
+            size,
+            blake3: *hasher.finalize().as_bytes(),
+        })
+    }
+}
+
 /// Why a set was not stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum StoreFailure {
     /// The set breaks a rule: duplicate paths, too many files or path bytes, or the server
     /// refused it.
@@ -31,7 +70,6 @@ pub enum StoreFailure {
 
 /// What became of one set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum StoreOutcome {
     Committed,
     /// Another write won; the cache keeps that one.

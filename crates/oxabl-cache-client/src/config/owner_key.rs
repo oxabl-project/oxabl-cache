@@ -19,3 +19,8 @@ pub(crate) fn parse_owner_key(text: &str) -> Result<PublicKey, ConfigError> {
     }
     Ok(key)
 }
+
+/// The `owner_keys` spelling of a public key: `ed25519:` and unpadded standard base64.
+pub(crate) fn owner_key_text(key: &PublicKey) -> String {
+    format!("{PREFIX}{}", STANDARD_NO_PAD.encode(key))
+}
