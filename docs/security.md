@@ -47,6 +47,13 @@ entries were uploaded together, access days, and account data. It gives no sourc
 paths, names or r-code, and no way to test a guess about a file, because lookup ids
 need the customer's key.
 
+**The sample route.** `GET /v1/caches/{cache}/sample` gives any `read` token up to
+1,000 live trusted lookup ids per call, so a token alone, without a key, can enumerate
+the ids of a cache and download the ciphertext behind them (tenant egress quota and
+request rate apply). That is the same ciphertext a bucket plus database leak gives and
+no plaintext. The ids are not secret from the server, never logged, and the client
+verifies every record it fetches by them, so a lying server cannot make `verify` pass.
+
 **Size padding.** Each segment's plaintext is padded to its Padmé length, which
 leaks O(log log L) bits of the size. On 100,000 synthetic sizes, log-uniform between
 4 KB and 1.4 MB, Padmé cost **1.2%** extra bytes and reduced 78,408 distinct sizes to

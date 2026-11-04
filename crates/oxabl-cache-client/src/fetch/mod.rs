@@ -25,7 +25,11 @@ use futures_core::Stream;
 use tokio::sync::{OnceCell, mpsc};
 use tokio::task::JoinHandle;
 
+use oxabl_cache_format::LookupId;
+
+use crate::artifact_path::ArtifactPath;
 use crate::cache::Inner;
+use crate::compile_key::CompileKey;
 use crate::install::Stage;
 use crate::progress::Progress;
 
@@ -65,10 +69,31 @@ impl Fetch {
         requests: Vec<FetchRequest>,
         options: FetchOptions,
     ) -> Fetch {
+        let (keys, expects) = requests.into_iter().map(|r| (r.key, r.expect)).unzip();
+        Self::launch(inner, keys, expects, None, options)
+    }
+
+    /// Fetches entries named by lookup id; each outcome's `key` holds the id.
+    pub(crate) fn start_sampled(
+        inner: Arc<Inner>,
+        ids: Vec<LookupId>,
+        options: FetchOptions,
+    ) -> Fetch {
+        let keys = ids.iter().map(|id| CompileKey(id.0)).collect();
+        let expects = ids.iter().map(|_| None).collect();
+        Self::launch(inner, keys, expects, Some(ids), options)
+    }
+
+    fn launch(
+        inner: Arc<Inner>,
+        keys: Vec<CompileKey>,
+        expects: Vec<Option<Vec<ArtifactPath>>>,
+        ids: Option<Vec<LookupId>>,
+        options: FetchOptions,
+    ) -> Fetch {
         let (tx, outcomes) = mpsc::channel(OUTCOME_BUFFER);
         let cancel = Arc::new(AtomicBool::new(false));
-        let count = requests.len();
-        let (keys, expects) = requests.into_iter().map(|r| (r.key, r.expect)).unzip();
+        let count = keys.len();
         let session = Arc::new(Session {
             stage: Stage::open(&options.stage)
                 .map(Arc::new)
@@ -77,6 +102,7 @@ impl Fetch {
             durability: options.durability,
             idle_timeout: options.idle_timeout,
             keys,
+            ids,
             expects,
             progress: Progress::new(),
             cancel: cancel.clone(),
@@ -114,4 +140,5 @@ async fn drive(session: Arc<Session>) {
             session.sink.time_out(&session.keys).await;
         }
     }
+    session.sink.log_failures(&session.inner.errors);
 }

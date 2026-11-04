@@ -94,6 +94,14 @@ impl Config {
         })
     }
 
+    /// The last `limit` failures of runs of this cache on this machine, newest first. Reads the
+    /// log under the state directory; a missing or unreadable one is empty.
+    pub fn recent_errors(&self, limit: usize) -> Vec<crate::LoggedError> {
+        crate::state::StateDirs::new(self.state_dir.as_deref())
+            .error_log(&self.pins.tenant.to_text(), &self.pins.cache.to_text())
+            .recent(limit)
+    }
+
     pub fn with_mode(mut self, mode: Mode) -> Config {
         self.mode = mode;
         self

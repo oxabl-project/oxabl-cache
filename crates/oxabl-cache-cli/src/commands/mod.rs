@@ -7,6 +7,7 @@ pub mod login;
 pub mod member;
 pub mod owner;
 pub mod put;
+pub mod recent_errors;
 pub mod report;
 pub mod status;
 pub mod verify;

@@ -100,27 +100,6 @@ async fn nothing_secret_is_printed_by_any_command() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_environment_never_supplies_a_secret() {
-    let owned = Owned::start().await;
-    for (name, flag) in [
-        ("OXABL_CACHE_TOKEN", "--token-file"),
-        ("OXABL_CACHE_IDENTITY", "--identity-file"),
-        ("OXABL_CACHE_IDENTITY_PASSPHRASE", "--passphrase-file"),
-    ] {
-        let refused = owned
-            .owner
-            .cli_with(&["status"], &[(name, "value-that-must-not-appear")])
-            .exits(2);
-        assert!(
-            refused.stderr.contains(name) && refused.stderr.contains(flag),
-            "{}",
-            refused.stderr
-        );
-        assert!(!refused.everything().contains("value-that-must-not-appear"));
-    }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_secret_file_that_others_can_read_or_a_missing_passphrase_source_is_a_usage_error() {
     let owned = Owned::start().await;
     let loose = owned.owner.file("loose-passphrase");

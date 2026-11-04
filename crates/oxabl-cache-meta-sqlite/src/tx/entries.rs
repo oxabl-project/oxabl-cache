@@ -135,6 +135,41 @@ impl EntriesTx for SqliteTx<'_> {
         Ok(hits)
     }
 
+    fn live_lookup_ids_from(
+        &self,
+        cache: &CacheId,
+        namespace: &NamespaceKey,
+        from: &LookupId,
+        limit: usize,
+    ) -> Result<Vec<LookupId>> {
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let mut statement = self
+            .conn
+            .prepare_cached(
+                "SELECT e.lookup_id
+                 FROM entries e
+                 JOIN segments s ON s.cache_id = e.cache_id AND s.segment_id = e.segment_id
+                 JOIN packs p ON p.cache_id = s.cache_id AND p.pack_id = s.pack_id
+                 WHERE e.cache_id = ?1 AND e.ns = ?2 AND e.lookup_id >= ?3
+                   AND s.dead_since IS NULL AND p.state = 1
+                 ORDER BY e.lookup_id
+                 LIMIT ?4",
+            )
+            .db()?;
+        let rows = statement
+            .query_map(
+                params![
+                    cache.as_bytes().as_slice(),
+                    namespace.as_slice(),
+                    from.as_bytes().as_slice(),
+                    limit
+                ],
+                |row| Ok(LookupId::from_bytes(row.blob(0)?)),
+            )
+            .db()?;
+        rows.collect::<rusqlite::Result<_>>().db()
+    }
+
     fn touch_entries(
         &mut self,
         cache: &CacheId,

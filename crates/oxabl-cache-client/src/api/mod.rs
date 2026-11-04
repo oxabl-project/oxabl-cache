@@ -9,6 +9,7 @@ mod object;
 mod purge;
 mod reports;
 mod roster;
+mod sample;
 mod uploads;
 
 use std::sync::Arc;

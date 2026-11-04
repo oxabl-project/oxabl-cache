@@ -41,6 +41,18 @@ pub struct Status {
 impl Cache {
     /// Reads the server's view of the cache next to the verified roster this handle holds.
     pub async fn status(&self) -> Result<Status, CacheError> {
+        let status = self.read_status().await;
+        if let Err(error) = &status {
+            self.inner.errors.record(
+                "status",
+                crate::error_log::cache_kind(error),
+                &error.to_string(),
+            );
+        }
+        status
+    }
+
+    async fn read_status(&self) -> Result<Status, CacheError> {
         let inner = &self.inner;
         let info = inner
             .api

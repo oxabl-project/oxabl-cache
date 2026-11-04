@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 const EXIT_CODES: &str = "Exit codes: 0 done, 1 refused or failed, 2 usage or configuration error. \
-Secrets are read from the terminal or from a file named by a flag, never from arguments or the environment.";
+Secrets are read from a file named by a flag, from OXABL_CACHE_TOKEN, OXABL_CACHE_IDENTITY and \
+OXABL_CACHE_IDENTITY_PASSPHRASE, or for a passphrase from the terminal, never from arguments. A file named by a flag wins over the variable.";
 
 #[derive(Parser)]
 #[command(name = "oxabl-cache", version, about = "The oxabl-cache member command line", after_help = EXIT_CODES)]
@@ -14,13 +15,15 @@ pub struct Cli {
     /// the current directory.
     #[arg(long, global = true, value_name = "DIR")]
     pub repo: Option<PathBuf>,
-    /// The member identity file; default: $XDG_CONFIG_HOME/oxabl-cache/identity.
+    /// The member identity file; default: the identity string in OXABL_CACHE_IDENTITY, else
+    /// $XDG_CONFIG_HOME/oxabl-cache/identity.
     #[arg(long, global = true, value_name = "PATH")]
     pub identity_file: Option<PathBuf>,
-    /// A file holding the identity file's passphrase; without it the passphrase is asked on the terminal.
+    /// A file holding the identity file's passphrase; default: OXABL_CACHE_IDENTITY_PASSPHRASE,
+    /// else the passphrase is asked on the terminal.
     #[arg(long, global = true, value_name = "PATH")]
     pub passphrase_file: Option<PathBuf>,
-    /// A file holding an API token; without it the stored login session is used.
+    /// A file holding an API token; default: OXABL_CACHE_TOKEN, else the stored login session.
     #[arg(long, global = true, value_name = "PATH")]
     pub token_file: Option<PathBuf>,
     /// Where roster state and the login session live; default: $XDG_STATE_HOME/oxabl-cache.
@@ -190,12 +193,13 @@ pub enum DictCommand {
 
 #[derive(Args)]
 pub struct VerifyArgs {
-    /// How many entries to fetch.
+    /// How many entries to fetch; at most 1,000 unless --keys is given.
     #[arg(long, value_name = "N")]
     pub sample: usize,
-    /// A file of compile keys, one 64-digit hex key per line, to draw the sample from.
+    /// A file of compile keys, one 64-digit hex key per line, to draw the sample from; without
+    /// it the server names the sample.
     #[arg(long, value_name = "PATH")]
-    pub keys: PathBuf,
+    pub keys: Option<PathBuf>,
 }
 
 #[derive(Args)]

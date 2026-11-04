@@ -13,6 +13,7 @@ use super::validate::validate;
 use crate::cache::{Inner, permits_for};
 use crate::compile_key::CompileKey;
 use crate::error::CacheError;
+use crate::error_log::{Tally, store_outcome_failure};
 use crate::mode::Mode;
 
 /// Sets that may be queued before `put` waits.
@@ -193,6 +194,7 @@ impl Uploader {
     /// Seals and uploads the rest, commits every pack, and reports per key.
     pub async fn finish(self) -> StoreReport {
         let Uploader {
+            inner,
             shared,
             jobs,
             packer,
@@ -203,7 +205,7 @@ impl Uploader {
         drop(jobs);
         let _ = sealer.await;
         let bytes_uploaded = packer.await.unwrap_or(0);
-        let outcomes = shared
+        let outcomes: Vec<(CompileKey, StoreOutcome)> = shared
             .take()
             .into_iter()
             .map(|(key, outcome)| {
@@ -213,6 +215,15 @@ impl Uploader {
                 )
             })
             .collect();
+        let mut failures = Tally::default();
+        for (_, outcome) in &outcomes {
+            if let Some((kind, meaning)) = store_outcome_failure(outcome) {
+                failures.add(kind, meaning);
+            }
+        }
+        if !failures.is_empty() {
+            failures.record(&inner.errors, "store", outcomes.len());
+        }
         StoreReport {
             outcomes,
             bytes_uploaded,

@@ -1328,6 +1328,7 @@ fn text_ids() {
 #[test]
 fn published_limits() {
     assert_eq!(limits::LOOKUP_IDS, 10_000);
+    assert_eq!(limits::SAMPLE_IDS, 1_000);
     assert_eq!(limits::COMMIT_ENTRIES, 2_000);
     assert_eq!(limits::PACK_SEGMENTS, 2_000);
     assert_eq!(limits::PACK_BYTES, 32 * 1024 * 1024);

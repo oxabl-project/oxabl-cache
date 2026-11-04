@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
+use oxabl_cache_format::LookupId;
 use tokio::sync::{OnceCell, mpsc};
 
 use super::committer::Committer;
@@ -10,6 +11,7 @@ use super::types::{FetchOutcome, MissReason};
 use crate::artifact_path::ArtifactPath;
 use crate::cache::{Inner, RosterView};
 use crate::compile_key::CompileKey;
+use crate::error_log::{ErrorLog, Tally, fetch_failure};
 use crate::install::{Durability, Stage};
 use crate::progress::Progress;
 
@@ -17,6 +19,7 @@ use crate::progress::Progress;
 pub(crate) struct Sink {
     tx: mpsc::Sender<FetchOutcome>,
     settled: Mutex<Vec<bool>>,
+    failures: Mutex<Tally>,
 }
 
 impl Sink {
@@ -24,6 +27,22 @@ impl Sink {
         Self {
             tx,
             settled: Mutex::new(vec![false; requests]),
+            failures: Mutex::default(),
+        }
+    }
+
+    fn count_failure(&self, reason: MissReason) {
+        if let Some((kind, meaning)) = fetch_failure(reason) {
+            self.failures.lock().expect("sink lock").add(kind, meaning);
+        }
+    }
+
+    /// Logs one line per kind of failure the fetch settled with.
+    pub fn log_failures(&self, log: &ErrorLog) {
+        let requests = self.settled.lock().expect("sink lock").len();
+        let failures = self.failures.lock().expect("sink lock");
+        if !failures.is_empty() {
+            failures.record(log, "fetch", requests);
         }
     }
 
@@ -34,6 +53,9 @@ impl Sink {
             if std::mem::replace(&mut settled[index], true) {
                 return;
             }
+        }
+        if let FetchOutcome::Miss { reason, .. } = &outcome {
+            self.count_failure(*reason);
         }
         progress.touch();
         let _ = self.tx.send(outcome).await;
@@ -48,6 +70,7 @@ impl Sink {
                 .collect()
         };
         for index in open {
+            self.count_failure(MissReason::Timeout);
             let outcome = FetchOutcome::Miss {
                 key: keys[index],
                 reason: MissReason::Timeout,
@@ -64,6 +87,8 @@ pub(crate) struct Session {
     pub durability: Durability,
     pub idle_timeout: Duration,
     pub keys: Vec<CompileKey>,
+    /// Lookup ids named by the caller, one per key; otherwise derived from the keys.
+    pub ids: Option<Vec<LookupId>>,
     pub expects: Vec<Option<Vec<ArtifactPath>>>,
     pub progress: Progress,
     pub cancel: Arc<AtomicBool>,

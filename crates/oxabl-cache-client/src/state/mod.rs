@@ -1,10 +1,12 @@
-//! Local state under `$XDG_STATE_HOME/oxabl-cache`.
+//! Local state under `$XDG_STATE_HOME/oxabl-cache`: per-cache roster state, the failure log and
+//! the stored login sessions.
 
 mod high_water;
 mod session_file;
 
 use std::path::{Path, PathBuf};
 
+use crate::error_log::ErrorLog;
 pub(crate) use high_water::HighWater;
 pub(crate) use session_file::StoredSession;
 
@@ -41,6 +43,15 @@ impl StateDirs {
 
     pub fn high_water(&self, cache: &str) -> HighWater {
         HighWater::new(self.root.as_ref().map(|root| root.join(cache)))
+    }
+
+    /// The failure log of one cache of one tenant.
+    pub fn error_log(&self, tenant: &str, cache: &str) -> ErrorLog {
+        ErrorLog::new(
+            self.root
+                .as_ref()
+                .map(|root| root.join("errors").join(format!("{tenant}-{cache}.jsonl"))),
+        )
     }
 
     pub fn session(&self, tenant: &str) -> StoredSession {
