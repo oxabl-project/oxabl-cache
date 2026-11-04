@@ -20,11 +20,15 @@ use crate::config::{Config, Pins};
 use crate::error::{CacheError, OpenError};
 use crate::fetch::{Fetch, FetchOptions, FetchRequest};
 use crate::mode::Mode;
+use crate::progress::Progress;
 use crate::state::HighWater;
 use crate::stats::{Counters, Stats};
 use crate::store::Uploader;
 
 pub use probe::Presence;
+
+/// The most entries `Cache::fetch_sample` asks for.
+pub const MAX_SAMPLE: usize = oxabl_cache_format::limits::SAMPLE_IDS;
 
 pub(crate) use dictionaries::Dictionaries;
 pub(crate) use gates::{Gates, permits_for};
@@ -90,6 +94,26 @@ impl Cache {
     /// Starts fetching; yields one outcome per request as each completes.
     pub fn fetch(&self, requests: Vec<FetchRequest>, options: FetchOptions) -> Fetch {
         Fetch::start(self.inner.clone(), requests, options)
+    }
+
+    /// Asks the server for up to `count` live trusted entries (1 to 1,000) and starts fetching
+    /// them with every verification `fetch` does. An outcome's `key` holds the entry's lookup
+    /// id. An empty cache gives an empty sample, so no outcomes.
+    pub async fn fetch_sample(
+        &self,
+        count: usize,
+        options: FetchOptions,
+    ) -> Result<Fetch, CacheError> {
+        if count == 0 || count > MAX_SAMPLE {
+            return Err(CacheError::SampleSize);
+        }
+        let ids = self
+            .inner
+            .api
+            .sample(count, &Progress::new())
+            .await
+            .map_err(|_| CacheError::Unavailable)?;
+        Ok(Fetch::start_sampled(self.inner.clone(), ids, options))
     }
 
     /// Starts a batched upload session. Fails if the mode does not write.

@@ -190,12 +190,13 @@ pub enum DictCommand {
 
 #[derive(Args)]
 pub struct VerifyArgs {
-    /// How many entries to fetch.
+    /// How many entries to fetch; at most 1,000 unless --keys is given.
     #[arg(long, value_name = "N")]
     pub sample: usize,
-    /// A file of compile keys, one 64-digit hex key per line, to draw the sample from.
+    /// A file of compile keys, one 64-digit hex key per line, to draw the sample from; without
+    /// it the server names the sample.
     #[arg(long, value_name = "PATH")]
-    pub keys: PathBuf,
+    pub keys: Option<PathBuf>,
 }
 
 #[derive(Args)]

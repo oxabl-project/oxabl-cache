@@ -34,6 +34,7 @@ mod purge;
 mod report;
 mod roster_get;
 mod roster_put;
+mod sample;
 mod scoped_cache;
 mod scrub;
 mod segment_death;

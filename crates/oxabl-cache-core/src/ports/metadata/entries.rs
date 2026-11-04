@@ -36,6 +36,15 @@ pub trait EntriesTx {
         ids: &[LookupId],
         with_record: bool,
     ) -> Result<Vec<EntryHit>>;
+    /// The lookup ids of live entries in a namespace that are at least `from`, in
+    /// ascending order, at most `limit`.
+    fn live_lookup_ids_from(
+        &self,
+        cache: &CacheId,
+        namespace: &NamespaceKey,
+        from: &LookupId,
+        limit: usize,
+    ) -> Result<Vec<LookupId>>;
     /// Raises the access day of entries whose day is lower.
     fn touch_entries(
         &mut self,

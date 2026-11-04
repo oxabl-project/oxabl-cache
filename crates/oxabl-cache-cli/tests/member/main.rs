@@ -10,3 +10,4 @@ mod login;
 mod owners;
 mod roster_guards;
 mod secrets;
+mod verify_sample;

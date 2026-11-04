@@ -2,6 +2,8 @@
 
 /// Lookup ids per request.
 pub const LOOKUP_IDS: usize = 10_000;
+/// Ids per sample request.
+pub const SAMPLE_IDS: usize = 1_000;
 /// Entries per commit.
 pub const COMMIT_ENTRIES: usize = 2_000;
 /// Segments per pack.

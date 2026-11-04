@@ -63,6 +63,7 @@ path as a miss.
 | Limit | Value |
 | --- | --- |
 | Lookup ids per request | 10,000 |
+| Ids per sample request | 1,000 |
 | Entries per commit, segments per pack | 2,000 |
 | Pack size | 32 MiB (single PUT) |
 | Files per artifact set; path length; total path bytes per set | 16; 1,024 bytes; 3,072 bytes |
@@ -206,6 +207,25 @@ asks for presigned GET URLs, one per pack involved. Without bit 0 the response
 carries presence only (plan mode). Every hit updates the entry's `access_day` (in
 `entry_access`, at most once a day). The
 call is safe to retry.
+
+### `GET /v1/caches/{cache}/sample?namespace=trusted&n=<count>`
+
+Scope `read`. Answers `200 application/json`:
+
+```json
+{"ids": ["<64 hex lookup id>", "…"]}
+```
+
+The ids are live entries of the trusted namespace: the ids that follow a random point
+of the id space, wrapping around, in ascending order, at most `n`. A cache with fewer
+live trusted entries returns all of them, and an empty cache returns `{"ids": []}`.
+Lookup ids are keyed hashes, so neighbours in the id space are unrelated entries. The
+ids are rows the server already holds, so the route tells it nothing new; it tells the
+caller ids that only a key holder could compute. `n` is 1 to 1,000. A missing,
+non-numeric, zero or larger `n`, or a `namespace` other than `trusted`, is 400
+`bad_request`. The client looks the ids up with `OXLQ` in fetch mode and verifies each
+record, segment and signature as for any fetch, so the server's answer is a hint, never
+trusted.
 
 ### `POST /v1/caches/{cache}/uploads`
 

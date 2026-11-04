@@ -34,6 +34,8 @@ mod operator_tokens;
 mod roster_rules;
 #[path = "../single_node/round_trip.rs"]
 mod round_trip;
+#[path = "../single_node/sample.rs"]
+mod sample;
 #[path = "../single_node/scopes.rs"]
 mod scopes;
 #[path = "../single_node/secret_modes.rs"]

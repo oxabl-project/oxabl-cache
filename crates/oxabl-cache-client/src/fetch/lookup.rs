@@ -39,7 +39,10 @@ pub(crate) async fn lookup(
 ) -> Result<Lookup, MissReason> {
     let ids: Vec<LookupId> = indexes
         .iter()
-        .map(|&i| view.lookup.lookup_id(&session.keys[i].0))
+        .map(|&i| match &session.ids {
+            Some(ids) => ids[i],
+            None => view.lookup.lookup_id(&session.keys[i].0),
+        })
         .collect();
     let request = LookupRequest {
         flags: LookupFlags {

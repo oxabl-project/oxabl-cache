@@ -82,6 +82,10 @@ impl Cache {
     /// Starts fetching; yields one outcome per request as each completes.
     pub fn fetch(&self, requests: Vec<FetchRequest>, options: FetchOptions) -> Fetch;
 
+    /// Asks the server for up to `count` (1 to `MAX_SAMPLE`) live trusted entries and fetches
+    /// them as `fetch` does; an outcome's `key` holds the entry's lookup id.
+    pub async fn fetch_sample(&self, count: usize, options: FetchOptions) -> Result<Fetch, CacheError>;
+
     /// Starts a batched upload session. Fails if the mode does not write.
     pub fn uploader(&self) -> Result<Uploader, CacheError>;
 
@@ -480,7 +484,7 @@ establish what it needs fails; it never reports success for nothing.
 | `login --issuer <url> --client-id <id>`, `logout` | Device-flow OIDC session for humans (below). |
 | `status` | Mode, principal, roster, epoch, quota, or why the cache is off. |
 | `dict train --outputs <dir> [--publish]` | Train a 112 KiB dictionary from sampled outputs, report the ratio gain, and publish it as `ci` when the gain is at least 1.3x. |
-| `verify --sample <n> --keys <file>` | Fetch and fully verify a random sample of trusted entries into a scratch directory. |
+| `verify --sample <n> [--keys <file>]` | Fetch and fully verify a random sample of trusted entries into a scratch directory. Without `--keys` the server names the sample (`n` is 1 to 1,000). |
 | `fetch --key <hex> --stage <dir> [--expect <path>]…`, `put --key <hex> --file <artifact>=<path>…` | Manual single-key operations for diagnostics. |
 
 Global flags, valid on every command: `--repo <dir>` (default: the nearest `.oxabl/cache.toml`
@@ -559,11 +563,15 @@ is deleted anyway.
 
 ### Verification and dictionaries
 
-The server has no route that lists entries, so `verify` draws its sample from a file of compile
-keys (one 64-digit hex key per line; `#` starts a comment) that the caller knows, for example
-from oxabl's plan. It fetches the sample with every check `fetch` makes into a scratch
-directory under the state directory, removes it afterwards, and exits 1 unless every sampled
-entry installs from the trusted namespace.
+`verify --sample n` asks the server for `n` live trusted entries (`GET .../sample`, 1 to 1,000;
+`Cache::fetch_sample` in the library, whose outcomes carry the lookup id in `key`). With
+`--keys <file>` (one 64-digit hex key per line; `#` starts a comment) it draws the sample from
+compile keys the caller knows instead, for example from oxabl's plan, and `n` is then bounded
+by the file. Either way it fetches the sample with every check `fetch` makes into a scratch
+directory under the state directory, removes it afterwards, and exits 1 unless at least one
+entry was sampled and every sampled entry installs from the trusted namespace. An empty cache
+prints `sampled 0` and exits 1: nothing was verified is not a pass. `--sample` outside 1 to
+1,000 without `--keys` is a usage error (exit 2).
 
 `dict train` samples up to 2,000 regular files under the directory, trains on the first 128 KiB of
 80% of them, and measures zstd with and without the dictionary on up to 1 MiB of each of the

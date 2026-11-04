@@ -12,6 +12,7 @@ mod purge;
 mod range;
 mod reports;
 mod roster;
+mod sample;
 mod served;
 mod session;
 mod tenant;
@@ -49,6 +50,7 @@ pub fn public_router<B: Backend>(app: Arc<App<B>>) -> Router {
             get(dictionary::get::<B>).put(dictionary::put::<B>),
         )
         .route("/v1/caches/{cache}/lookup", post(lookup::post::<B>))
+        .route("/v1/caches/{cache}/sample", get(sample::get::<B>))
         .route("/v1/caches/{cache}/uploads", post(uploads::post::<B>))
         .route(
             "/v1/caches/{cache}/objects/{pack}",

@@ -15,6 +15,7 @@ use crate::failure::Failure;
 use crate::output::{print_fields, print_json};
 
 const MAX_KEY_FILE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_SERVER_SAMPLE: usize = oxabl_cache_client::MAX_SAMPLE;
 
 /// A scratch directory that is removed when it goes out of scope.
 struct Scratch(PathBuf);
@@ -76,30 +77,51 @@ fn sample(keys: &mut Vec<CompileKey>, count: usize) -> Result<(), Failure> {
     Ok(())
 }
 
-/// Fetches a random sample of keys into a scratch directory with every verification the
-/// client does, and fails unless every one installs from the trusted namespace.
+/// Fetches a random sample of trusted entries into a scratch directory with every verification
+/// the client does, and fails unless at least one was sampled and every one installs from the
+/// trusted namespace. The sample is drawn from `--keys` when given, else by the server.
 pub async fn run(context: &Context, args: VerifyArgs) -> Result<(), Failure> {
     if args.sample == 0 {
         return Err(Failure::usage("--sample must be at least 1"));
     }
-    let mut pool = read_keys(&args.keys)?;
-    if pool.is_empty() {
-        return Err(Failure::usage(format!("{}: no keys", args.keys.display())));
+    if args.keys.is_none() && args.sample > MAX_SERVER_SAMPLE {
+        return Err(Failure::usage(format!(
+            "--sample is at most {MAX_SERVER_SAMPLE} without --keys"
+        )));
     }
-    sample(&mut pool, args.sample)?;
+    let pool = match &args.keys {
+        Some(path) => {
+            let mut pool = read_keys(path)?;
+            if pool.is_empty() {
+                return Err(Failure::usage(format!("{}: no keys", path.display())));
+            }
+            sample(&mut pool, args.sample)?;
+            Some(pool)
+        }
+        None => None,
+    };
     let scratch = Scratch::create(context.state_dir())?;
     let cache = Cache::open(context.config()?).await?;
-    let requests = pool
-        .iter()
-        .map(|key| FetchRequest {
-            key: *key,
-            expect: None,
-        })
-        .collect();
-    let mut fetch = cache.fetch(requests, FetchOptions::new(scratch.0.join("stage")));
-    let (mut trusted, mut personal) = (0usize, 0usize);
+    let options = FetchOptions::new(scratch.0.join("stage"));
+    let mut fetch = match pool {
+        Some(pool) => cache.fetch(
+            pool.iter()
+                .map(|key| FetchRequest {
+                    key: *key,
+                    expect: None,
+                })
+                .collect(),
+            options,
+        ),
+        None => cache
+            .fetch_sample(args.sample, options)
+            .await
+            .map_err(|e| Failure::refused(format!("sample: {e}")))?,
+    };
+    let (mut sampled, mut trusted, mut personal) = (0usize, 0usize, 0usize);
     let mut misses: BTreeMap<String, usize> = BTreeMap::new();
     while let Some(outcome) = fetch.next().await {
+        sampled += 1;
         match outcome {
             FetchOutcome::Installed { provenance, .. } => match provenance.tier {
                 Tier::Trusted => trusted += 1,
@@ -108,7 +130,6 @@ pub async fn run(context: &Context, args: VerifyArgs) -> Result<(), Failure> {
             FetchOutcome::Miss { reason, .. } => *misses.entry(miss_name(reason)).or_default() += 1,
         }
     }
-    let sampled = pool.len();
     if context.json {
         print_json(&json!({
             "sampled": sampled,
@@ -126,6 +147,11 @@ pub async fn run(context: &Context, args: VerifyArgs) -> Result<(), Failure> {
             fields.push(("miss", format!("{reason}: {count}")));
         }
         print_fields(&fields);
+    }
+    if sampled == 0 {
+        return Err(Failure::refused(
+            "the cache holds no trusted entries: nothing was verified",
+        ));
     }
     if trusted != sampled {
         return Err(Failure::refused(format!(

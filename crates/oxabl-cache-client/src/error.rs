@@ -107,6 +107,8 @@ pub enum CacheError {
     NotAWriter,
     /// The server is unreachable or answered an error.
     Unavailable,
+    /// A sample must hold 1 to 1,000 entries.
+    SampleSize,
 }
 
 impl fmt::Display for CacheError {
@@ -115,6 +117,7 @@ impl fmt::Display for CacheError {
             Self::ReadOnly => "the mode does not write to the cache",
             Self::NotAWriter => "the identity is not a ci member of the roster",
             Self::Unavailable => "the cache server is unavailable",
+            Self::SampleSize => "a sample holds 1 to 1,000 entries",
         })
     }
 }

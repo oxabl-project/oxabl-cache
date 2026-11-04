@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
+use oxabl_cache_format::LookupId;
 use tokio::sync::{OnceCell, mpsc};
 
 use super::committer::Committer;
@@ -64,6 +65,8 @@ pub(crate) struct Session {
     pub durability: Durability,
     pub idle_timeout: Duration,
     pub keys: Vec<CompileKey>,
+    /// Lookup ids named by the caller, one per key; otherwise derived from the keys.
+    pub ids: Option<Vec<LookupId>>,
     pub expects: Vec<Option<Vec<ArtifactPath>>>,
     pub progress: Progress,
     pub cancel: Arc<AtomicBool>,

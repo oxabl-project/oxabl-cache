@@ -24,6 +24,7 @@ mod object_urls;
 mod operator_tokens;
 mod roster_rules;
 mod round_trip;
+mod sample;
 mod scopes;
 mod secret_modes;
 mod shutdown_upload;
