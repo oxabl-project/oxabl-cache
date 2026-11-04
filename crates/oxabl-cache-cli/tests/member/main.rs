@@ -6,6 +6,7 @@ mod support;
 mod dictionary;
 mod entries;
 mod environment;
+mod error_log;
 mod flow;
 mod login;
 mod owners;

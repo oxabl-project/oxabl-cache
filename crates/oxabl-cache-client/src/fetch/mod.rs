@@ -140,4 +140,5 @@ async fn drive(session: Arc<Session>) {
             session.sink.time_out(&session.keys).await;
         }
     }
+    session.sink.log_failures(&session.inner.errors);
 }

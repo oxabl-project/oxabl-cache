@@ -59,6 +59,21 @@ impl Cache {
         &self,
         dictionary: &[u8],
     ) -> Result<DictionaryPublished, DictionaryError> {
+        let published = self.publish_dictionary_once(dictionary).await;
+        if let Err(error) = &published {
+            self.inner.errors.record(
+                "dictionary",
+                crate::error_log::dictionary_kind(error),
+                &error.to_string(),
+            );
+        }
+        published
+    }
+
+    async fn publish_dictionary_once(
+        &self,
+        dictionary: &[u8],
+    ) -> Result<DictionaryPublished, DictionaryError> {
         let inner = &self.inner;
         let view = inner.view();
         if inner.mode != Mode::Ci || view.role(&inner.identity) != Some(Role::Ci) {

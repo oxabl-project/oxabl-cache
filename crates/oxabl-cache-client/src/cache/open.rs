@@ -34,6 +34,7 @@ pub(super) async fn open(config: Config) -> Result<Cache, OpenError> {
         &state,
     )
     .await?;
+    let errors = state.error_log(&config.pins.tenant.to_text(), &config.pins.cache.to_text());
     let counters = Arc::new(Counters::default());
     let api = Api::new(
         http,
@@ -65,6 +66,7 @@ pub(super) async fn open(config: Config) -> Result<Cache, OpenError> {
             handle: Handle::current(),
             checksum_sha256: info.checksum_sha256(),
             counters,
+            errors,
             reported: Mutex::new(Default::default()),
         }),
     })

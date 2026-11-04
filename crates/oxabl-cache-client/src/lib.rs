@@ -13,6 +13,7 @@ mod compile_key;
 mod config;
 mod dictionary;
 mod error;
+mod error_log;
 mod fetch;
 mod identity;
 mod install;
@@ -36,6 +37,7 @@ pub use dictionary::{
     train_from_outputs,
 };
 pub use error::{CacheError, IdTokenError, OpenError};
+pub use error_log::LoggedError;
 pub use fetch::{
     Fetch, FetchOptions, FetchOutcome, FetchRequest, InstalledFile, MissReason, Provenance, Tier,
 };

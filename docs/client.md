@@ -29,7 +29,8 @@ cache never defines it.
 - Each `Installed` outcome carries its origin (`Provenance`: tier and the signer's
   public key, plus epoch and roster version), so oxabl's local cache keeps the tier.
 - Every cache failure is a miss or "not stored". The cache never fails a build;
-  oxabl compiles what it could not fetch.
+  oxabl compiles what it could not fetch. Each failure is also appended to the failure log
+  (below), which `status` shows.
 
 ## Public API
 
@@ -49,6 +50,8 @@ pub struct Config { /* private */ }
 impl Config {
     /// Reads `<root>/.oxabl/cache.toml` and the environment.
     pub fn from_repo(root: &std::path::Path) -> Result<Config, ConfigError>;
+    /// The failure log of this cache, readable without opening it; empty when there is none.
+    pub fn recent_errors(&self, limit: usize) -> Vec<LoggedError>;
     pub fn with_mode(self, mode: Mode) -> Config;
     pub fn with_credentials(self, credentials: Credentials) -> Config;
     pub fn with_identity(self, identity: IdentitySource) -> Config;
@@ -56,7 +59,7 @@ impl Config {
     pub fn with_concurrency(self, connections: usize) -> Config;
     pub fn with_zstd_level(self, level: i32) -> Config;
     pub fn with_max_plain_bytes(self, bytes: u64) -> Config;
-    /// Replaces `$XDG_STATE_HOME/oxabl-cache` (per-cache state and stored sessions).
+    /// Replaces `$XDG_STATE_HOME/oxabl-cache` (per-cache state, the failure log and stored sessions).
     pub fn with_state_dir(self, dir: std::path::PathBuf) -> Config;
     /// A PEM bundle trusted in addition to the system roots (a private CA).
     pub fn with_ca_file(self, path: std::path::PathBuf) -> Config;
@@ -93,6 +96,8 @@ impl Cache {
     pub fn stats(&self) -> Stats;
     /// The mode, the member, the verified roster and the server's epoch, dictionary and quota.
     pub async fn status(&self) -> Result<Status, CacheError>;
+    /// The last `limit` failures logged for this cache on this machine, newest first.
+    pub fn recent_errors(&self, limit: usize) -> Vec<LoggedError>;
     /// Seals `dictionary`, commits it and moves the pointer; a `ci` member in `ci` mode only.
     pub async fn publish_dictionary(&self, dictionary: &[u8]) -> Result<DictionaryPublished, DictionaryError>;
 }
@@ -464,6 +469,26 @@ unreadable or malformed high-water file is an error, never treated as zero. A fa
 state write is only logged. The root key lives only in memory and is zeroed on
 drop.
 
+### Failure log
+
+Every run of the library, so `oxabl build` as well as the command line, appends what failed to
+`$XDG_STATE_HOME/oxabl-cache/errors/<tenant id>-<cache id>.jsonl` (under `--state-dir` or
+`with_state_dir` when set): a failed `open`, `probe`, `fetch`, `store`, `dictionary` publication
+or `status`. A fetch or a store over many entries writes one line per kind of failure, with the
+count ("12 of 340 entries failed verification"), not one per entry. An entry that is simply not
+in the cache is no failure.
+
+One JSON object per line: `t` (unix seconds), `op`, `kind` and `msg`. The message is fixed text
+built from the kind of error and counts. It never holds a secret, a token, a path, a value of
+the configuration or the content of a file, and is cut to 160 characters. The log keeps the
+newest 30 entries and at most 4 KiB. Writers take an exclusive lock on a lock file beside the
+log, add their entries, trim and replace the log with a rename, so concurrent processes lose
+and tear nothing and a reader sees the log before or after a write. The log is a regular file of
+mode 0600 in a directory of mode 0700; a log that is not a regular file is not read, lines that
+do not parse are dropped at the next write, and a file that is group readable is private again
+after it. A failure to write the log (no state directory, a full disk, a lock held for more than
+250 ms) is ignored: it never fails the operation it records.
+
 ## Command line (`oxabl-cache`)
 
 The `oxabl-cache` binary (crate `oxabl-cache-cli`) is built on the public API above, as
@@ -482,7 +507,7 @@ establish what it needs fails; it never reports success for nothing.
 | `owner add <descriptor> --label <l> --cosign-identity-file <f>` | Add an owner (below). |
 | `owner remove <label\|ed25519:key> [--purge]` | Remove an owner and start a new epoch (below). |
 | `login --issuer <url> --client-id <id>`, `logout` | Device-flow OIDC session for humans (below). |
-| `status` | Mode, principal, roster, epoch, quota, or why the cache is off. |
+| `status` | Mode, principal, roster, epoch, quota, or why the cache is off, and the last five failures from the failure log (`recent_errors` in `--json`, newest first, each `{at, operation, kind, message}`), whether the cache is on or off. |
 | `dict train --outputs <dir> [--publish]` | Train a 112 KiB dictionary from sampled outputs, report the ratio gain, and publish it as `ci` when the gain is at least 1.3x. |
 | `verify --sample <n> [--keys <file>]` | Fetch and fully verify a random sample of trusted entries into a scratch directory. Without `--keys` the server names the sample (`n` is 1 to 1,000). |
 | `fetch --key <hex> --stage <dir> [--expect <path>]…`, `put --key <hex> --file <artifact>=<path>…` | Manual single-key operations for diagnostics. |
