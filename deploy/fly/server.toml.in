@@ -1,0 +1,32 @@
+# Rendered to server.toml (git-ignored) by deploy.sh, which fills each at-sign placeholder from the environment.
+# The Fly edge terminates TLS. Admin and metrics listen on the private network only:
+# Fly publishes nothing but the http_service port. Reach admin with `fly proxy 9091`.
+
+[server]
+listen = "0.0.0.0:8080"
+admin_listen = "[::]:9091"
+metrics_listen = "[::]:9090"
+public_url = "https://@DOMAIN@"
+
+[tls]
+terminated_upstream = true
+
+[metadata]
+url = "sqlite:///var/lib/oxabl-cache/meta.db"
+
+[store]
+kind = "s3"
+endpoint = "https://@CLOUDFLARE_ACCOUNT_ID@.r2.cloudflarestorage.com"
+region = "auto"
+bucket = "@R2_BUCKET@"
+path_style = true
+access_key_id_file = "/run/secrets/oxabl-cache/s3-access-key-id"
+secret_access_key_file = "/run/secrets/oxabl-cache/s3-secret-access-key"
+
+[keys]
+url_key_file = "/run/secrets/oxabl-cache/url-key"
+claim_hash_key_file = "/run/secrets/oxabl-cache/claim-key"
+
+[log]
+level = "info"
+format = "json"
