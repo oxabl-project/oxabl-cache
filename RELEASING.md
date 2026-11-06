@@ -31,6 +31,15 @@ Merging the release PR tags `<crate>-v<version>` and starts the build and publis
 
 The first release, `0.1.0`, is already in the manifest: run the `Release` workflow manually (`workflow_dispatch`) to publish it.
 
+## The desktop app
+
+`desktop/` is a `simple` release-please package (tag `oxabl-cache-desktop-v<version>`): its
+version lives in `desktop/Cargo.toml` and `desktop/Cargo.lock`, both `extra-files`, and the format,
+crypto and client packages list `desktop/Cargo.lock` too, so a bump of theirs keeps the app's lock
+file in step. A desktop release runs the `desktop` job of `release.yml`, which builds the binary
+against glibc 2.34 (`desktop/scripts/package.sh`, cargo-zigbuild) and attaches the tarball and its
+SHA-256 to the GitHub release.
+
 ## Secrets
 
 | Secret | Used for |
