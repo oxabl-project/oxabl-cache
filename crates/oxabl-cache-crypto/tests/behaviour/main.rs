@@ -12,4 +12,5 @@ mod segment_hostile;
 mod segment_tamper;
 mod segments;
 mod support;
+mod telemetry;
 mod trust;
