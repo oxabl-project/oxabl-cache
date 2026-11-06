@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use oxabl_cache_format::LookupId;
 use tokio::sync::{OnceCell, mpsc};
@@ -20,6 +20,18 @@ pub(crate) struct Sink {
     tx: mpsc::Sender<FetchOutcome>,
     delivered: Mutex<Vec<bool>>,
     failures: Mutex<Tally>,
+    installed: AtomicU64,
+    not_found: AtomicU64,
+    failed: AtomicU64,
+    bytes: AtomicU64,
+}
+
+/// What one fetch settled with.
+pub(crate) struct Settled {
+    pub installed: u64,
+    pub not_found: u64,
+    pub failed: u64,
+    pub bytes: u64,
 }
 
 impl Sink {
@@ -28,6 +40,38 @@ impl Sink {
             tx,
             delivered: Mutex::new(vec![false; requests]),
             failures: Mutex::default(),
+            installed: AtomicU64::new(0),
+            not_found: AtomicU64::new(0),
+            failed: AtomicU64::new(0),
+            bytes: AtomicU64::new(0),
+        }
+    }
+
+    fn count(&self, outcome: &FetchOutcome) {
+        match outcome {
+            FetchOutcome::Installed { files, .. } => {
+                self.installed.fetch_add(1, Ordering::Relaxed);
+                let size: u64 = files.iter().map(|f| f.size).sum();
+                self.bytes.fetch_add(size, Ordering::Relaxed);
+            }
+            FetchOutcome::Miss {
+                reason: MissReason::NotFound,
+                ..
+            } => {
+                self.not_found.fetch_add(1, Ordering::Relaxed);
+            }
+            FetchOutcome::Miss { .. } => {
+                self.failed.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    pub fn settled(&self) -> Settled {
+        Settled {
+            installed: self.installed.load(Ordering::Relaxed),
+            not_found: self.not_found.load(Ordering::Relaxed),
+            failed: self.failed.load(Ordering::Relaxed),
+            bytes: self.bytes.load(Ordering::Relaxed),
         }
     }
 
@@ -89,6 +133,7 @@ impl Sink {
         if let FetchOutcome::Miss { reason, .. } = &outcome {
             self.count_failure(*reason);
         }
+        self.count(&outcome);
         permit.send(outcome);
     }
 }
@@ -108,6 +153,7 @@ pub(crate) struct Session {
     pub sink: Sink,
     pub committer: Committer,
     pub refreshed: OnceCell<Option<Arc<RosterView>>>,
+    pub started: Instant,
 }
 
 impl Session {

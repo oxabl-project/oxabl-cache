@@ -1,3 +1,6 @@
+//! A private JSON-lines file that keeps only its newest entries, safe to share between
+//! processes: writers take turns under a lock and replace the file atomically.
+
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
@@ -6,18 +9,21 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use nix::fcntl::{Flock, FlockArg, OFlag};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
-use super::LoggedError;
-
-/// Entries kept; older ones are dropped first.
-const MAX_ENTRIES: usize = 30;
-/// Bytes kept; older entries are dropped first.
-const MAX_BYTES: usize = 4 * 1024;
 const LOCK_WAIT: Duration = Duration::from_millis(250);
 const LOCK_POLL: Duration = Duration::from_millis(5);
 
+/// How much a log keeps; older entries are dropped first.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Bounds {
+    pub entries: usize,
+    pub bytes: usize,
+}
+
 fn invalid() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, "error log")
+    io::Error::new(io::ErrorKind::InvalidData, "bounded log")
 }
 
 fn open_plain(path: &Path) -> io::Result<File> {
@@ -32,14 +38,14 @@ fn open_plain(path: &Path) -> io::Result<File> {
 }
 
 /// The entries of the log, oldest first; lines that do not parse are skipped.
-pub(super) fn read(path: &Path) -> io::Result<Vec<LoggedError>> {
+pub(crate) fn read<T: DeserializeOwned>(path: &Path, bounds: Bounds) -> io::Result<Vec<T>> {
     let file = match open_plain(path) {
         Ok(file) => file,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
     };
     let mut text = String::new();
-    file.take(2 * MAX_BYTES as u64)
+    file.take(2 * bounds.bytes as u64)
         .read_to_string(&mut text)
         .map_err(|_| invalid())?;
     Ok(text
@@ -70,9 +76,17 @@ fn lock(path: &Path) -> io::Result<Flock<File>> {
     }
 }
 
-/// Adds `entries` to the log, keeps the newest within the bounds and replaces the file
-/// atomically, so a reader sees the log before or after, and concurrent writers take turns.
-pub(super) fn append(path: &Path, entries: &[LoggedError]) -> io::Result<()> {
+/// Lets `change` edit the entries under the lock, keeps the newest within `bounds` and replaces
+/// the file atomically, so a reader sees the log before or after, and concurrent writers take
+/// turns. Returns what `change` returned.
+pub(crate) fn update<T, R>(
+    path: &Path,
+    bounds: Bounds,
+    change: impl FnOnce(&mut Vec<T>) -> R,
+) -> io::Result<R>
+where
+    T: Serialize + DeserializeOwned,
+{
     let dir = path.parent().ok_or_else(invalid)?;
     fs::DirBuilder::new()
         .recursive(true)
@@ -81,18 +95,18 @@ pub(super) fn append(path: &Path, entries: &[LoggedError]) -> io::Result<()> {
     let name = path.file_name().ok_or_else(invalid)?.to_string_lossy();
     let _turn = lock(&dir.join(format!(".{name}.lock")))?;
 
-    let mut kept = read(path).unwrap_or_default();
-    kept.extend_from_slice(entries);
+    let mut kept = read(path, bounds).unwrap_or_default();
+    let answer = change(&mut kept);
     let mut lines: Vec<String> = kept
         .iter()
         .filter_map(|entry| serde_json::to_string(entry).ok())
         .collect();
     let mut bytes: usize = lines.iter().map(|line| line.len() + 1).sum();
-    let mut drop_count = lines.len().saturating_sub(MAX_ENTRIES);
+    let mut drop_count = lines.len().saturating_sub(bounds.entries);
     for line in &lines[..drop_count] {
         bytes -= line.len() + 1;
     }
-    while bytes > MAX_BYTES && drop_count + 1 < lines.len() {
+    while bytes > bounds.bytes && drop_count + 1 < lines.len() {
         bytes -= lines[drop_count].len() + 1;
         drop_count += 1;
     }
@@ -113,5 +127,5 @@ pub(super) fn append(path: &Path, entries: &[LoggedError]) -> io::Result<()> {
     if written.is_err() {
         let _ = fs::remove_file(&staging);
     }
-    written
+    written.map(|()| answer)
 }

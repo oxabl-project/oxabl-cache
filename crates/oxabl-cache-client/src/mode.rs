@@ -1,7 +1,8 @@
 //! What a client does with the cache.
 
 /// A client's role: which namespaces it reads and whether it writes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Mode {
     /// Reads trusted entries and writes trusted entries signed with its `ci` key.
     Ci,

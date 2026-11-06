@@ -34,6 +34,16 @@ tracing.workspace = true
 url.workspace = true
 zeroize.workspace = true
 zstd.workspace = true
+keyring-core = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus-secret-service-keyring-store = { workspace = true, optional = true }
+
+[features]
+default = ["os-keyring"]
+## Reads and stores the identity passphrase in the operating system's keyring (the Secret
+## Service on Linux).
+os-keyring = ["dep:keyring-core", "dep:zbus-secret-service-keyring-store"]
 
 [dev-dependencies]
 oxabl-cache-e2e = { path = "../../tests/e2e" }
