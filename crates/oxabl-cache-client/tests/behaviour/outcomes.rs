@@ -25,13 +25,14 @@ async fn a_reader_that_stalls_longer_than_the_idle_timeout_loses_no_outcome() {
     let reader = world.machine(&world.dev, Mode::Developer).await;
     let mut options = FetchOptions::new(reader.stage());
     options.durability = Durability::Caller;
-    options.idle_timeout = Duration::from_millis(4_000);
+    // Long enough for a slow CI machine to start the first downloads.
+    options.idle_timeout = Duration::from_millis(20_000);
 
     let mut fetch = reader
         .cache
         .fetch(requests(sets.iter().map(|s| s.key)), options);
     let mut outcomes = vec![fetch.next().await.expect("the first outcome")];
-    tokio::time::sleep(Duration::from_millis(6_000)).await;
+    tokio::time::sleep(Duration::from_millis(25_000)).await;
     while let Some(outcome) = fetch.next().await {
         outcomes.push(outcome);
     }
