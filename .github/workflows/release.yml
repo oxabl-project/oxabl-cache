@@ -15,6 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
+      desktop_created: ${{ steps.release.outputs['desktop--release_created'] }}
+      desktop_tag: ${{ steps.release.outputs['desktop--tag_name'] }}
+      desktop_version: ${{ steps.release.outputs['desktop--version'] }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -52,3 +55,20 @@ jobs:
         timeout-minutes: 75
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  desktop:
+    name: Desktop app for Linux
+    needs: release-please
+    if: ${{ needs.release-please.outputs.desktop_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+      - name: Install the pinned toolchain
+        run: nix develop --command rustup toolchain install
+      - name: Build and pack against glibc 2.34
+        run: nix develop --command desktop/scripts/package.sh "${{ needs.release-please.outputs.desktop_version }}"
+      - name: Attach to the release
+        run: gh release upload "${{ needs.release-please.outputs.desktop_tag }}" desktop/target/dist/*.tar.gz desktop/target/dist/*.sha256 --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
