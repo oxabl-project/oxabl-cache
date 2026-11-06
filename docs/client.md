@@ -189,13 +189,15 @@ need:
 
 - `Config::local_activity()`, the fetches and stores of this machine (below), and
   `ActivitySummary::of(&activities)` for their averages.
-- `Invite::new(&config, name, issuer, client_id)`, `Invite::parse`, `to_text`, `config()` and
-  `cache_toml()` (below).
+- `Invite::new(&config, name, sign_in)`, with `sign_in` an optional `(issuer, client_id)`,
+  `Invite::parse`, `to_text`, `sign_in()`, `config()` and `cache_toml()` (below).
 - `me(&config)`, the caches the credential holds a grant on (`GET /v1/me`); `round_trip(&config,
   tries)`, the fastest round trip to the server's health check; and `signed_in(&config)`, whether
   a stored login session for the tenant is unexpired.
 - `save_passphrase`, `stored_passphrase` and `forget_passphrase`: the identity passphrase in the
-  operating system's keyring (below).
+  operating system's keyring (below). `save_token`, `stored_token` and `forget_token` keep an
+  access token there the same way, under the account `token <tenant> <server>`; the library
+  never reads it by itself, the caller passes it as `Credentials::Token`.
 
 - `Owner::open(config)` opens the cache as an owner whose signing key the repository pins, and
   `add_member`, `remove_member`, `rotate`, `add_owner` and `remove_owner` publish the next roster
@@ -517,7 +519,10 @@ drops repeats by report id. The server cannot read a report (security.md, "Telem
 An invite is one line, `oxc-invite:` and the unpadded base64url of a JSON object with a
 4-byte BLAKE3 checksum appended: the server, tenant, cache, `owner_keys` and
 `min_roster_version` that `.oxabl/cache.toml` pins, a display name, and the OIDC issuer and
-public client id people sign in with. It holds no secret. `Invite::config()` is a `developer`
+public client id people sign in with. The issuer and client id come together or not at all:
+without them, people join with an access token a tenant administrator gives them
+(`POST /v1/tenant/tokens`), and an invite with only one of the two is refused. It holds no
+secret. `Invite::config()` is a `developer`
 configuration whose pins come from the invite, so a person who trusts the sender of the invite
 trusts the cache as one who trusts the repository. A changed character fails the checksum, and
 an issuer that is not `https` is refused.
@@ -560,7 +565,7 @@ establish what it needs fails; it never reports success for nothing.
 | `owner add <descriptor> --label <l> --cosign-identity-file <f>` | Add an owner (below). |
 | `owner remove <label\|ed25519:key> [--purge]` | Remove an owner and start a new epoch (below). |
 | `login --issuer <url> --client-id <id>`, `logout` | Device-flow OIDC session for humans (below). |
-| `invite --name <n> --issuer <url> --client-id <id>` | Print a one-line invite to the repository's cache for the desktop app (above). |
+| `invite --name <n> [--issuer <url> --client-id <id>]` | Print a one-line invite to the repository's cache for the desktop app (above). Without `--issuer` and `--client-id`, people join with an access token. |
 | `identity remember`, `identity forget` | Put the identity file's passphrase in the operating system's keyring, after checking that it unlocks the file, or remove it. |
 | `status` | Mode, principal, roster, epoch, quota, or why the cache is off, and the last five failures from the failure log (`recent_errors` in `--json`, newest first, each `{at, operation, kind, message}`), whether the cache is on or off. |
 | `dict train --outputs <dir> [--publish]` | Train a 112 KiB dictionary from sampled outputs, report the ratio gain, and publish it as `ci` when the gain is at least 1.3x. |

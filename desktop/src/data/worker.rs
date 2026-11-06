@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
@@ -24,8 +25,17 @@ pub enum Command {
         remember: bool,
         invites: Vec<String>,
     },
+    /// Find out what joining still needs: a sign-in, a token, or nothing.
+    Prepare {
+        invite: Invite,
+    },
     SignIn {
         invite: Invite,
+    },
+    /// Check a pasted access token and keep it.
+    UseToken {
+        invite: Invite,
+        token: SecretString,
     },
     Join {
         invite: Invite,
@@ -57,8 +67,13 @@ pub enum Event {
         url: String,
         code: String,
     },
+    /// This machine has a credential for the organisation: a sign-in or an accepted token.
     SignedIn,
     SignInFailed(String),
+    NeedsSignIn,
+    /// The organisation takes an access token; with why the last one did not do.
+    NeedsToken(Option<String>),
+    TokenRefused(String),
     /// What the person sends an owner, and the passphrase of an identity made just now.
     JoinRequest {
         command: String,
@@ -83,6 +98,8 @@ pub(crate) struct Context {
     pub wake: Option<Arc<dyn Fn() + Send + Sync>>,
     /// The unlocked identity string, once unlocked.
     pub identity: Mutex<Option<SecretString>>,
+    /// Pasted tokens by organisation and server; `None` when the keyring has none.
+    pub tokens: Mutex<BTreeMap<String, Option<SecretString>>>,
 }
 
 impl Context {
@@ -121,6 +138,7 @@ impl Worker {
             events,
             wake,
             identity: Mutex::new(None),
+            tokens: Mutex::new(BTreeMap::new()),
         });
         std::thread::Builder::new()
             .name("oxabl-cache-worker".into())
@@ -154,6 +172,13 @@ impl Worker {
     }
 }
 
+/// One step of joining runs at a time; a new one ends the last.
+fn replace(joining: &mut Option<JoinHandle<()>>, next: JoinHandle<()>) {
+    if let Some(previous) = joining.replace(next) {
+        previous.abort();
+    }
+}
+
 fn handle(context: &Arc<Context>, command: Command, joining: &mut Option<JoinHandle<()>>) {
     let context = context.clone();
     match command {
@@ -177,16 +202,29 @@ fn handle(context: &Arc<Context>, command: Command, joining: &mut Option<JoinHan
                 }
             });
         }
+        Command::Prepare { invite } => {
+            replace(
+                joining,
+                tokio::spawn(async move { join::prepare(&context, &invite).await }),
+            );
+        }
         Command::SignIn { invite } => {
-            tokio::spawn(async move { join::sign_in(&context, &invite).await });
+            replace(
+                joining,
+                tokio::spawn(async move { join::sign_in(&context, &invite).await }),
+            );
+        }
+        Command::UseToken { invite, token } => {
+            replace(
+                joining,
+                tokio::spawn(async move { join::use_token(&context, &invite, token).await }),
+            );
         }
         Command::Join { invite } => {
-            if let Some(previous) = joining.take() {
-                previous.abort();
-            }
-            *joining = Some(tokio::spawn(
-                async move { join::join(&context, &invite).await },
-            ));
+            replace(
+                joining,
+                tokio::spawn(async move { join::join(&context, &invite).await }),
+            );
         }
         Command::CancelJoin => {
             if let Some(previous) = joining.take() {

@@ -23,7 +23,10 @@ async fn an_owner_prints_an_invite_that_pins_the_repository_cache() {
     let invite = Invite::parse(printed.trim()).expect("an invite");
     assert_eq!(invite.cache(), owned.cache);
     assert_eq!(invite.name(), "Codebase");
-    assert_eq!(invite.client_id(), "oxabl-desktop");
+    assert_eq!(
+        invite.sign_in(),
+        Some(("https://login.example.com/", "oxabl-desktop"))
+    );
     assert_eq!(
         invite.cache_toml(),
         std::fs::read_to_string(owned.world.repo.path().join(".oxabl/cache.toml"))
@@ -49,8 +52,24 @@ async fn an_owner_prints_an_invite_that_pins_the_repository_cache() {
         invite
     );
 
+    let without = owned
+        .owner
+        .text(&["invite", "--name", "Codebase"])
+        .ok()
+        .stdout;
+    let without = Invite::parse(without.trim()).expect("an invite without a sign-in");
+    assert_eq!(without.sign_in(), None);
+    assert_eq!(without.cache_toml(), invite.cache_toml());
+
     for args in [
         vec!["invite", "--name", "Codebase", "--client-id", "x"],
+        vec![
+            "invite",
+            "--name",
+            "Codebase",
+            "--issuer",
+            "https://login.example.com",
+        ],
         vec![
             "invite",
             "--name",

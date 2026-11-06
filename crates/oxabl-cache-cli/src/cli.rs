@@ -181,12 +181,13 @@ pub struct InviteArgs {
     /// The name the invite shows, such as the codebase.
     #[arg(long)]
     pub name: String,
-    /// The identity provider's issuer URL people sign in at.
-    #[arg(long, env = "OXABL_CACHE_OIDC_ISSUER")]
-    pub issuer: String,
+    /// The identity provider's issuer URL people sign in at. Without it and `--client-id`,
+    /// people join with an access token instead.
+    #[arg(long, env = "OXABL_CACHE_OIDC_ISSUER", requires = "client_id")]
+    pub issuer: Option<String>,
     /// The public client id of the device login.
-    #[arg(long, env = "OXABL_CACHE_OIDC_CLIENT_ID")]
-    pub client_id: String,
+    #[arg(long, env = "OXABL_CACHE_OIDC_CLIENT_ID", requires = "issuer")]
+    pub client_id: Option<String>,
 }
 
 #[derive(Args)]

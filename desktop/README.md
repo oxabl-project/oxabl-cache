@@ -26,7 +26,12 @@ the cache's key and shares it through the server, which cannot read it (docs/sec
 ## Joining
 
 1. **Paste the invite** an owner sent you (`oxabl-cache invite` prints one).
-2. **Sign in.** The window shows a code and opens your organisation's sign-in page.
+2. **Sign in.** The window shows a code and opens your organisation's sign-in page. When the
+   invite names no sign-in, or you press **Use an access token instead**, paste an access token
+   from your organisation's administrator. The window checks that it reaches the cache and keeps
+   it in the keyring, never in a file. **Sign out** in Settings forgets it; only the
+   administrator can revoke it. The window skips this step when the computer already has a
+   credential for the organisation: a sign-in, a kept token, or `OXABL_CACHE_TOKEN`.
 3. **Ask to be added.** Copy the request and send it to an owner, who runs it once. The window
    notices by itself and says "You're in".
 

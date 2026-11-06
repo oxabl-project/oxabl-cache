@@ -7,6 +7,7 @@ use oxabl_cache_client::{
     round_trip,
 };
 
+use super::credentials;
 use super::model::{CacheCard, Numbers, Standing, recent_pull_times};
 use super::worker::{Context, Event};
 
@@ -19,12 +20,13 @@ pub(crate) fn now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// The invite's cache as this machine opens it: its state directory, its CA bundle and, once
-/// unlocked, its identity.
+/// The invite's cache as this machine opens it: its state directory, its CA bundle, a pasted
+/// token and, once unlocked, its identity.
 pub(crate) fn config_of(context: &Context, invite: &Invite) -> Config {
     let mut config = invite
         .config()
-        .with_state_dir(context.paths.state_dir.clone());
+        .with_state_dir(context.paths.state_dir.clone())
+        .with_credentials(credentials::credentials_of(context, invite));
     if let Some(ca) = &context.paths.ca_file {
         config = config.with_ca_file(ca.clone());
     }
@@ -108,6 +110,7 @@ pub(crate) async fn refresh_all(context: &Arc<Context>, invites: &[String]) {
         .iter()
         .filter_map(|t| Invite::parse(t).ok())
         .collect();
+    credentials::load(context, &parsed).await;
     let mut running = tokio::task::JoinSet::new();
     for invite in parsed.clone() {
         let context = context.clone();

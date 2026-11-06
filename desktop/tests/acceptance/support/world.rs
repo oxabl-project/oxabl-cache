@@ -41,7 +41,8 @@ pub struct Org {
     pub dir: TestDir,
 }
 
-/// A cache an owner has set up, and the invite the owner sends people.
+/// A cache an owner has set up, and the invites the owner sends people: one that names the
+/// organisation's sign-in, and one for people who bring an access token.
 pub struct OwnedCache {
     pub id: String,
     /// The owner's identity string.
@@ -49,6 +50,7 @@ pub struct OwnedCache {
     pub owner_token: String,
     pub repo: PathBuf,
     pub invite: Invite,
+    pub token_invite: Invite,
 }
 
 impl Org {
@@ -157,13 +159,15 @@ impl Org {
         fs::create_dir_all(repo.join(".oxabl")).expect("repo");
         fs::write(repo.join(".oxabl/cache.toml"), report.cache_toml).expect("cache.toml");
         let config = Config::from_repo(&repo).expect("config");
-        let invite = Invite::new(&config, name, &self.issuer, CLIENT_ID).expect("invite");
+        let invite = Invite::new(&config, name, Some((&self.issuer, CLIENT_ID))).expect("invite");
+        let token_invite = Invite::new(&config, name, None).expect("invite");
         OwnedCache {
             id,
             owner: owner_text,
             owner_token,
             repo,
             invite,
+            token_invite,
         }
     }
 

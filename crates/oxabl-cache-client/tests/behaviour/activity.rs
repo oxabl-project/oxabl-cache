@@ -197,8 +197,7 @@ async fn an_invite_carries_the_pins_and_opens_the_same_cache() {
     let invite = Invite::new(
         &pinned,
         "Codebase",
-        "https://login.example.com/",
-        "oxabl-desktop",
+        Some(("https://login.example.com/", "oxabl-desktop")),
     )
     .expect("invite");
     let text = invite.to_text();
@@ -208,8 +207,10 @@ async fn an_invite_carries_the_pins_and_opens_the_same_cache() {
     assert_eq!(read, invite);
     assert_eq!(read.name(), "Codebase");
     assert_eq!(read.cache(), world.cache);
-    assert_eq!(read.issuer(), "https://login.example.com/");
-    assert_eq!(read.client_id(), "oxabl-desktop");
+    assert_eq!(
+        read.sign_in(),
+        Some(("https://login.example.com/", "oxabl-desktop"))
+    );
     assert_eq!(
         read.cache_toml(),
         std::fs::read_to_string(world.repo().join(".oxabl/cache.toml")).expect("toml")
@@ -253,8 +254,70 @@ async fn an_invite_carries_the_pins_and_opens_the_same_cache() {
     let http = Invite::new(
         &pinned,
         "Codebase",
-        "http://login.example.com/",
-        "oxabl-desktop",
+        Some(("http://login.example.com/", "oxabl-desktop")),
     );
     assert!(http.is_err(), "the issuer must be https");
+}
+
+/// The JSON inside an invite, and an invite of any JSON with a valid checksum.
+fn invite_json(text: &str) -> serde_json::Value {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(text.strip_prefix("oxc-invite:").expect("prefix"))
+        .expect("base64");
+    serde_json::from_slice(&bytes[..bytes.len() - 4]).expect("json")
+}
+
+fn invite_of(json: &serde_json::Value) -> String {
+    use base64::Engine as _;
+    let mut bytes = serde_json::to_vec(json).expect("json");
+    let check = blake3::hash(&bytes);
+    bytes.extend_from_slice(&check.as_bytes()[..4]);
+    format!(
+        "oxc-invite:{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_invite_without_a_sign_in_carries_only_the_pins() {
+    let world = World::start().await;
+    let dirs = TestDir::new("invite").expect("dir");
+    let pinned = world.config(&world.dev, Mode::Developer, &dirs.path().join("state"));
+    let invite = Invite::new(&pinned, "Codebase", None).expect("invite");
+    let text = invite.to_text();
+    let json = invite_json(&text);
+    assert!(json.get("issuer").is_none() && json.get("client_id").is_none());
+    let read = Invite::parse(&text).expect("parse");
+    assert_eq!(read, invite);
+    assert_eq!(read.sign_in(), None);
+    assert_eq!(read.cache(), world.cache);
+
+    let config = read
+        .config()
+        .with_credentials(oxabl_cache_client::Credentials::Token(
+            oxabl_cache_client::SecretString::from(world.dev.token.clone()),
+        ))
+        .with_identity(oxabl_cache_client::IdentitySource::Value(
+            oxabl_cache_client::SecretString::from(world.dev.identity.clone()),
+        ))
+        .with_state_dir(dirs.path().join("state"));
+    Cache::open(config).await.expect("open from the invite");
+
+    let signed = Invite::new(
+        &pinned,
+        "Codebase",
+        Some(("https://login.example.com/", "oxabl-desktop")),
+    )
+    .expect("invite");
+    let full = invite_json(&signed.to_text());
+    for half in ["issuer", "client_id"] {
+        let mut json = full.clone();
+        json.as_object_mut().expect("object").remove(half);
+        assert!(
+            Invite::parse(&invite_of(&json)).is_err(),
+            "an invite without its {half} is refused"
+        );
+    }
+    assert_eq!(Invite::parse(&invite_of(&full)).expect("parse"), signed);
 }

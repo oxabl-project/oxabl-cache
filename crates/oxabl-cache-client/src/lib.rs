@@ -52,7 +52,10 @@ pub use identity::{
 };
 pub use install::Durability;
 pub use invite::Invite;
-pub use keyring::{KeyringError, forget_passphrase, save_passphrase, stored_passphrase};
+pub use keyring::{
+    KeyringError, forget_passphrase, forget_token, save_passphrase, save_token, stored_passphrase,
+    stored_token,
+};
 pub use login::{Challenge, DeviceLogin, LoginError, LoginSession, Logout, logout};
 pub use me::{Me, VisibleCache, me, round_trip, signed_in};
 pub use mode::Mode;

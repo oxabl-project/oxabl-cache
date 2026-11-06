@@ -28,10 +28,17 @@ pub enum Side {
 pub enum JoinStep {
     /// Step 1: paste the invite.
     Invite,
+    /// Step 2, briefly: finding out whether this machine has a credential already.
+    Checking,
     /// Step 2: approve the sign-in in the browser.
     SignIn {
         url: Option<String>,
         code: Option<String>,
+        failed: Option<String>,
+    },
+    /// Step 2: paste an access token from the organisation's administrator.
+    Token {
+        busy: bool,
         failed: Option<String>,
     },
     /// Step 3: send the request to an owner and wait.
@@ -47,6 +54,7 @@ pub enum JoinStep {
 pub struct JoinFlow {
     pub step: JoinStep,
     pub edit: TextEdit,
+    pub token: TextEdit,
     pub invite: Option<Invite>,
     pub error: Option<String>,
 }
@@ -56,6 +64,7 @@ impl Default for JoinFlow {
         JoinFlow {
             step: JoinStep::Invite,
             edit: TextEdit::new(""),
+            token: TextEdit::new(""),
             invite: None,
             error: None,
         }

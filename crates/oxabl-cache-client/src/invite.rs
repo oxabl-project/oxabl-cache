@@ -1,6 +1,6 @@
 //! A one-line invitation to a cache: what `.oxabl/cache.toml` pins, plus the issuer a person
-//! signs in with. It holds no secret, so it travels by chat or mail; a checksum catches a
-//! damaged copy.
+//! signs in with, if the organisation has one. It holds no secret, so it travels by chat or
+//! mail; a checksum catches a damaged copy.
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -33,9 +33,15 @@ pub struct Invite {
     cache: CacheId,
     owner_keys: Vec<PublicKey>,
     min_roster_version: u64,
+    sign_in: Option<SignIn>,
+    name: String,
+}
+
+/// Where the invited sign in: an OIDC issuer and its public client.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SignIn {
     issuer: Url,
     client_id: String,
-    name: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -48,8 +54,10 @@ struct Wire {
     cache: String,
     owner_keys: Vec<String>,
     min_roster_version: u64,
-    issuer: String,
-    client_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    issuer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    client_id: Option<String>,
 }
 
 fn displayable(text: &str, limit: usize) -> bool {
@@ -57,13 +65,12 @@ fn displayable(text: &str, limit: usize) -> bool {
 }
 
 impl Invite {
-    /// An invitation to the cache `config` pins, named `name`, whose members sign in at `issuer`
-    /// with the public client `client_id`.
+    /// An invitation to the cache `config` pins, named `name`. With `sign_in`, an issuer and
+    /// its public client id, members sign in there; without, they bring an access token.
     pub fn new(
         config: &Config,
         name: &str,
-        issuer: &str,
-        client_id: &str,
+        sign_in: Option<(&str, &str)>,
     ) -> Result<Invite, ConfigError> {
         let invite = Invite {
             server: config.server.clone(),
@@ -71,8 +78,9 @@ impl Invite {
             cache: config.pins.cache,
             owner_keys: config.pins.owner_keys.clone(),
             min_roster_version: config.pins.min_roster_version,
-            issuer: Url::parse(issuer).map_err(|_| ConfigError::Invalid("issuer"))?,
-            client_id: client_id.to_owned(),
+            sign_in: sign_in
+                .map(|(issuer, client_id)| SignIn::new(issuer, client_id.to_owned()))
+                .transpose()?,
             name: name.trim().to_owned(),
         };
         invite.check()?;
@@ -81,11 +89,13 @@ impl Invite {
 
     fn check(&self) -> Result<(), ConfigError> {
         check_server(&self.server)?;
-        if self.issuer.scheme() != "https" && check_server(&self.issuer).is_err() {
-            return Err(ConfigError::Invalid("the issuer must be https"));
-        }
-        if !displayable(&self.client_id, 256) {
-            return Err(ConfigError::Invalid("client id"));
+        if let Some(sign_in) = &self.sign_in {
+            if sign_in.issuer.scheme() != "https" && check_server(&sign_in.issuer).is_err() {
+                return Err(ConfigError::Invalid("the issuer must be https"));
+            }
+            if !displayable(&sign_in.client_id, 256) {
+                return Err(ConfigError::Invalid("client id"));
+            }
         }
         if !displayable(&self.name, MAX_NAME) {
             return Err(ConfigError::Invalid("name"));
@@ -131,8 +141,11 @@ impl Invite {
                 .map(|key| parse_owner_key(key))
                 .collect::<Result<_, _>>()?,
             min_roster_version: wire.min_roster_version,
-            issuer: Url::parse(&wire.issuer).map_err(|_| ConfigError::Invalid("issuer"))?,
-            client_id: wire.client_id,
+            sign_in: match (wire.issuer, wire.client_id) {
+                (Some(issuer), Some(client_id)) => Some(SignIn::new(&issuer, client_id)?),
+                (None, None) => None,
+                _ => return Err(ConfigError::Invalid("the invite is damaged")),
+            },
             name: wire.name,
         };
         invite.check()?;
@@ -149,8 +162,8 @@ impl Invite {
             cache: self.cache.to_text(),
             owner_keys: self.owner_keys.iter().map(owner_key_text).collect(),
             min_roster_version: self.min_roster_version,
-            issuer: self.issuer.to_string(),
-            client_id: self.client_id.clone(),
+            issuer: self.sign_in.as_ref().map(|s| s.issuer.to_string()),
+            client_id: self.sign_in.as_ref().map(|s| s.client_id.clone()),
         };
         let mut bytes = serde_json::to_vec(&wire).expect("an invite serialises");
         let check = check_bytes(&bytes);
@@ -213,11 +226,19 @@ impl Invite {
         self.cache.to_text()
     }
 
-    pub fn issuer(&self) -> &str {
-        self.issuer.as_str()
+    /// The issuer and public client id members sign in with; `None` when they bring a token.
+    pub fn sign_in(&self) -> Option<(&str, &str)> {
+        self.sign_in
+            .as_ref()
+            .map(|s| (s.issuer.as_str(), s.client_id.as_str()))
     }
+}
 
-    pub fn client_id(&self) -> &str {
-        &self.client_id
+impl SignIn {
+    fn new(issuer: &str, client_id: String) -> Result<SignIn, ConfigError> {
+        Ok(SignIn {
+            issuer: Url::parse(issuer).map_err(|_| ConfigError::Invalid("issuer"))?,
+            client_id,
+        })
     }
 }

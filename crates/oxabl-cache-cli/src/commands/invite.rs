@@ -9,8 +9,8 @@ use crate::output::print_json;
 /// Prints the invite for the repository's cache; it holds no secret.
 pub fn run(context: &Context, args: InviteArgs) -> Result<(), Failure> {
     let config = context.session_config()?;
-    let invite =
-        Invite::new(&config, &args.name, &args.issuer, &args.client_id).map_err(Failure::usage)?;
+    let sign_in = args.issuer.as_deref().zip(args.client_id.as_deref());
+    let invite = Invite::new(&config, &args.name, sign_in).map_err(Failure::usage)?;
     if context.json {
         print_json(&json!({"invite": invite.to_text()}));
     } else {

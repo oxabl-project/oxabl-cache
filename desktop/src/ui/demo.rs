@@ -175,6 +175,17 @@ pub fn join_sign_in(ui: &mut Ui) {
     };
 }
 
+pub fn join_token(ui: &mut Ui) {
+    base(ui);
+    ui.screen = Screen::Join;
+    ui.join.invite = demo_invite();
+    ui.join.token = rune::TextEdit::new("oxc_demo");
+    ui.join.step = JoinStep::Token {
+        busy: false,
+        failed: None,
+    };
+}
+
 pub fn join_request(ui: &mut Ui) {
     base(ui);
     ui.screen = Screen::Join;
@@ -213,6 +224,7 @@ pub const SCENES: &[Scene] = &[
     ("welcome", welcome),
     ("join-invite", join_invite),
     ("join-sign-in", join_sign_in),
+    ("join-token", join_token),
     ("join-request", join_request),
     ("joined", joined),
     ("settings", settings),

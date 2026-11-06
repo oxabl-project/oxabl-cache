@@ -5,10 +5,10 @@ use std::time::Duration;
 use oxabl_cache_client::{ExposeSecret, Invite, SecretString};
 use rune::Tx;
 
+use crate::data::model;
 use crate::data::model::{CacheCard, Standing};
 use crate::data::settings::Appearance;
 use crate::data::worker::Command;
-use crate::data::{is_signed_in, model};
 
 use super::state::{JoinFlow, JoinStep, Screen, Side, Speed, Ui};
 
@@ -28,11 +28,7 @@ pub fn open_detail(ui: &mut Ui, id: &str) {
 }
 
 pub fn home(ui: &mut Ui) {
-    if matches!(
-        ui.join.step,
-        JoinStep::Request { .. } | JoinStep::SignIn { .. }
-    ) && ui.screen == Screen::Join
-    {
+    if !matches!(ui.join.step, JoinStep::Invite | JoinStep::Done) && ui.screen == Screen::Join {
         ui.send(Command::CancelJoin);
     }
     ui.join = JoinFlow::default();
@@ -93,11 +89,8 @@ pub fn continue_join(ui: &mut Ui) {
     }
     ui.join.error = None;
     ui.join.invite = Some(invite.clone());
-    if is_signed_in(&ui.paths, &invite) {
-        begin_request(ui);
-    } else {
-        begin_sign_in(ui);
-    }
+    ui.join.step = JoinStep::Checking;
+    ui.send(Command::Prepare { invite });
 }
 
 pub fn begin_sign_in(ui: &mut Ui) {
@@ -110,6 +103,53 @@ pub fn begin_sign_in(ui: &mut Ui) {
         failed: None,
     };
     ui.send(Command::SignIn { invite });
+}
+
+/// Shows the token step, with why the last token did not do.
+pub fn ask_for_token(ui: &mut Ui, failed: Option<String>) {
+    if ui.join.invite.is_none() {
+        return;
+    }
+    ui.send(Command::CancelJoin);
+    ui.join.token = rune::TextEdit::new("");
+    ui.join.token.focused = true;
+    ui.join.step = JoinStep::Token {
+        busy: false,
+        failed,
+    };
+}
+
+/// Sends the pasted token to be checked.
+pub fn submit_token(ui: &mut Ui) {
+    let Some(invite) = ui.join.invite.clone() else {
+        return;
+    };
+    let text = ui.join.token.text.trim().to_owned();
+    let JoinStep::Token { busy, failed } = &mut ui.join.step else {
+        return;
+    };
+    if *busy {
+        return;
+    }
+    if text.is_empty() {
+        *failed = Some("Paste the access token you were given.".into());
+        return;
+    }
+    *busy = true;
+    *failed = None;
+    ui.send(Command::UseToken {
+        invite,
+        token: SecretString::from(text),
+    });
+}
+
+pub fn paste_token(tx: &mut Tx) {
+    tx.read_clipboard(|ui: &mut Ui, content, _| {
+        ui.join.token = rune::TextEdit::new(content.text().trim());
+        if let JoinStep::Token { failed, .. } = &mut ui.join.step {
+            *failed = None;
+        }
+    });
 }
 
 pub fn begin_request(ui: &mut Ui) {

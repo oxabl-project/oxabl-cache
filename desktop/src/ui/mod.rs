@@ -23,7 +23,10 @@ impl Ui {
         self.speed.values().any(|s| *s == Speed::Testing)
             || matches!(
                 self.join.step,
-                JoinStep::SignIn { failed: None, .. } | JoinStep::Request { failed: None, .. }
+                JoinStep::Checking
+                    | JoinStep::SignIn { failed: None, .. }
+                    | JoinStep::Token { busy: true, .. }
+                    | JoinStep::Request { failed: None, .. }
             ) && self.screen == state::Screen::Join
     }
 }

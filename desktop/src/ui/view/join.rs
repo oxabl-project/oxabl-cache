@@ -125,19 +125,30 @@ fn sign_in_step(ui: &Ui, p: &Palette, code: &Option<String>, failed: &Option<Str
         "Sign in",
         &format!("Approve this computer with your organisation's sign-in for {host}."),
     ));
+    let use_token = parts::quiet_button(
+        p,
+        "use-token",
+        None,
+        "Use an access token instead",
+        |ui: &mut Ui, _: &mut Tx| actions::ask_for_token(ui, None),
+    );
     if let Some(why) = failed {
-        return step
-            .child(problem(p, &Some(why.clone())))
-            .child(row().child(parts::primary_button(
-                p,
-                ui.settings.effects,
-                "try-again",
-                "Try again",
-                true,
-                |ui: &mut Ui, _: &mut Tx| actions::begin_sign_in(ui),
-            )));
+        return step.child(problem(p, &Some(why.clone()))).child(
+            row()
+                .gap(10.0)
+                .center_y()
+                .child(parts::primary_button(
+                    p,
+                    ui.settings.effects,
+                    "try-again",
+                    "Try again",
+                    true,
+                    |ui: &mut Ui, _: &mut Tx| actions::begin_sign_in(ui),
+                ))
+                .child(use_token),
+        );
     }
-    match code {
+    let step = match code {
         None => step.child(parts::waiting(
             p,
             ui.settings.effects,
@@ -186,7 +197,88 @@ fn sign_in_step(ui: &Ui, p: &Palette, code: &Option<String>, failed: &Option<Str
                 ));
             step
         }
+    };
+    step.child(row().child(use_token))
+}
+
+fn token_step(ui: &Ui, p: &Palette, busy: bool, failed: &Option<String>) -> El {
+    let invite = ui.join.invite.as_ref();
+    let host = invite
+        .and_then(|i| i.server().host_str().map(str::to_owned))
+        .unwrap_or_default();
+    let field = row()
+        .w_full()
+        .h(40.0)
+        .px(12.0)
+        .gap(8.0)
+        .center_y()
+        .radius(10.0)
+        .fill(p.code)
+        .border(
+            1.0,
+            if failed.is_some() {
+                p.poor.alpha(0.6)
+            } else {
+                p.border
+            },
+        )
+        .child(
+            text_input(&ui.join.token, parts::CODE)
+                .key("token-field")
+                .label("Access token")
+                .single_line()
+                .secure()
+                .grow(1.0)
+                .min_w(0.0)
+                .color(p.text)
+                .placeholder("oxc_…", p.faint)
+                .on_edit(|ui: &mut Ui| &mut ui.join.token)
+                .on_submit(|ui: &mut Ui, _: &mut Tx| actions::submit_token(ui)),
+        )
+        .child(parts::quiet_button(
+            p,
+            "paste-token",
+            Some(&crate::ui::icons::PASTE),
+            "Paste",
+            |_: &mut Ui, tx: &mut Tx| actions::paste_token(tx),
+        ));
+    let mut step = col()
+        .gap(14.0)
+        .w_full()
+        .child(heading(
+            p,
+            "Paste an access token",
+            &format!("Your organisation's administrator for {host} gives these out. This computer keeps it in its keyring."),
+        ))
+        .child(field)
+        .child(problem(p, failed));
+    if busy {
+        return step.child(parts::waiting(
+            p,
+            ui.settings.effects,
+            "token-checking",
+            "Checking the token…",
+        ));
     }
+    let mut buttons = row().gap(10.0).center_y().child(parts::primary_button(
+        p,
+        ui.settings.effects,
+        "token-continue",
+        "Continue",
+        true,
+        |ui: &mut Ui, _: &mut Tx| actions::submit_token(ui),
+    ));
+    if invite.is_some_and(|i| i.sign_in().is_some()) {
+        buttons = buttons.child(parts::quiet_button(
+            p,
+            "sign-in-instead",
+            None,
+            "Sign in instead",
+            |ui: &mut Ui, _: &mut Tx| actions::begin_sign_in(ui),
+        ));
+    }
+    step = step.child(buttons);
+    step
 }
 
 fn request_step(
@@ -319,6 +411,16 @@ fn done_step(ui: &Ui, p: &Palette) -> El {
 pub fn view(ui: &Ui, p: &Palette) -> El {
     let (index, content) = match &ui.join.step {
         JoinStep::Invite => (0, invite_step(ui, p)),
+        JoinStep::Checking => (
+            1,
+            parts::waiting(
+                p,
+                ui.settings.effects,
+                "join-checking",
+                "Checking this computer…",
+            ),
+        ),
+        JoinStep::Token { busy, failed } => (1, token_step(ui, p, *busy, failed)),
         JoinStep::SignIn { code, failed, .. } => (1, sign_in_step(ui, p, code, failed)),
         JoinStep::Request {
             command,

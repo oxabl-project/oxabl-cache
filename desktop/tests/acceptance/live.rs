@@ -15,7 +15,7 @@
 use oxabl_cache_client::{Config, Invite};
 
 use crate::support::window::Window;
-use crate::support::world::{CLIENT_ID, Person};
+use crate::support::world::Person;
 
 fn required(name: &str) -> String {
     std::env::var(name)
@@ -32,13 +32,7 @@ fn a_deployed_cache_opens_with_its_round_trip_and_size() {
     let member = std::env::var("OXABL_CACHE_IDENTITY").is_ok_and(|v| !v.is_empty());
     let config =
         Config::from_repo(std::path::Path::new(&repo)).expect("the repository's cache.toml");
-    let invite = Invite::new(
-        &config,
-        "Live cache",
-        "https://login.example.com",
-        CLIENT_ID,
-    )
-    .expect("invite");
+    let invite = Invite::new(&config, "Live cache", None).expect("invite");
     let person = Person::new("live");
     person.joined(&[&invite]);
 

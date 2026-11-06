@@ -60,11 +60,36 @@ pub fn apply(ui: &mut Ui, event: Event, tx: &mut rune::Tx) {
             }
         }
         Event::SignedIn => {
-            if matches!(ui.join.step, JoinStep::SignIn { .. }) {
+            if matches!(
+                ui.join.step,
+                JoinStep::Checking | JoinStep::SignIn { .. } | JoinStep::Token { .. }
+            ) {
                 super::actions::begin_request(ui);
             } else {
                 ui.say("Signed in");
                 super::actions::refresh(ui);
+            }
+        }
+        Event::NeedsSignIn => {
+            if matches!(ui.join.step, JoinStep::Checking) {
+                super::actions::begin_sign_in(ui);
+            }
+        }
+        Event::NeedsToken(why) => {
+            if ui.screen == Screen::Join
+                && !matches!(ui.join.step, JoinStep::Invite | JoinStep::Done)
+            {
+                super::actions::ask_for_token(ui, why);
+            } else if let Some(why) = why {
+                ui.say(why);
+            }
+        }
+        Event::TokenRefused(why) => {
+            if let JoinStep::Token { busy, failed } = &mut ui.join.step {
+                *busy = false;
+                *failed = Some(why);
+                ui.join.token = rune::TextEdit::new("");
+                ui.join.token.focused = true;
             }
         }
         Event::SignInFailed(why) => {
