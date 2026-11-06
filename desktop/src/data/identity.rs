@@ -30,6 +30,10 @@ fn keep(context: &Context, identity: &Identity) -> bool {
 pub(crate) async fn unlock_from_keyring(context: &Context) {
     let path = context.paths.identity_file.clone();
     if !path.is_file() {
+        if let Some(identity) = from_environment() {
+            keep(context, &identity);
+            context.send(Event::Unlocked);
+        }
         return;
     }
     let stored = tokio::task::spawn_blocking(move || stored_passphrase(&path))
@@ -73,6 +77,14 @@ pub(crate) async fn unlock(context: &Context, passphrase: SecretString, remember
             false
         }
     }
+}
+
+/// The identity string in `OXABL_CACHE_IDENTITY`, which the command line and CI use too.
+fn from_environment() -> Option<Identity> {
+    let text = std::env::var("OXABL_CACHE_IDENTITY")
+        .ok()
+        .filter(|v| !v.is_empty())?;
+    Identity::parse(&text).ok()
 }
 
 fn fresh_passphrase() -> Option<SecretString> {
