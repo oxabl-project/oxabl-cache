@@ -12,8 +12,8 @@ const SERVICE: &str = "oxabl-cache";
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum KeyringError {
-    /// No keyring is running, or this build has none.
-    Unavailable,
+    /// No keyring is running, or this build has none; the reason says which.
+    Unavailable(String),
     /// The keyring refused or failed.
     Refused(String),
 }
@@ -21,7 +21,7 @@ pub enum KeyringError {
 impl std::fmt::Display for KeyringError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unavailable => f.write_str("no keyring is available"),
+            Self::Unavailable(why) => write!(f, "no keyring is available: {why}"),
             Self::Refused(why) => write!(f, "the keyring refused: {why}"),
         }
     }
@@ -43,7 +43,7 @@ mod store {
 
     pub(super) fn entry(account: &str) -> Result<Entry, KeyringError> {
         let store = zbus_secret_service_keyring_store::Store::new()
-            .map_err(|_| KeyringError::Unavailable)?;
+            .map_err(|e| KeyringError::Unavailable(e.to_string()))?;
         store
             .build(SERVICE, account, None)
             .map_err(|e| KeyringError::Refused(e.to_string()))
@@ -51,7 +51,9 @@ mod store {
 
     pub(super) fn refused(error: Error) -> KeyringError {
         match error {
-            Error::NoStorageAccess(_) | Error::PlatformFailure(_) => KeyringError::Unavailable,
+            Error::NoStorageAccess(why) | Error::PlatformFailure(why) => {
+                KeyringError::Unavailable(why.to_string())
+            }
             other => KeyringError::Refused(other.to_string()),
         }
     }
@@ -72,7 +74,9 @@ pub fn save_passphrase(
     #[cfg(not(all(feature = "os-keyring", target_os = "linux")))]
     {
         let _ = (account(identity_file), passphrase);
-        Err(KeyringError::Unavailable)
+        Err(KeyringError::Unavailable(
+            "this build has no keyring".into(),
+        ))
     }
 }
 
@@ -106,6 +110,8 @@ pub fn forget_passphrase(identity_file: &Path) -> Result<(), KeyringError> {
     #[cfg(not(all(feature = "os-keyring", target_os = "linux")))]
     {
         let _ = account(identity_file);
-        Err(KeyringError::Unavailable)
+        Err(KeyringError::Unavailable(
+            "this build has no keyring".into(),
+        ))
     }
 }
