@@ -1,3 +1,7 @@
 target
 /result
 .direnv
+# Rendered by deploy/fly/deploy.sh from the operator's values, and those values.
+/deploy/fly/fly.toml
+/deploy/fly/server.toml
+/deploy/fly/deploy.env

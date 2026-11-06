@@ -22,6 +22,7 @@ One image, one Helm chart, one systemd unit and one OpenTofu module run every sh
 | A team on one VM: container or systemd, SQLite and local disk | [deploy-container](docs/hosting/deploy-container.md), `deploy/container`, `deploy/systemd` |
 | A cluster: Helm chart on Postgres and an S3-compatible bucket | [deploy-kubernetes](docs/hosting/deploy-kubernetes.md), `deploy/helm/oxabl-cache` |
 | The hosted service: Cloudflare R2 and Hetzner Cloud | [deploy-hosted](docs/hosting/deploy-hosted.md), `deploy/tofu/hosted` |
+| One Fly.io machine: SQLite on a volume and packs in Cloudflare R2 | [deploy-fly](docs/hosting/deploy-fly.md), `deploy/fly` |
 
 The image (static, distroless, non-root, read-only root) will be published, signed, as
 `ghcr.io/oxabl-project/oxabl-cache-server`. Publishing is off until the repository variable `PUBLISH_IMAGE` is

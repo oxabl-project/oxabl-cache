@@ -1,0 +1,65 @@
+# One Fly Machine with SQLite on a volume and the packs in R2 (docs/hosting/deploy-fly.md).
+# deploy/fly/deploy.sh renders this file and server.toml.in (both git-ignored) and deploys.
+
+app = "@FLY_APP@"
+primary_region = "@FLY_REGION@"
+
+[build]
+dockerfile = "../container/Containerfile"
+
+[build.args]
+# Fly mounts a volume owned by root; the machine is its own microVM.
+RUNTIME_USER = "0:0"
+
+[[files]]
+guest_path = "/etc/oxabl-cache/server.toml"
+# Rendered by deploy.sh; relative to the directory fly deploy runs in, the repository root.
+local_path = "deploy/fly/server.toml"
+
+# Fly writes each secret's base64-decoded value to the file.
+[[files]]
+guest_path = "/run/secrets/oxabl-cache/url-key"
+secret_name = "URL_KEY"
+
+[[files]]
+guest_path = "/run/secrets/oxabl-cache/claim-key"
+secret_name = "CLAIM_KEY"
+
+[[files]]
+guest_path = "/run/secrets/oxabl-cache/s3-access-key-id"
+secret_name = "S3_ACCESS_KEY_ID"
+
+[[files]]
+guest_path = "/run/secrets/oxabl-cache/s3-secret-access-key"
+secret_name = "S3_SECRET_ACCESS_KEY"
+
+[mounts]
+source = "oxabl_cache_data"
+destination = "/var/lib/oxabl-cache"
+initial_size = "3gb"
+
+# SQLite allows one machine: never scale this app beyond one.
+[http_service]
+internal_port = 8080
+force_https = true
+auto_stop_machines = "off"
+auto_start_machines = false
+min_machines_running = 1
+
+# The health routes live on the metrics listener, not the public one.
+[checks.ready]
+type = "http"
+port = 9090
+method = "GET"
+path = "/readyz"
+interval = "30s"
+timeout = "5s"
+grace_period = "20s"
+
+[metrics]
+port = 9090
+path = "/metrics"
+
+[[vm]]
+size = "shared-cpu-1x"
+memory = "1gb"

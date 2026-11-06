@@ -8,6 +8,7 @@ Step-by-step guides:
   Postgres and S3.
 - [Kubernetes](hosting/deploy-kubernetes.md): the Helm chart.
 - [Hosted](hosting/deploy-hosted.md): Cloudflare R2 and Hetzner, with OpenTofu.
+- [Fly.io](hosting/deploy-fly.md): one machine, SQLite on a volume and packs in R2.
 
 The image is built and smoke-tested on every pull request; the amd64 build also runs
 the two-node Postgres and S3 smoke test (`deploy/container/cluster-smoke.sh`). From
