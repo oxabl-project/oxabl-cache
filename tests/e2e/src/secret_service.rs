@@ -1,6 +1,7 @@
-//! A private Secret Service: a D-Bus session bus on an abstract socket and an unlocked
-//! `gnome-keyring-daemon` on it, so a child given [`SecretService::environment`] stores and reads
-//! secrets without touching the user's keyring or asking anyone.
+//! A private Secret Service: a D-Bus session bus on a socket in a test directory and an
+//! unlocked `gnome-keyring-daemon` on it, so a child given [`SecretService::environment`] stores
+//! and reads secrets without touching the user's keyring or asking anyone. The socket is a file,
+//! so a child in a network namespace of its own reaches it too.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,7 +32,7 @@ fn short_dir(prefix: &str) -> Result<PathBuf> {
         .collect();
     let dir = root.join(format!("{prefix}{n}-{}", std::process::id()));
     fs::create_dir_all(&dir)?;
-    Ok(dir)
+    Ok(fs::canonicalize(dir)?)
 }
 
 impl SecretService {
@@ -45,14 +46,21 @@ impl SecretService {
             &runtime,
             std::os::unix::fs::PermissionsExt::from_mode(0o700),
         )?;
-        let address = format!(
-            "unix:abstract=oxabl-cache-test-{}-{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        );
+        let address = format!("unix:path={}", dir.join("bus").display());
+        let config = dir.join("bus.conf");
+        fs::write(
+            &config,
+            format!(
+                "<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN\" \
+                 \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n\
+                 <busconfig><type>session</type><listen>{address}</listen><auth>EXTERNAL</auth>\
+                 <policy context=\"default\"><allow send_destination=\"*\" eavesdrop=\"true\"/>\
+                 <allow eavesdrop=\"true\"/><allow own=\"*\"/></policy></busconfig>\n"
+            ),
+        )?;
         let mut bus = Command::new("dbus-daemon");
-        bus.args(["--session", "--nofork", "--nopidfile"])
-            .arg(format!("--address={address}"));
+        bus.arg(format!("--config-file={}", config.display()))
+            .args(["--nofork", "--nopidfile"]);
         let mut bus = Supervised::spawn("dbus", bus, &dir)?;
         wait::until(Duration::from_secs(10), || {
             bus.ensure_running()?;

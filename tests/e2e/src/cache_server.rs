@@ -25,9 +25,12 @@ fn target_dir() -> PathBuf {
 pub fn ensure_built() {
     BUILD.call_once(|| {
         let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml");
         let status = Command::new(cargo)
+            .arg("build")
+            .arg("--manifest-path")
+            .arg(manifest)
             .args([
-                "build",
                 "-p",
                 "oxabl-cache-server",
                 "-p",

@@ -17,6 +17,11 @@ pub fn inside() -> bool {
 /// also answers on `addresses`, asserts that run passed, and returns `false`. The server
 /// binary is built first, outside the namespace.
 pub fn enter(addresses: &[&str]) -> bool {
+    enter_with(addresses, &[])
+}
+
+/// [`enter`], with `environment` added to the test's run inside the namespace.
+pub fn enter_with(addresses: &[&str], environment: &[(String, String)]) -> bool {
     if inside() {
         return true;
     }
@@ -39,6 +44,7 @@ pub fn enter(addresses: &[&str]) -> bool {
         .args(["--user", "--map-root-user", "--net", "sh", "-c", &script])
         .arg(executable)
         .args([&test, "--exact", "--nocapture", "--test-threads=1"])
+        .envs(environment.iter().map(|(k, v)| (k, v)))
         .env(MARKER, "1")
         .output()
         .expect("run unshare");

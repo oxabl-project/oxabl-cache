@@ -13,6 +13,7 @@ pub mod pdeathsig;
 pub mod ports;
 pub mod postgres;
 pub mod random;
+pub mod reexec;
 pub mod s3;
 pub mod secret_service;
 pub mod session;
