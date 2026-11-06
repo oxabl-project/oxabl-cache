@@ -4,6 +4,7 @@
 
 pub mod data;
 pub mod fx;
+mod single_instance;
 pub mod ui;
 
 use rune::{App, AppSpec, Waker, WindowOptions};
@@ -13,6 +14,8 @@ use data::worker::Worker;
 use ui::state::Ui;
 
 pub const TITLE: &str = "Oxabl Cache";
+/// The application id the desktop entry and the window share.
+pub const APP_ID: &str = "org.oxabl.Cache";
 pub const SIZE: (f32, f32) = (520.0, 620.0);
 pub const MIN_SIZE: (f32, f32) = (380.0, 460.0);
 
@@ -40,12 +43,19 @@ pub fn spec() -> AppSpec<Ui> {
     }
 }
 
-/// Opens the window and runs until it closes.
+/// Opens the window and runs until it closes; a second launch brings the open one forward.
 pub fn run() {
+    if !rune::tooling::is_headless() && single_instance::forward_to_running() {
+        return;
+    }
     rune::prewarm_gpu();
-    rune::tooling::set_app_id("org.oxabl.Cache");
-    App::new(spec())
-        .float_on_open()
+    rune::tooling::set_app_id(APP_ID);
+    let app = App::new(spec());
+    if !rune::tooling::is_headless() {
+        let handle = app.handle();
+        single_instance::listen(move |token| handle.activate(token));
+    }
+    app.float_on_open()
         .window_options(WindowOptions {
             transparent: true,
             borderless: true,

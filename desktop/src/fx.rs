@@ -25,6 +25,8 @@ pub const SPARKLES: u32 = 6;
 
 /// Seconds the effects keep moving after something changed.
 const AWAKE_SECONDS: f64 = 8.0;
+/// The first frames draw without effects: compiling their pipelines would hold the window back.
+const EFFECTS_FROM: f64 = 0.4;
 
 const QUALITY: [u32; 3] = [0xf87171, 0xfbbf24, 0x34d399];
 
@@ -116,8 +118,12 @@ impl Compositor<Ui> for Effects {
         let (device, queue, size) = (f.device, f.queue, f.size);
         let t = f.rt.t;
         let ui = &f.rt.state;
-        self.moving = ui.settings.effects
-            && (t - ui.stirred < AWAKE_SECONDS || ui.refreshing || ui.is_waiting());
+        if !ui.settings.effects || t < EFFECTS_FROM {
+            self.moving = ui.settings.effects;
+            f.draw_ui();
+            return;
+        }
+        self.moving = t - ui.stirred < AWAKE_SECONDS || ui.refreshing || ui.is_waiting();
         let marks = &f.rt.marks;
         let mut at: Vec<u32> = Vec::new();
         let mut layers: Vec<FxLayer> = Vec::new();
