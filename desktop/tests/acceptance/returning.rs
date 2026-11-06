@@ -150,3 +150,25 @@ fn appearance_and_effects_are_saved_and_come_back() {
         "the next window opens light"
     );
 }
+
+#[test]
+fn a_computer_waiting_for_its_owner_still_sees_the_cache_and_its_size() {
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    let org = runtime.block_on(Org::start("", "https://login.example.com"));
+    let cache = runtime.block_on(org.cache("ERP codebase"));
+    let person = Person::new("person");
+    let token = runtime.block_on(org.token("alice", &["read", "write:personal"], &[&cache.id]));
+    person.sign_in(&org.tenant, &token);
+    person.joined(&[&cache.invite]);
+
+    let mut window = Window::open(&person.paths);
+    window.wait_until("the cache's size while it waits", |w| {
+        w.shows("Waiting for an owner to add this computer") && w.has(&format!("{}-size", cache.id))
+    });
+    assert!(window.shows("Action needed"));
+    assert_eq!(
+        window.text_of("hero-caches-value").as_deref(),
+        Some("1"),
+        "one cache joined here"
+    );
+}

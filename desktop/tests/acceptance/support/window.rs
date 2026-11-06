@@ -18,8 +18,22 @@ pub struct Window {
 }
 
 impl Window {
-    /// The window as it opens on the person's computer, with its background running.
+    /// The window as it opens on the person's computer, with its background running. The
+    /// tests bring their own credentials: one in the environment would take precedence, as it
+    /// does for a person, and point the window at another server.
     pub fn open(paths: &Paths) -> Window {
+        if std::env::var_os("OXABL_DESKTOP_LIVE_REPO").is_none() {
+            for name in [
+                "OXABL_CACHE_TOKEN",
+                "OXABL_CACHE_IDENTITY",
+                "OXABL_CACHE_SERVER",
+            ] {
+                assert!(
+                    std::env::var_os(name).is_none(),
+                    "unset {name}: the acceptance tests use credentials of their own"
+                );
+            }
+        }
         let mut window = Window::open_without_network(paths);
         let worker = Worker::start(paths.clone(), None);
         window.rt.state.connect(worker);
@@ -80,6 +94,11 @@ impl Window {
             .filter(|e| !e.exiting)
             .find(|e| e.key.as_deref() == Some(key))
             .and_then(|e| e.text.or(e.label))
+    }
+
+    /// The key of a cache's row on the home screen.
+    pub fn card_key(cache: &str) -> String {
+        format!("card-{cache}")
     }
 
     pub fn has(&self, key: &str) -> bool {

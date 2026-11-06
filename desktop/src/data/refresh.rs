@@ -114,15 +114,16 @@ pub(crate) async fn refresh_all(context: &Arc<Context>, invites: &[String]) {
         running.spawn(async move {
             let card = refresh_one(&context, &invite).await;
             context.send(Event::Card(Box::new(card.clone())));
-            card.id
+            card
         });
     }
-    let mut ids = Vec::new();
+    let mut joined_cards = BTreeMap::new();
     while let Some(done) = running.join_next().await {
-        if let Ok(id) = done {
-            ids.push(id);
+        if let Ok(card) = done {
+            joined_cards.insert(card.id.clone(), card);
         }
     }
+    let mut ids: Vec<String> = joined_cards.keys().cloned().collect();
     let joined: BTreeSet<String> = ids.iter().cloned().collect();
     let mut by_tenant: BTreeMap<String, &Invite> = BTreeMap::new();
     for invite in &parsed {
@@ -133,6 +134,15 @@ pub(crate) async fn refresh_all(context: &Arc<Context>, invites: &[String]) {
             continue;
         };
         for visible in seen.caches {
+            if let Some(card) = joined_cards.get(&visible.id) {
+                if card.live_bytes.is_none() {
+                    let mut sized = card.clone();
+                    sized.live_bytes = Some(visible.quota.live_bytes);
+                    sized.hard_bytes = Some(visible.quota.hard_bytes);
+                    context.send(Event::Card(Box::new(sized)));
+                }
+                continue;
+            }
             if joined.contains(&visible.id) || visible.scopes.is_empty() {
                 continue;
             }
