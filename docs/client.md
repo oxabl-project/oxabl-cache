@@ -291,11 +291,15 @@ under them.
 6. Install (below), then yield `Installed`. Expired URLs are refreshed once through
    `urls`.
 
-Outcomes arrive in completion order, not request order. The idle timeout restarts on
-every received byte, every outcome and every durability flush. When it fires, every key still pending yields
-`Miss { reason: Timeout }` and the stream ends. A cold fetch on a slow link therefore
-keeps going as long as bytes flow. Whatever was installed stays installed. Dropping a
-`Fetch` stops the work, removes its temp files, and leaves completed installs alone.
+Outcomes arrive in completion order, not request order. Every request gets exactly one
+outcome. The idle timeout restarts on every received byte, every outcome delivered and every
+durability flush. Time spent waiting for the reader also counts as progress: while the outcome
+buffer is full and a sender waits for room, the fetch is not idle, so a slow reader never
+loses an outcome. A link that stops while the reader is fast still times out. When the idle
+timeout fires, every request without a delivered outcome yields `Miss { reason: Timeout }`
+and the stream ends. A cold fetch on a slow link therefore keeps going as long as bytes flow.
+Whatever was installed stays installed. Dropping a `Fetch` stops the work, removes its temp
+files, and leaves completed installs alone.
 
 ### Install
 

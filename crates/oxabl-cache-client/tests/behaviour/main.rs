@@ -10,6 +10,7 @@ mod fetch_control;
 mod hostile;
 mod identity;
 mod oidc;
+mod outcomes;
 mod roster;
 mod round_trip;
 mod store;
