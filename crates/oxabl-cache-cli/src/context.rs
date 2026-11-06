@@ -83,11 +83,13 @@ impl Context {
     }
 
     /// The passphrase source: the named file, else `OXABL_CACHE_IDENTITY_PASSPHRASE`, else the
-    /// terminal.
-    pub fn passphrase(&self) -> Result<Option<SecretString>, Failure> {
+    /// one the keyring holds for `unlocking` (an existing identity file), else the terminal.
+    pub fn passphrase(&self, unlocking: Option<&Path>) -> Result<Option<SecretString>, Failure> {
         match &self.passphrase_file {
             Some(path) => secrets::read_passphrase_file(path).map(Some),
-            None => match secrets::environment_passphrase() {
+            None => match secrets::environment_passphrase()
+                .or_else(|| unlocking.and_then(oxabl_cache_client::stored_passphrase))
+            {
                 Some(passphrase) => Ok(Some(passphrase)),
                 None if secrets::has_terminal() => Ok(None),
                 None => Err(Failure::usage(
@@ -120,13 +122,16 @@ impl Context {
     /// The repository's cache with this invocation's identity, credentials and settings.
     pub fn config(&self) -> Result<Config, Failure> {
         let source = self.identity_source()?;
-        let protected = matches!(source, IdentitySource::File(_));
+        let protected = match &source {
+            IdentitySource::File(path) => Some(path.clone()),
+            _ => None,
+        };
         let mut config = Config::from_repo(&self.repo_root()?)
             .map_err(Failure::usage)?
             .with_credentials(self.credentials()?)
             .with_identity(source);
-        if protected {
-            config = match self.passphrase()? {
+        if let Some(path) = protected {
+            config = match self.passphrase(Some(&path))? {
                 Some(passphrase) => config.with_passphrase(move || Some(passphrase.clone())),
                 None => config.with_passphrase(|| secrets::prompt("Identity passphrase")),
             };

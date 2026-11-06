@@ -29,6 +29,8 @@
             pkgs.kind
             pkgs.kubectl
             pkgs.systemd
+            pkgs.dbus
+            pkgs.gnome-keyring
           ];
         };
       });

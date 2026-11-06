@@ -12,7 +12,7 @@ use crate::secrets;
 pub async fn run(context: &Context, args: InitArgs) -> Result<(), Failure> {
     let server = Url::parse(&args.server).map_err(|_| Failure::usage("--server is not a URL"))?;
     let path = context.identity_path()?;
-    let passphrase = match context.passphrase()? {
+    let passphrase = match context.passphrase(Some(&path))? {
         Some(passphrase) => passphrase,
         None => secrets::prompt("Identity passphrase")
             .ok_or_else(|| Failure::usage("no passphrase was entered"))?,

@@ -75,6 +75,8 @@ pub enum Command {
     /// Change the owners of the roster.
     #[command(subcommand)]
     Owner(OwnerCommand),
+    /// Print a one-line invite that lets a person join this cache from the desktop app.
+    Invite(InviteArgs),
     /// Log in with a device code and store a session.
     Login(LoginArgs),
     /// Revoke the stored session and delete it.
@@ -96,6 +98,11 @@ pub enum Command {
 pub enum IdentityCommand {
     /// Create an identity and print its public descriptor.
     New(IdentityNewArgs),
+    /// Keep the identity file's passphrase in the operating system's keyring, so nothing asks
+    /// for it again.
+    Remember,
+    /// Remove the identity file's passphrase from the keyring.
+    Forget,
 }
 
 #[derive(Args)]
@@ -167,6 +174,19 @@ pub enum OwnerCommand {
         #[arg(long)]
         purge: bool,
     },
+}
+
+#[derive(Args)]
+pub struct InviteArgs {
+    /// The name the invite shows, such as the codebase.
+    #[arg(long)]
+    pub name: String,
+    /// The identity provider's issuer URL people sign in at.
+    #[arg(long, env = "OXABL_CACHE_OIDC_ISSUER")]
+    pub issuer: String,
+    /// The public client id of the device login.
+    #[arg(long, env = "OXABL_CACHE_OIDC_CLIENT_ID")]
+    pub client_id: String,
 }
 
 #[derive(Args)]
