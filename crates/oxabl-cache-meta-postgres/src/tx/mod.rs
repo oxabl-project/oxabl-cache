@@ -11,6 +11,7 @@ mod packs;
 mod roster;
 mod segments;
 mod teardown;
+mod telemetry;
 
 use crate::error::DbResult;
 use crate::pool::Conn;

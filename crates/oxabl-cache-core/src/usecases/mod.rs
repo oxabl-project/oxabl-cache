@@ -20,6 +20,7 @@ mod gc_orphans;
 mod gc_retention;
 mod gc_sweep;
 mod lookup;
+mod me;
 mod node_heartbeat;
 mod object_route;
 mod oidc_exchange;
@@ -41,6 +42,7 @@ mod segment_death;
 mod session_open;
 mod session_revoke;
 mod signature_check;
+mod telemetry;
 mod tenant_bootstrap;
 mod tenant_create;
 mod tenant_listing;
@@ -64,6 +66,7 @@ pub use lookup::{
     DictionaryLocation, LookupHit, LookupRequest, LookupResponse, NamespaceSet, PackLocator,
     SegmentLocation,
 };
+pub use me::{Me, VisibleCache};
 pub use oidc_exchange::Exchanged;
 pub use oidc_issuer::IssuerSpec;
 pub use oidc_policy::PolicySpec;

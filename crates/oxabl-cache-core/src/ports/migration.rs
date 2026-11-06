@@ -51,6 +51,7 @@ pub const MIGRATED_TABLES: &[&str] = &[
     "workload_policies",
     "workload_policy_claims",
     "workload_policy_grants",
+    "telemetry",
 ];
 
 /// Tables a migration leaves to the target: its schema version and its leader epoch.
