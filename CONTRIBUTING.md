@@ -36,3 +36,12 @@ nix develop -c cargo clippy --workspace --all-targets --locked -- -D warnings
 nix develop -c cargo test --workspace --locked
 nix develop -c scripts/check-server-deps.sh
 ```
+
+A change under `desktop/` (or to the client library it uses) also runs:
+
+```sh
+nix develop -c cargo fmt --manifest-path desktop/Cargo.toml --all --check
+nix develop -c cargo clippy --manifest-path desktop/Cargo.toml --all-targets --locked -- -D warnings
+nix develop -c cargo test --manifest-path desktop/Cargo.toml --locked
+nix develop -c desktop/scripts/previews.sh   # and look at the PNGs a visible change touches
+```
