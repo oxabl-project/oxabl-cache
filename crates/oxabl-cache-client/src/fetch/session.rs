@@ -15,10 +15,10 @@ use crate::error_log::{ErrorLog, Tally, fetch_failure};
 use crate::install::{Durability, Stage};
 use crate::progress::Progress;
 
-/// Delivers outcomes to the stream and remembers which requests are settled.
+/// Delivers outcomes to the stream and remembers which requests have one.
 pub(crate) struct Sink {
     tx: mpsc::Sender<FetchOutcome>,
-    settled: Mutex<Vec<bool>>,
+    delivered: Mutex<Vec<bool>>,
     failures: Mutex<Tally>,
 }
 
@@ -26,7 +26,7 @@ impl Sink {
     pub fn new(tx: mpsc::Sender<FetchOutcome>, requests: usize) -> Self {
         Self {
             tx,
-            settled: Mutex::new(vec![false; requests]),
+            delivered: Mutex::new(vec![false; requests]),
             failures: Mutex::default(),
         }
     }
@@ -39,7 +39,7 @@ impl Sink {
 
     /// Logs one line per kind of failure the fetch settled with.
     pub fn log_failures(&self, log: &ErrorLog) {
-        let requests = self.settled.lock().expect("sink lock").len();
+        let requests = self.delivered.lock().expect("sink lock").len();
         let failures = self.failures.lock().expect("sink lock");
         if !failures.is_empty() {
             failures.record(log, "fetch", requests);
@@ -47,36 +47,49 @@ impl Sink {
     }
 
     /// Delivers the outcome of request `index`, once; later outcomes for it are dropped.
+    /// The request counts as settled only when its outcome is in the stream. Waiting for room
+    /// in the stream counts as progress.
     pub async fn settle(&self, index: usize, outcome: FetchOutcome, progress: &Progress) {
-        {
-            let mut settled = self.settled.lock().expect("sink lock");
-            if std::mem::replace(&mut settled[index], true) {
-                return;
-            }
+        if self.delivered.lock().expect("sink lock")[index] {
+            return;
         }
-        if let FetchOutcome::Miss { reason, .. } = &outcome {
-            self.count_failure(*reason);
+        let permit = {
+            let _waiting = progress.waiting();
+            self.tx.reserve().await
+        };
+        if let Ok(permit) = permit {
+            self.deliver(index, outcome, permit);
         }
-        progress.touch();
-        let _ = self.tx.send(outcome).await;
     }
 
-    /// Settles every request still open as a timeout.
+    /// Settles every request without a delivered outcome as a timeout.
     pub async fn time_out(&self, keys: &[CompileKey]) {
         let open: Vec<usize> = {
-            let mut settled = self.settled.lock().expect("sink lock");
-            (0..settled.len())
-                .filter(|&i| !std::mem::replace(&mut settled[i], true))
-                .collect()
+            let delivered = self.delivered.lock().expect("sink lock");
+            (0..delivered.len()).filter(|&i| !delivered[i]).collect()
         };
         for index in open {
-            self.count_failure(MissReason::Timeout);
+            let Ok(permit) = self.tx.reserve().await else {
+                return;
+            };
             let outcome = FetchOutcome::Miss {
                 key: keys[index],
                 reason: MissReason::Timeout,
             };
-            let _ = self.tx.send(outcome).await;
+            self.deliver(index, outcome, permit);
         }
+    }
+
+    /// Sends the outcome through its reserved slot unless another outcome got there first.
+    fn deliver(&self, index: usize, outcome: FetchOutcome, permit: mpsc::Permit<'_, FetchOutcome>) {
+        let mut delivered = self.delivered.lock().expect("sink lock");
+        if std::mem::replace(&mut delivered[index], true) {
+            return;
+        }
+        if let FetchOutcome::Miss { reason, .. } = &outcome {
+            self.count_failure(*reason);
+        }
+        permit.send(outcome);
     }
 }
 
