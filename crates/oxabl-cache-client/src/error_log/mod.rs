@@ -5,7 +5,6 @@
 //! Writing the log never fails the operation it records.
 
 mod describe;
-mod file;
 mod tally;
 
 use std::path::PathBuf;
@@ -13,11 +12,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::state::bounded_log::{self, Bounds};
+
 pub(crate) use describe::{
     cache_kind, dictionary_kind, fetch_failure, open_failure, store_outcome_failure,
 };
 pub(crate) use tally::Tally;
 
+/// Entries and bytes kept; older entries are dropped first.
+const BOUNDS: Bounds = Bounds {
+    entries: 30,
+    bytes: 4 * 1024,
+};
 const MAX_OPERATION: usize = 24;
 const MAX_KIND: usize = 32;
 const MAX_MESSAGE: usize = 160;
@@ -90,7 +96,7 @@ impl ErrorLog {
             .iter()
             .map(|(operation, kind, message)| LoggedError::new(operation, kind, message))
             .collect();
-        let _ = file::append(path, &entries);
+        let _ = bounded_log::update(path, BOUNDS, |kept| kept.extend(entries));
     }
 
     /// The last `limit` failures, newest first. A missing or unreadable log is empty.
@@ -98,7 +104,7 @@ impl ErrorLog {
         let Some(path) = &self.path else {
             return Vec::new();
         };
-        let mut entries = file::read(path).unwrap_or_default();
+        let mut entries: Vec<LoggedError> = bounded_log::read(path, BOUNDS).unwrap_or_default();
         entries.reverse();
         entries.truncate(limit);
         entries

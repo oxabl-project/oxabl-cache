@@ -19,10 +19,15 @@ async fn run(cli: Cli) -> Result<(), Failure> {
     let context = Context::new(&cli)?;
     match cli.command {
         Command::Identity(IdentityCommand::New(args)) => commands::identity::new(&context, args),
+        Command::Identity(IdentityCommand::Remember) => {
+            commands::identity::remember(&context).await
+        }
+        Command::Identity(IdentityCommand::Forget) => commands::identity::forget(&context),
         Command::Init(args) => commands::init::run(&context, args).await,
         Command::Member(command) => commands::member::run(&context, command).await,
         Command::Rotate { purge } => commands::member::rotate(&context, purge).await,
         Command::Owner(command) => commands::owner::run(&context, command).await,
+        Command::Invite(args) => commands::invite::run(&context, args),
         Command::Login(args) => commands::login::run(&context, args).await,
         Command::Logout => commands::login::run_logout(&context).await,
         Command::Status => commands::status::run(&context).await,

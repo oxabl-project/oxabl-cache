@@ -94,12 +94,38 @@ impl Config {
         })
     }
 
+    /// The server this configuration talks to.
+    pub fn server(&self) -> &Url {
+        &self.server
+    }
+
+    /// The tenant id, `t_…`.
+    pub fn tenant(&self) -> String {
+        self.pins.tenant.to_text()
+    }
+
+    /// The cache id, `c_…`.
+    pub fn cache(&self) -> String {
+        self.pins.cache.to_text()
+    }
+
     /// The last `limit` failures of runs of this cache on this machine, newest first. Reads the
     /// log under the state directory; a missing or unreadable one is empty.
     pub fn recent_errors(&self, limit: usize) -> Vec<crate::LoggedError> {
         crate::state::StateDirs::new(self.state_dir.as_deref())
             .error_log(&self.pins.tenant.to_text(), &self.pins.cache.to_text())
             .recent(limit)
+    }
+
+    /// The fetches and stores this machine ran against this cache, oldest first, read from the
+    /// journal under the state directory; a missing or unreadable one is empty.
+    pub fn local_activity(&self) -> Vec<crate::Activity> {
+        crate::state::StateDirs::new(self.state_dir.as_deref())
+            .journal(&self.pins.tenant.to_text(), &self.pins.cache.to_text())
+            .entries()
+            .into_iter()
+            .map(|entry| entry.activity)
+            .collect()
     }
 
     pub fn with_mode(mut self, mode: Mode) -> Config {

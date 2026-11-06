@@ -10,7 +10,8 @@ use oxabl_cache_format as format;
 use serde_json::json;
 use std::time::{Duration, Instant};
 
-const CACHE_TABLES: [&str; 5] = [
+const CACHE_TABLES: [&str; 6] = [
+    "telemetry",
     "entries",
     "entry_access",
     "segments",
@@ -76,6 +77,12 @@ fn a_deleted_cache_is_404_at_once_keeps_its_name_until_teardown_and_leaves_every
     let packs = [first, second];
     let (sibling_pack, sibling_keys) = sibling.publish(&world, 3);
     let (stranger_pack, stranger_keys) = stranger.publish(&world, 3);
+    for party in [&doomed, &sibling] {
+        let sent = party
+            .ci
+            .binary("POST", &party.path("/telemetry"), &frames::telemetry(1, 74));
+        assert_eq!(sent.status, 201, "{}", String::from_utf8_lossy(&sent.body));
+    }
     let url = (crate::STORE == Kind::Fs).then(|| get_url(&doomed, &keys));
     assert_eq!(doomed.hits(&keys), Ok(3));
     let sibling_rows = rows_left(&world, &sibling);

@@ -6,6 +6,7 @@ mod commit;
 mod dictionary;
 mod health;
 mod lookup;
+mod me;
 mod metrics_page;
 mod objects;
 mod purge;
@@ -15,6 +16,7 @@ mod roster;
 mod sample;
 mod served;
 mod session;
+mod telemetry;
 mod tenant;
 mod uploads;
 mod urls;
@@ -40,6 +42,7 @@ pub fn public_router<B: Backend>(app: Arc<App<B>>) -> Router {
         .route("/v1/health", get(health::public))
         .route("/v1/auth/oidc", post(session::oidc::<B>))
         .route("/v1/auth/session", delete(session::revoke::<B>))
+        .route("/v1/me", get(me::get::<B>))
         .route("/v1/caches/{cache}", get(cache_info::get::<B>))
         .route(
             "/v1/caches/{cache}/roster",
@@ -63,6 +66,10 @@ pub fn public_router<B: Backend>(app: Arc<App<B>>) -> Router {
         .route("/v1/caches/{cache}/urls", post(urls::post::<B>))
         .route("/v1/caches/{cache}/reports", post(reports::post::<B>))
         .route("/v1/caches/{cache}/purge", post(purge::post::<B>))
+        .route(
+            "/v1/caches/{cache}/telemetry",
+            get(telemetry::get::<B>).post(telemetry::post::<B>),
+        )
         .route(
             "/v1/tenant/caches",
             get(tenant::caches::list::<B>).post(tenant::caches::create::<B>),

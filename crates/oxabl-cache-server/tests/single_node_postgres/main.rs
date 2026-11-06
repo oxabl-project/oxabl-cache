@@ -24,6 +24,8 @@ mod lifecycle;
 mod limits;
 #[path = "../single_node/logs.rs"]
 mod logs;
+#[path = "../single_node/me_and_telemetry.rs"]
+mod me_and_telemetry;
 #[path = "../single_node/migrate.rs"]
 mod migrate;
 #[path = "../single_node/object_urls.rs"]

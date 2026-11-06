@@ -8,6 +8,8 @@ mod entries;
 mod environment;
 mod error_log;
 mod flow;
+mod invite;
+mod keyring;
 mod login;
 mod owners;
 mod roster_guards;

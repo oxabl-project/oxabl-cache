@@ -56,6 +56,7 @@ pub fn run(home: &Path, args: &[String], extra_env: &[(&str, &str)]) -> Output {
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", home.join("config"))
         .env("XDG_STATE_HOME", home.join("state"))
+        .env("DBUS_SESSION_BUS_ADDRESS", "disabled:")
         .stdin(Stdio::null());
     for (name, _) in std::env::vars() {
         if name.starts_with("OXABL_CACHE_") || name == "CI" {

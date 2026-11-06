@@ -12,6 +12,12 @@ Design: [architecture](docs/architecture.md), [security](docs/security.md),
 [protocol](docs/protocol.md), [client](docs/client.md),
 [operations](docs/operations.md), [testing](docs/testing.md), [decisions](docs/adr/), [releasing](RELEASING.md).
 
+## Desktop app
+
+[`desktop/`](desktop/README.md) is a small window onto your organisation's caches: size, speed
+and hit rate for the team and for your computer, and joining a cache in three steps without a
+command line. Releases attach a Linux build.
+
 ## Deploy
 
 One image, one Helm chart, one systemd unit and one OpenTofu module run every shape in

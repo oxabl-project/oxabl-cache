@@ -9,6 +9,7 @@ use rusqlite::params;
 
 /// Tables holding rows of one cache, in foreign-key order.
 const CACHE_ROWS: &[&str] = &[
+    "telemetry",
     "entry_access",
     "entries",
     "dictionary_pointers",

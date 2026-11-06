@@ -98,6 +98,10 @@ impl Cache {
     pub async fn status(&self) -> Result<Status, CacheError>;
     /// The last `limit` failures logged for this cache on this machine, newest first.
     pub fn recent_errors(&self, limit: usize) -> Vec<LoggedError>;
+    /// Every fetch and store the cache's members shared in the current epoch, each once.
+    pub async fn team_activity(&self) -> Result<Vec<Activity>, CacheError>;
+    /// Sends this machine's unshared activity now and waits for it.
+    pub async fn share_activity(&self);
     /// Seals `dictionary`, commits it and moves the pointer; a `ci` member in `ci` mode only.
     pub async fn publish_dictionary(&self, dictionary: &[u8]) -> Result<DictionaryPublished, DictionaryError>;
 }
@@ -180,7 +184,18 @@ pub enum StoreOutcome {
 pub enum StoreFailure { Rejected, TooLarge, Unreadable, QuotaExceeded, Unavailable }
 ```
 
-The command line uses the rest of the public API, which oxabl does not need:
+The command line and the desktop app use the rest of the public API, which oxabl does not
+need:
+
+- `Config::local_activity()`, the fetches and stores of this machine (below), and
+  `ActivitySummary::of(&activities)` for their averages.
+- `Invite::new(&config, name, issuer, client_id)`, `Invite::parse`, `to_text`, `config()` and
+  `cache_toml()` (below).
+- `me(&config)`, the caches the credential holds a grant on (`GET /v1/me`); `round_trip(&config,
+  tries)`, the fastest round trip to the server's health check; and `signed_in(&config)`, whether
+  a stored login session for the tenant is unexpired.
+- `save_passphrase`, `stored_passphrase` and `forget_passphrase`: the identity passphrase in the
+  operating system's keyring (below).
 
 - `Owner::open(config)` opens the cache as an owner whose signing key the repository pins, and
   `add_member`, `remove_member`, `rotate`, `add_owner` and `remove_owner` publish the next roster
@@ -452,7 +467,11 @@ Mode, credentials and identity come from the environment or from the caller's fl
 
 `IdentitySource::Auto` tries `OXABL_CACHE_IDENTITY`, then the file named by
 `OXABL_CACHE_IDENTITY_FILE`, then the default identity file. The passphrase comes
-from the `with_passphrase` callback, or else from `OXABL_CACHE_IDENTITY_PASSPHRASE`.
+from the `with_passphrase` callback, or else from `OXABL_CACHE_IDENTITY_PASSPHRASE`, or else
+from the operating system's keyring (the Secret Service on Linux, with the default
+`os-keyring` feature), where `save_passphrase` or `oxabl-cache identity remember` put it under
+the service `oxabl-cache` and the identity file's absolute path. No keyring, or none running,
+is the same as no passphrase there.
 Unlocking (scrypt) runs on a blocking thread.
 
 The stored login session is `$XDG_STATE_HOME/oxabl-cache/session/<tenant id>`
@@ -472,6 +491,36 @@ mark (`roster-high-water`, raised under `flock`) and the last verified roster. A
 unreadable or malformed high-water file is an error, never treated as zero. A failed
 state write is only logged. The root key lives only in memory and is zeroed on
 drop.
+
+### Activity
+
+Every fetch (not a sample) and every store of a handle is recorded twice, and neither ever
+fails or delays the operation:
+
+- In the journal of this machine, `$XDG_STATE_HOME/oxabl-cache/journal/<tenant>-<cache>.jsonl`
+  (the newest 1,000 entries, at most 320 KiB, written as the failure log is). An entry holds
+  when it ended, pull or push, the mode, keys asked for (or sets put), hits (installed, or
+  committed or already there), misses (not in the cache, or refused for quota), other failures,
+  bytes (plaintext installed, or sealed uploaded), the duration and the round trip to the
+  server. `Config::local_activity` reads it without opening the cache.
+- Shared with the cache's members: in the background, the handle seals each unsent entry as an
+  `OXTL` report under the epoch's telemetry key (protocol.md) and sends it, at most 64 at a
+  time and only entries of the last 7 days; the journal marks what was sent. `Cache::open`
+  sends what an earlier process left unsent, so a CI job that exits early shares at its next
+  run. The round trip is measured once per handle against `GET /v1/health`.
+
+`Cache::team_activity` reads the cache's log back, opens the reports of the current epoch and
+drops repeats by report id. The server cannot read a report (security.md, "Telemetry").
+
+### Invites
+
+An invite is one line, `oxc-invite:` and the unpadded base64url of a JSON object with a
+4-byte BLAKE3 checksum appended: the server, tenant, cache, `owner_keys` and
+`min_roster_version` that `.oxabl/cache.toml` pins, a display name, and the OIDC issuer and
+public client id people sign in with. It holds no secret. `Invite::config()` is a `developer`
+configuration whose pins come from the invite, so a person who trusts the sender of the invite
+trusts the cache as one who trusts the repository. A changed character fails the checksum, and
+an issuer that is not `https` is refused.
 
 ### Failure log
 
@@ -511,6 +560,8 @@ establish what it needs fails; it never reports success for nothing.
 | `owner add <descriptor> --label <l> --cosign-identity-file <f>` | Add an owner (below). |
 | `owner remove <label\|ed25519:key> [--purge]` | Remove an owner and start a new epoch (below). |
 | `login --issuer <url> --client-id <id>`, `logout` | Device-flow OIDC session for humans (below). |
+| `invite --name <n> --issuer <url> --client-id <id>` | Print a one-line invite to the repository's cache for the desktop app (above). |
+| `identity remember`, `identity forget` | Put the identity file's passphrase in the operating system's keyring, after checking that it unlocks the file, or remove it. |
 | `status` | Mode, principal, roster, epoch, quota, or why the cache is off, and the last five failures from the failure log (`recent_errors` in `--json`, newest first, each `{at, operation, kind, message}`), whether the cache is on or off. |
 | `dict train --outputs <dir> [--publish]` | Train a 112 KiB dictionary from sampled outputs, report the ratio gain, and publish it as `ci` when the gain is at least 1.3x. |
 | `verify --sample <n> [--keys <file>]` | Fetch and fully verify a random sample of trusted entries into a scratch directory. Without `--keys` the server names the sample (`n` is 1 to 1,000). |
@@ -547,7 +598,7 @@ and a named file is never replaced by a variable:
 | --- | --- | --- | --- |
 | Server credential | `--token-file` | `OXABL_CACHE_TOKEN` | a CI system's ID token and the stored login session, as in "Configuration" |
 | Identity | `--identity-file` | the identity string in `OXABL_CACHE_IDENTITY` | the default identity file (`OXABL_CACHE_IDENTITY_FILE`, else `$XDG_CONFIG_HOME/oxabl-cache/identity`) |
-| Identity file passphrase | `--passphrase-file` | `OXABL_CACHE_IDENTITY_PASSPHRASE` | the terminal; without one the command fails instead of waiting |
+| Identity file passphrase | `--passphrase-file` | `OXABL_CACHE_IDENTITY_PASSPHRASE`, then the keyring | the terminal; without one the command fails instead of waiting |
 
 So a CI job that sets `OXABL_CACHE_TOKEN` and `OXABL_CACHE_IDENTITY` for `oxabl build` runs
 `oxabl-cache dict train --publish` the same way. An identity string needs no passphrase. `init`

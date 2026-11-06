@@ -10,6 +10,7 @@ mod purge;
 mod reports;
 mod roster;
 mod sample;
+mod telemetry;
 mod uploads;
 
 use std::sync::Arc;
@@ -37,6 +38,7 @@ const READ_TIMEOUT: Duration = Duration::from_secs(60);
 #[derive(Clone)]
 pub(crate) struct Api {
     http: Client,
+    server: String,
     base: String,
     auth: Arc<Authenticator>,
     counters: Arc<Counters>,
@@ -91,9 +93,11 @@ impl Api {
         auth: Arc<Authenticator>,
         counters: Arc<Counters>,
     ) -> Self {
+        let server = server.trim_end_matches('/').to_owned();
         Self {
             http,
-            base: format!("{}/v1/caches/{cache}", server.trim_end_matches('/')),
+            base: format!("{server}/v1/caches/{cache}"),
+            server,
             auth,
             counters,
         }

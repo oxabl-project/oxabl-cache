@@ -35,6 +35,7 @@ pub mod roster_verify;
 pub mod segment_info;
 pub mod segment_open;
 pub mod segment_seal;
+pub mod telemetry;
 pub mod trust;
 
 pub use age::secrecy::{ExposeSecret, SecretString};
@@ -55,4 +56,5 @@ pub use roster_verify::{RosterPins, VerifiedRoster};
 pub use segment_info::{SegmentSeal, sealed_segment_len};
 pub use segment_open::{SegmentExpectation, open_segment};
 pub use segment_seal::{DEFAULT_ZSTD_LEVEL, SealOptions, seal_compressed, seal_segment};
+pub use telemetry::{open_telemetry, seal_telemetry, telemetry_epoch};
 pub use trust::{AcceptedRecord, Provenance};

@@ -10,6 +10,7 @@ use super::seal::{SealContext, seal_set};
 use super::shared::Shared;
 use super::types::{ArtifactFileRef, StoreFailure, StoreOutcome, StoreReport};
 use super::validate::validate;
+use crate::activity::{Activity, ActivityKind};
 use crate::cache::{Inner, permits_for};
 use crate::compile_key::CompileKey;
 use crate::error::CacheError;
@@ -41,6 +42,7 @@ impl Drop for Guard {
 /// A batched upload session, fed one artifact set at a time.
 pub struct Uploader {
     inner: Arc<Inner>,
+    started: std::time::Instant,
     shared: Arc<Shared>,
     jobs: mpsc::Sender<Job>,
     packer: JoinHandle<u64>,
@@ -156,6 +158,7 @@ impl Uploader {
         let guard = Guard(vec![packer.abort_handle(), sealer.abort_handle()]);
         Ok(Uploader {
             inner,
+            started: std::time::Instant::now(),
             shared,
             jobs,
             packer,
@@ -195,6 +198,7 @@ impl Uploader {
     pub async fn finish(self) -> StoreReport {
         let Uploader {
             inner,
+            started,
             shared,
             jobs,
             packer,
@@ -224,9 +228,46 @@ impl Uploader {
         if !failures.is_empty() {
             failures.record(&inner.errors, "store", outcomes.len());
         }
+        if !outcomes.is_empty() {
+            record_push(&inner, &outcomes, bytes_uploaded, started);
+        }
         StoreReport {
             outcomes,
             bytes_uploaded,
         }
     }
+}
+
+fn record_push(
+    inner: &Arc<Inner>,
+    outcomes: &[(CompileKey, StoreOutcome)],
+    bytes: u64,
+    started: std::time::Instant,
+) {
+    let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+    let tally = |wanted: fn(&StoreOutcome) -> bool| {
+        count(outcomes.iter().filter(|(_, o)| wanted(o)).count())
+    };
+    crate::activity::record(
+        inner,
+        Activity {
+            at: crate::activity::now_secs(),
+            kind: ActivityKind::Push,
+            mode: inner.mode,
+            requested: count(outcomes.len()),
+            hits: tally(|o| matches!(o, StoreOutcome::Committed | StoreOutcome::Existed)),
+            misses: tally(|o| matches!(o, StoreOutcome::Failed(StoreFailure::QuotaExceeded))),
+            failed: tally(|o| {
+                !matches!(
+                    o,
+                    StoreOutcome::Committed
+                        | StoreOutcome::Existed
+                        | StoreOutcome::Failed(StoreFailure::QuotaExceeded)
+                )
+            }),
+            bytes,
+            duration_ms: u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX),
+            rtt_ms: 0,
+        },
+    );
 }

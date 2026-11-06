@@ -16,6 +16,7 @@ mod roster;
 mod scrub_queue;
 mod segments;
 mod teardown;
+mod telemetry;
 mod tenants;
 mod users;
 
@@ -35,6 +36,7 @@ pub use roster::RosterTx;
 pub use scrub_queue::ScrubQueueTx;
 pub use segments::SegmentsTx;
 pub use teardown::TeardownTx;
+pub use telemetry::TelemetryTx;
 pub use tenants::TenantsTx;
 pub use users::{User, UsersTx};
 
@@ -62,6 +64,7 @@ pub trait MetaTx:
     + LedgerTx
     + FenceTx
     + TeardownTx
+    + TelemetryTx
 {
 }
 
@@ -84,6 +87,7 @@ impl<T> MetaTx for T where
         + LedgerTx
         + FenceTx
         + TeardownTx
+        + TelemetryTx
 {
 }
 

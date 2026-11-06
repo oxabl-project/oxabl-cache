@@ -30,6 +30,7 @@ pub mod record;
 pub mod roster;
 pub mod segment;
 pub mod segment_plaintext;
+pub mod telemetry;
 pub mod text_ids;
 pub mod writer;
 
@@ -52,3 +53,4 @@ pub use record::SealedRecord;
 pub use roster::{Member, Role, Roster, RosterSignature};
 pub use segment::{SealedSegment, SegmentHeader};
 pub use segment_plaintext::{Codec, SegmentPlaintext};
+pub use telemetry::{SealedTelemetry, TelemetryKind, TelemetryMode, TelemetryReport};

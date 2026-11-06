@@ -141,6 +141,11 @@ and the storage attacks below use it, so it also checks the spec.
   unreachable: `127.0.0.1`, `::1`, `10.0.0.5`, `172.16.0.1`, `192.168.1.1`,
   `100.64.0.1` and `169.254.169.254`. A refusal is therefore proven by "no
   connection reached the decoy", not by "connect failed".
+- **Secret Service.** `secret_service::SecretService` starts a private D-Bus session bus on
+  an abstract socket and an unlocked `gnome-keyring-daemon` on it (both from the devshell),
+  so a child given its environment stores and reads a passphrase without prompting and
+  without touching the developer's keyring. Every other command-line test runs with
+  `DBUS_SESSION_BUS_ADDRESS=disabled:`, so no test reaches the developer's session.
 - **Break it once.** Every scenario and adversarial test below is first run against a
   deliberately broken server or client build (the protecting check removed) and must
   fail, naming its assertion. The break is recorded in the pull request that adds the
