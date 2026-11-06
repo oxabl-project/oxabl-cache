@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/oxabl-project/oxabl-cache/compare/oxabl-cache-client-v0.2.0...oxabl-cache-client-v0.2.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **client:** a slow reader never loses fetch outcomes ([4aec1f0](https://github.com/oxabl-project/oxabl-cache/commit/4aec1f074a734fb0518734f888cd2a143799d4aa))
+* **client:** deliver exactly one outcome per fetch request ([fb84160](https://github.com/oxabl-project/oxabl-cache/commit/fb841608918bc69b11aa955694226458e68cbe56))
+
 ## [0.2.0](https://github.com/oxabl-project/oxabl-cache/compare/oxabl-cache-client-v0.1.0...oxabl-cache-client-v0.2.0) (2026-11-04)
 
 
