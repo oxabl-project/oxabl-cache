@@ -179,7 +179,7 @@ pub fn join_request(ui: &mut Ui) {
     base(ui);
     ui.screen = Screen::Join;
     ui.join.step = JoinStep::Request {
-        command: Some("oxabl-cache member add oxabl-cache-member-1qyvx8v5z0mq3h4n7u2w9x6k3p8r5t0y4e7c2a9s6d3f0g5h8j2k7l4 --label evan@fedora --role developer".into()),
+        command: Some("oxabl-cache member add oxabl-cache-member-1qyvx8v5z0mq3h4n7u2w9x6k3p8r5t0y4e7c2a9s6d3f0g5h8j2k7l4 --label alex@laptop --role developer".into()),
         passphrase: Some(oxabl_cache_client::SecretString::from("demo".to_owned())),
         failed: None,
     };

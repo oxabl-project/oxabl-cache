@@ -84,7 +84,7 @@ fn from_environment() -> Option<Identity> {
     let text = std::env::var("OXABL_CACHE_IDENTITY")
         .ok()
         .filter(|v| !v.is_empty())?;
-    Identity::parse(&text).ok()
+    Identity::parse(text.trim()).ok()
 }
 
 fn fresh_passphrase() -> Option<SecretString> {

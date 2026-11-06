@@ -120,6 +120,11 @@ impl Ui {
                 ));
             }
         }
+        let refreshed_at = std::fs::metadata(paths.snapshot_file())
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs());
         Ui {
             settings,
             cards,
@@ -134,7 +139,7 @@ impl Ui {
             },
             needs_unlock: false,
             refreshing: false,
-            refreshed_at: None,
+            refreshed_at,
             toast: None,
             speed: BTreeMap::new(),
             worker: None,

@@ -14,7 +14,7 @@ struct Overall {
     latency: Option<u32>,
     hit_rate: Option<f64>,
     pull_ms: Option<u32>,
-    members: usize,
+    joined: usize,
 }
 
 fn overall(ui: &Ui) -> Overall {
@@ -39,7 +39,7 @@ fn overall(ui: &Ui) -> Overall {
         latency,
         hit_rate: (asked > 0.0).then(|| hits / asked),
         pull_ms: (pulls > 0).then(|| u32::try_from(pull_total / pulls).unwrap_or(u32::MAX)),
-        members: members.len(),
+        joined: ui.joined_cards().count(),
     }
 }
 
@@ -105,7 +105,7 @@ fn hero(ui: &Ui, p: &Palette) -> El {
             "Average pull",
             summary.pull_ms.map_or("–".into(), format::millis),
         ))
-        .child(figure("hero-caches", "Caches", summary.members.to_string()));
+        .child(figure("hero-caches", "Joined", summary.joined.to_string()));
     card.child(connection).child(figures)
 }
 
