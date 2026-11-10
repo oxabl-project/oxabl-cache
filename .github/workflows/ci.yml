@@ -35,6 +35,29 @@ jobs:
       - name: Test
         run: nix develop --command cargo test --workspace --locked
 
+  under-load:
+    name: Client behaviour on one busy CPU
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.rustup/toolchains
+            target
+          key: load-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'flake.lock') }}
+          restore-keys: load-${{ runner.os }}-
+      - name: Install the pinned toolchain
+        run: nix develop --command rustup toolchain install
+      - name: Allow unprivileged user namespaces for the OIDC tests
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Behaviour suite on CPU 0 beside four busy loops
+        run: nix develop --command scripts/test-under-load.sh 4
+
   dependency-gate:
     name: Server dependency gate
     runs-on: ubuntu-latest

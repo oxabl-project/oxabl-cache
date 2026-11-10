@@ -19,5 +19,8 @@ subtle.workspace = true
 getrandom.workspace = true
 tokio = { workspace = true, features = ["rt"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix.workspace = true
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

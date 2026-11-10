@@ -311,3 +311,7 @@ Every pull request runs:
 - **Public-repo hygiene:** a grep for internal identifiers over the tree, with a
   fixture that must trip it.
 - The e2e suite on both backends, and 60 s of each fuzz target.
+- **Under load:** `scripts/test-under-load.sh` runs the client behaviour suite with the
+  test binary and the servers it starts pinned to one CPU beside four busy loops, as a
+  slow, shared runner would. Work added to a request path shows up here as an expired
+  lease or a timeout long before fast runners notice it.
