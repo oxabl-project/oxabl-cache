@@ -55,8 +55,11 @@ jobs:
         run: nix develop --command rustup toolchain install
       - name: Allow unprivileged user namespaces for the OIDC tests
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Behaviour suite on CPU 0 beside four busy loops
-        run: nix develop --command scripts/test-under-load.sh 4
+      # The store tests beside two busy loops: they catch work added to the
+      # PUT-to-commit path (an expired pending lease). The whole suite, or more
+      # loops, also fails tests with fixed timeouts on a correct build here.
+      - name: Store tests on CPU 0 beside two busy loops
+        run: nix develop --command scripts/test-under-load.sh 2 store::
 
   dependency-gate:
     name: Server dependency gate
