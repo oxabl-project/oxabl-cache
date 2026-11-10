@@ -25,9 +25,10 @@ pub(crate) enum Transport {
     Plaintext,
 }
 
-/// The least `gc.grace` must exceed `server.url_lifetime` by: the signed expiry has whole-second
-/// resolution. Deployments keep the default gap of many hours.
-const MIN_GRACE_MARGIN: Duration = Duration::from_secs(1);
+/// The least `gc.grace` must exceed `server.url_lifetime` by: a signed expiry has whole-second
+/// resolution and is rounded up, so a URL outlives its lifetime by up to a second. Deployments
+/// keep the default gap of many hours.
+const MIN_GRACE_MARGIN: Duration = Duration::from_secs(2);
 
 /// Garbage-collection timers.
 #[derive(Debug, Clone, Copy)]

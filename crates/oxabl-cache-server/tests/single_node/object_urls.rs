@@ -86,6 +86,35 @@ fn an_expired_url_is_refused() {
 }
 
 #[test]
+fn a_url_is_valid_for_its_whole_lifetime_wherever_in_the_second_it_was_issued() {
+    let world = World::start(
+        "url-lifetime",
+        Options {
+            url_lifetime: "2s",
+            ..Options::default()
+        },
+    );
+    let pack = frames::pack(world.cache_bytes, &[4_000]);
+    // Issued just before a whole second ends, where a floored expiry loses most of a second.
+    loop {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock");
+        if (900..950).contains(&now.subsec_millis()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let (url, _) = pending(&world, pack.bytes.len());
+    std::thread::sleep(std::time::Duration::from_millis(1_500));
+    assert_eq!(
+        world.put_object(&url, &pack.bytes).status,
+        200,
+        "the URL outlives 1.5 s of its 2 s lifetime"
+    );
+}
+
+#[test]
 fn a_committed_pack_accepts_no_further_put_and_a_pending_one_serves_no_get() {
     let world = World::start("put-after-commit", Options::default());
     let pack = frames::pack(world.cache_bytes, &[4_000]);

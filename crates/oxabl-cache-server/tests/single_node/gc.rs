@@ -58,7 +58,7 @@ fn compaction_moves_live_segments_and_lookups_keep_returning_the_same_bytes() {
         "compaction",
         Options {
             grace: "16s",
-            url_lifetime: "15s",
+            url_lifetime: "14s",
             ..Options::default()
         },
     );
