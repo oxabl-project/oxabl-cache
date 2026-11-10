@@ -232,7 +232,15 @@ async fn a_non_default_output_layout_stores_and_installs_a_thousand_keys() {
     assert!(
         outcomes
             .iter()
-            .all(|o| matches!(o, FetchOutcome::Installed { .. }))
+            .all(|o| matches!(o, FetchOutcome::Installed { .. })),
+        "{} not installed, first: {:?}",
+        outcomes
+            .iter()
+            .filter(|o| !matches!(o, FetchOutcome::Installed { .. }))
+            .count(),
+        outcomes
+            .iter()
+            .find(|o| !matches!(o, FetchOutcome::Installed { .. }))
     );
     assert_installed(&reader.stage(), &sets);
 }
