@@ -1,7 +1,7 @@
 //! The filesystem store through its public API: durable writes, ranges, URLs.
 
 use oxabl_cache_core::ids::{CacheId, NodeId, PackId};
-use oxabl_cache_core::ports::{ObjectKey, ObjectStore};
+use oxabl_cache_core::ports::{ObjectHead, ObjectKey, ObjectStore};
 use oxabl_cache_core::{Conflict, Error};
 use oxabl_cache_store_fs::{FsStore, UrlRejection, UrlRequest};
 use std::path::{Path, PathBuf};
@@ -144,6 +144,195 @@ async fn ranges_check_bounds_and_the_etag_and_a_replaced_object_changes_its_etag
         store.read_range(&missing, 0, 1, None).await,
         Err(Error::NotFound)
     );
+}
+
+/// Writes `bytes` with the modification time pinned, as a clock too coarse to tell two writes apart would.
+fn put_at_a_standstill(
+    dir: &Scratch,
+    store: &FsStore,
+    key: &ObjectKey,
+    bytes: &[u8],
+) -> ObjectHead {
+    let mut writer = store.writer(key).expect("writer");
+    writer.write_all(bytes).expect("write");
+    let tmp = dir.0.join("objects/tmp");
+    let mut files = std::fs::read_dir(&tmp).expect("tmp");
+    let file = files
+        .next()
+        .expect("a temporary file")
+        .expect("entry")
+        .path();
+    assert!(files.next().is_none(), "one writer, one temporary file");
+    let pinned = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+    std::fs::File::options()
+        .write(true)
+        .open(file)
+        .expect("open")
+        .set_modified(pinned)
+        .expect("pin the time");
+    writer.finish(None).expect("finish")
+}
+
+#[tokio::test]
+async fn every_replace_of_the_same_size_gets_a_new_etag_whatever_the_clock() {
+    let dir = Scratch::new();
+    let store = open(&dir);
+    let key = key(CacheId::random());
+    let mut etags: Vec<String> = Vec::new();
+    for round in 0..200u8 {
+        let head = put_at_a_standstill(&dir, &store, &key, &[round; 4096]);
+        assert_eq!(
+            store.head(&key).await.expect("head").as_ref(),
+            Some(&head),
+            "a head agrees with what the write returned"
+        );
+        for older in &etags {
+            assert_ne!(older, &head.etag, "round {round} reused an ETag");
+            assert_eq!(
+                store.read_range(&key, 0, 1, Some(older)).await,
+                Err(Error::Conflict(Conflict::PackChanged)),
+                "round {round}: an older ETag still matches"
+            );
+        }
+        etags.push(head.etag);
+    }
+}
+
+#[tokio::test]
+async fn an_object_that_is_not_replaced_keeps_its_etag_across_reads_and_a_restart() {
+    let dir = Scratch::new();
+    let store = open(&dir);
+    let key = key(CacheId::random());
+    let head = store.put(&key, vec![7; 1000]).await.expect("put");
+    for _ in 0..3 {
+        store
+            .read_range(&key, 10, 20, Some(&head.etag))
+            .await
+            .expect("range");
+        assert_eq!(store.head(&key).await.expect("head"), Some(head.clone()));
+    }
+    let reopened = open(&dir);
+    assert_eq!(reopened.head(&key).await.expect("head"), Some(head.clone()));
+    let replaced = reopened.put(&key, vec![8; 1000]).await.expect("replace");
+    assert_ne!(replaced.etag, head.etag);
+    assert_eq!(
+        store.head(&key).await.expect("head"),
+        Some(replaced),
+        "another handle sees the replacement"
+    );
+}
+
+/// The file that holds `key` in the store at `dir`.
+fn file_of(dir: &Scratch, key: &ObjectKey) -> PathBuf {
+    let pack = key.pack.to_string();
+    dir.0
+        .join("objects/v1")
+        .join(key.cache.to_string())
+        .join(&pack[..2])
+        .join(pack)
+}
+
+#[tokio::test]
+async fn a_copy_of_an_object_without_its_file_attributes_keeps_its_etag() {
+    let dir = Scratch::new();
+    let store = open(&dir);
+    let key = key(CacheId::random());
+    let bytes: Vec<u8> = (0..5000u32).map(|n| (n % 251) as u8).collect();
+    let head = store.put(&key, bytes.clone()).await.expect("put");
+    let file = file_of(&dir, &key);
+    std::fs::remove_file(&file).expect("remove");
+    std::fs::write(&file, &bytes).expect("a plain copy");
+    let reopened = open(&dir);
+    assert_eq!(reopened.head(&key).await.expect("head"), Some(head.clone()));
+    assert_eq!(
+        reopened
+            .read_range(&key, 0, 4, Some(&head.etag))
+            .await
+            .expect("range"),
+        bytes[..4]
+    );
+}
+
+#[tokio::test]
+async fn bytes_changed_in_place_change_the_etag() {
+    use std::io::Write;
+    let dir = Scratch::new();
+    let store = open(&dir);
+    let key = key(CacheId::random());
+    let head = store.put(&key, vec![1; 4096]).await.expect("put");
+    let mut file = std::fs::File::options()
+        .write(true)
+        .open(file_of(&dir, &key))
+        .expect("open");
+    file.write_all(&[2]).expect("change a byte");
+    file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000))
+        .expect("set the time");
+    drop(file);
+    let changed = store.head(&key).await.expect("head").expect("present");
+    assert_ne!(
+        changed.etag, head.etag,
+        "the old ETag still describes new bytes"
+    );
+    assert_eq!(
+        store.read_range(&key, 0, 1, Some(&head.etag)).await,
+        Err(Error::Conflict(Conflict::PackChanged))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn under_concurrent_replaces_an_etag_only_ever_comes_with_its_own_bytes() {
+    const WRITERS: u16 = 4;
+    const ROUNDS: u16 = 50;
+    let dir = Scratch::new();
+    let store = open(&dir);
+    let key = key(CacheId::random());
+    let first = store.put(&key, vec![0; 8192]).await.expect("put");
+    let mut tags = std::collections::HashMap::from([(first.etag, [0, 0])]);
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut writers = tokio::task::JoinSet::new();
+    for writer in 0..WRITERS {
+        let store = store.clone();
+        writers.spawn(async move {
+            let mut written = Vec::new();
+            for round in 0..ROUNDS {
+                let tag = (writer * ROUNDS + round + 1).to_be_bytes();
+                let head = store.put(&key, tag.repeat(4096)).await.expect("put");
+                written.push((head.etag, tag));
+            }
+            written
+        });
+    }
+    let mut readers = tokio::task::JoinSet::new();
+    for _ in 0..4 {
+        let (store, done) = (store.clone(), done.clone());
+        readers.spawn(async move {
+            let mut seen = Vec::new();
+            while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                let head = store.head(&key).await.expect("head").expect("present");
+                match store.read_range(&key, 0, head.size, Some(&head.etag)).await {
+                    Ok(bytes) => seen.push((head.etag, bytes)),
+                    Err(Error::Conflict(Conflict::PackChanged)) => {}
+                    Err(other) => panic!("read: {other:?}"),
+                }
+            }
+            seen
+        });
+    }
+    while let Some(written) = writers.join_next().await {
+        for (etag, tag) in written.expect("writer") {
+            assert!(tags.insert(etag, tag).is_none(), "two writes share an ETag");
+        }
+    }
+    done.store(true, std::sync::atomic::Ordering::Relaxed);
+    let mut checked = 0;
+    while let Some(seen) = readers.join_next().await {
+        for (etag, bytes) in seen.expect("reader") {
+            let tag = tags.get(&etag).expect("an ETag no write returned");
+            assert_eq!(bytes, tag.repeat(4096), "ETag {etag} came with other bytes");
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "no read saw a replacement");
 }
 
 #[tokio::test]

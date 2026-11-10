@@ -205,6 +205,14 @@ S3: `v1/<cache-id>/<pack-id-hex>`. Local disk:
 `<root>/v1/<cache-id>/<pack-id[0..2]>/<pack-id-hex>`, with a sibling `tmp/`
 directory. Packs are immutable: never modified, appended or overwritten.
 
+A local-disk ETag is the first 128 bits of the SHA-256 of the pack's bytes, so a
+replaced object gets a new one whatever the file system's clock, and a copy of the
+store keeps them. The writer hashes while it writes and keeps the digest in the
+`user.oxabl-cache.sha256` extended attribute, with the size and modification time it
+describes; a read whose file has no such attribute, or one that no longer matches,
+hashes the file and keeps the digest. On a file system without extended attributes
+every `HEAD` and ranged read hashes the pack.
+
 ## Metadata: SQLite for one node, Postgres for many
 
 Both run behind the `MetadataStore` port with the same schema and a common SQL

@@ -1,10 +1,12 @@
 //! Durable object writes: temporary file, fsync, rename, directory fsync.
 
 use crate::error::io_error;
-use crate::head::head_of;
+use crate::head::etag_of;
 use crate::layout::{object_path, tmp_dir};
+use crate::stamp::{Stamp, keep_digest};
 use oxabl_cache_core::ports::{ObjectHead, ObjectKey};
 use oxabl_cache_core::{Error, Result};
+use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -18,6 +20,7 @@ pub struct ObjectWriter {
     tmp: PathBuf,
     target: PathBuf,
     written: u64,
+    digest: Sha256,
 }
 
 impl ObjectWriter {
@@ -31,6 +34,7 @@ impl ObjectWriter {
             tmp,
             target: object_path(root, key),
             written: 0,
+            digest: Sha256::new(),
         })
     }
 
@@ -38,6 +42,7 @@ impl ObjectWriter {
     pub fn write_all(&mut self, bytes: &[u8]) -> Result<()> {
         let file = self.file.as_mut().expect("the file is open until finish");
         file.write_all(bytes).map_err(|e| io_error(&e))?;
+        self.digest.update(bytes);
         self.written += u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         Ok(())
     }
@@ -47,8 +52,9 @@ impl ObjectWriter {
         self.written
     }
 
-    /// Syncs, renames into place and syncs the directory. With `expected_size`,
-    /// a different byte count is `BadRequest` and nothing becomes visible.
+    /// Keeps the digest on the file, syncs, renames into place and syncs the directory.
+    /// With `expected_size`, a different byte count is `BadRequest` and nothing becomes
+    /// visible.
     pub fn finish(mut self, expected_size: Option<u64>) -> Result<ObjectHead> {
         if expected_size.is_some_and(|size| size != self.written) {
             return Err(Error::bad_request(
@@ -56,16 +62,21 @@ impl ObjectWriter {
             ));
         }
         let file = self.file.take().expect("the file is open until finish");
-        self.publish(&file).map_err(|e| io_error(&e))
+        let digest: [u8; 32] = self.digest.clone().finalize().into();
+        self.publish(&file, &digest).map_err(|e| io_error(&e))?;
+        Ok(ObjectHead {
+            size: self.written,
+            etag: etag_of(&digest),
+        })
     }
 
-    fn publish(&self, file: &File) -> std::io::Result<ObjectHead> {
+    fn publish(&self, file: &File, digest: &[u8; 32]) -> std::io::Result<()> {
+        keep_digest(file, Stamp::of(file)?, digest)?;
         file.sync_all()?;
         let directory = self.target.parent().expect("object paths have a parent");
         fs::create_dir_all(directory)?;
         fs::rename(&self.tmp, &self.target)?;
-        File::open(directory)?.sync_all()?;
-        head_of(&self.target)
+        File::open(directory)?.sync_all()
     }
 }
 

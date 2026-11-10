@@ -2210,6 +2210,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hmac 0.13.0",
  "oxabl-cache-core",
+ "rustix",
  "sha2 0.11.1",
  "subtle",
  "tokio",
