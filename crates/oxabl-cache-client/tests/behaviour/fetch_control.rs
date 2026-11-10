@@ -17,7 +17,7 @@ use crate::support::world::{Machine, World, assert_installed, identity_of, tree}
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_expired_url_is_renewed_once_and_the_read_succeeds() {
     let world = World::start_with(&Timers {
-        url_lifetime: "1s",
+        url_lifetime: "3s",
         ..Timers::default()
     })
     .await;
@@ -25,7 +25,9 @@ async fn an_expired_url_is_renewed_once_and_the_read_succeeds() {
     let sets = fixture::sets(&ci.workspace(), 4, "expiry");
     ci.store(&sets).await;
     let reader = world.machine(&world.dev, Mode::Developer).await;
-    world.proxy.delay_first_object(Duration::from_millis(1_600));
+    // Longer than any URL lives (lifetime plus the second its expiry is rounded up by), so the
+    // first read is refused; a renewed URL then has its whole lifetime left to be used.
+    world.proxy.delay_first_object(Duration::from_millis(4_500));
     let outcomes = reader.fetch(&sets).await;
     assert!(
         outcomes

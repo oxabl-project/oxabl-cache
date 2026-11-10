@@ -578,8 +578,9 @@ fenced.
   `server.url_lifetime` (24 h against 15 min by default). Otherwise an S3 PUT URL
   issued before the tombstone could create an object after the teardown, which the
   orphan scan can no longer see, because that cache no longer exists. The config
-  refuses a `gc.grace` that is not at least one second above `server.url_lifetime`
-  (the resolution of the signed expiry); keep a gap of hours, as the defaults do,
+  refuses a `gc.grace` that is not at least two seconds above `server.url_lifetime`
+  (a signed expiry has whole-second resolution and is rounded up, so a URL never lives
+  shorter than the lifetime and up to a second longer); keep a gap of hours, as the defaults do,
   to cover clock differences between the nodes and the bucket.
 - **Orphans.** Weekly, the sweeper lists the cache prefix and deletes objects that
   have no pack row and are older than twice the lease. This covers a lost database

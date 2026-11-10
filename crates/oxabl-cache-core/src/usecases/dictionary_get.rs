@@ -75,7 +75,7 @@ where
                     cache,
                     pack: segment.pack,
                 },
-                self.now() + self.config.url_lifetime_secs,
+                self.url_expiry(self.now()),
             )
             .await?;
         Ok(LocatedDictionary {

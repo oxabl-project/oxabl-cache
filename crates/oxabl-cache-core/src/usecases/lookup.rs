@@ -219,7 +219,7 @@ where
         response.dictionaries = dictionaries;
 
         if request.urls && records {
-            let expires_at = now + self.config.url_lifetime_secs;
+            let expires_at = self.url_expiry(now);
             for locator in &mut response.packs {
                 let key = ObjectKey {
                     cache: cache_id,

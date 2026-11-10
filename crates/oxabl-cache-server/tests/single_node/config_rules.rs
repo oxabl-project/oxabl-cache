@@ -237,7 +237,8 @@ fn the_gc_grace_must_exceed_the_url_lifetime() {
     for (name, lifetime, grace) in [
         ("grace-shorter", "15m", "10m"),
         ("grace-equal", "5s", "5s"),
-        ("grace-just-short", "5s", "5500ms"),
+        ("grace-just-short", "5s", "6500ms"),
+        ("grace-one-second-over", "5s", "6s"),
     ] {
         let refused = with(name, lifetime, grace);
         assert!(!refused.status.success(), "{lifetime} against {grace}");
@@ -247,7 +248,7 @@ fn the_gc_grace_must_exceed_the_url_lifetime() {
             "{message}"
         );
     }
-    let fine = with("grace-just-enough", "5s", "6s");
+    let fine = with("grace-just-enough", "5s", "7s");
     assert!(fine.status.success(), "{}", stderr(&fine));
     let defaults = run("grace-defaults", BASE, &["init"], &[]);
     assert!(defaults.status.success(), "{}", stderr(&defaults));
