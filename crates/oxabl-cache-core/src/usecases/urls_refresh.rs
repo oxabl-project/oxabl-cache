@@ -51,7 +51,7 @@ where
                 Ok(readable)
             })
             .await?;
-        let expires_at = self.now() + self.config.url_lifetime_secs;
+        let expires_at = self.url_expiry(self.now());
         let mut urls = Vec::with_capacity(readable.len());
         for pack in readable {
             let url = self

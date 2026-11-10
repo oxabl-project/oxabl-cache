@@ -1,6 +1,6 @@
 [package]
 name = "oxabl-cache-store-fs"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -18,6 +18,9 @@ sha2.workspace = true
 subtle.workspace = true
 getrandom.workspace = true
 tokio = { workspace = true, features = ["rt"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

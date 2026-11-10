@@ -160,6 +160,8 @@ server, the image or the scripts, right after `smoke.sh` (about ten seconds once
   copy the file off the host. Volume or filesystem snapshots also work (WAL mode makes
   a crash-consistent snapshot recoverable).
 - **Packs on local disk** are immutable: `rsync` without `--delete` or a filesystem snapshot is consistent.
+  A copy need not keep extended attributes (`rsync -X`): an ETag is a digest of the bytes, and a pack
+  without its kept digest is hashed once on its first read.
 - **Upgrades** replace the image tag (or the binary) and restart. Migrations are additive and run at startup.
 - **Verify a node** with `oxabl-cache-server scrub` (re-verifies stored packs) and, on an S3 store,
   `check-store` (prints the store's capabilities).

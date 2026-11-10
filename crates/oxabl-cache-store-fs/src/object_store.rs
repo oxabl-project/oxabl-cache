@@ -1,7 +1,7 @@
 //! The `ObjectStore` port on a directory.
 
 use crate::error::io_error;
-use crate::head::head_of;
+use crate::head::{head_of, open_with_head};
 use crate::layout::{cache_dir, object_path, pack_of_name};
 use crate::store::FsStore;
 use oxabl_cache_core::ids::CacheId;
@@ -9,7 +9,7 @@ use oxabl_cache_core::ports::{
     ObjectHead, ObjectInfo, ObjectKey, ObjectStore, SignedUrl, StoreCapabilities,
 };
 use oxabl_cache_core::{Conflict, Error, Result};
-use std::fs::{self, File};
+use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::time::UNIX_EPOCH;
 
@@ -76,8 +76,7 @@ impl ObjectStore for FsStore {
         let path = object_path(&self.root, key);
         let if_match = if_match.map(str::to_owned);
         blocking(move || {
-            let mut file = File::open(&path).map_err(|e| io_error(&e))?;
-            let head = head_of(&path).map_err(|e| io_error(&e))?;
+            let (mut file, head) = open_with_head(&path).map_err(|e| io_error(&e))?;
             if if_match.is_some_and(|etag| etag != head.etag) {
                 return Err(Error::Conflict(Conflict::PackChanged));
             }

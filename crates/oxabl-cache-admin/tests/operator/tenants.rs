@@ -234,7 +234,7 @@ fn deleting_a_tenant_ends_its_access_at_once_and_frees_its_name_after_the_teardo
         "op-delete",
         false,
         "url_lifetime = \"1s\"\n",
-        "[gc]\ngrace = \"2s\"\nlease = \"60s\"\ninterval = \"200ms\"\n",
+        "[gc]\ngrace = \"3s\"\nlease = \"60s\"\ninterval = \"200ms\"\n",
     );
     let doomed = Tenant::create(&server, "doomed");
     let kept = Tenant::create(&server, "kept");

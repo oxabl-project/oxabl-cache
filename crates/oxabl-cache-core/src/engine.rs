@@ -74,6 +74,12 @@ where
         self.clock.now()
     }
 
+    /// The expiry of a URL issued at `now`. The clock counts whole seconds, so the lifetime
+    /// is counted from the next one: a URL never lives shorter than `url_lifetime_secs`.
+    pub(crate) fn url_expiry(&self, now: i64) -> i64 {
+        now + self.config.url_lifetime_secs + 1
+    }
+
     pub(crate) fn count(&self, tenant: TenantId, cache: CacheId, metric: Metric, value: u64) {
         self.usage
             .add(tenant, cache, day_of(self.now()), metric, value);

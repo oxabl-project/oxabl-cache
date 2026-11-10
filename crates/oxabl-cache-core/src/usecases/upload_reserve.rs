@@ -101,7 +101,7 @@ where
                 Reservation::Refused => UploadOutcome::QuotaExceeded,
                 Reservation::Committed(pack) => UploadOutcome::Committed { pack },
                 Reservation::Fresh(pack) | Reservation::Renewed(pack) => {
-                    let expires_at = self.now() + self.config.url_lifetime_secs;
+                    let expires_at = self.url_expiry(self.now());
                     let url = self
                         .store
                         .put_url(

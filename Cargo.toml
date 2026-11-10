@@ -48,6 +48,7 @@ jiff = { version = "0.2", default-features = false }
 keyring-core = "1"
 rcgen = { version = "0.14", default-features = false }
 rusqlite = "0.41"
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 rustls = { version = "0.23", default-features = false }
 rustls-native-certs = "0.8"
 serde = "1"
@@ -75,4 +76,7 @@ zstd = { version = "0.13", default-features = false, features = ["zdict_builder"
 opt-level = 3
 
 [profile.dev.package.salsa20]
+opt-level = 3
+
+[profile.dev.package.sha2]
 opt-level = 3

@@ -316,3 +316,10 @@ Every pull request runs:
 - **Public-repo hygiene:** a grep for internal identifiers over the tree, with a
   fixture that must trip it.
 - The e2e suite on both backends, and 60 s of each fuzz target.
+- **Under load:** `scripts/test-under-load.sh [loops] [filter...]` runs client behaviour
+  tests with the test binary and the servers it starts pinned to one CPU beside busy loops,
+  as a slow, shared runner would. Work added to a request path shows up here as an expired
+  lease or a timeout long before fast runners notice it. CI runs the `store::` tests beside
+  two loops: that fails on a build that hashes each pack twice on the PUT-to-commit path,
+  and passes on a correct one. On a CI runner the whole suite, or four loops, also fails
+  tests with fixed timeouts (an idle timeout, a fetch of 1,000 keys) on a correct build.
