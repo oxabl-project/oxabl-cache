@@ -59,7 +59,7 @@ jobs:
       # PUT-to-commit path (an expired pending lease). The whole suite, or more
       # loops, also fails tests with fixed timeouts on a correct build here.
       - name: Store tests on CPU 0 beside two busy loops
-        run: nix develop --command scripts/test-under-load.sh 2 store::
+        run: nix develop --command scripts/test-under-load.sh 2 'store::'
 
   dependency-gate:
     name: Server dependency gate
