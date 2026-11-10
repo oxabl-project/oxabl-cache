@@ -3,7 +3,8 @@
 //! Objects live at `<root>/v1/<cache>/<pack[0..2]>/<pack>` and are written
 //! through `<root>/tmp` with fsync, rename and a directory fsync. URLs have the
 //! shape of presigned ones and are signed with HMAC-SHA256; the HTTP layer serves
-//! them and checks them with [`FsStore::verify_url`].
+//! them and checks them with [`FsStore::verify_url`]. An object's ETag is a
+//! digest of its bytes, so it does not depend on the file system's clock.
 
 mod base64url;
 mod error;
