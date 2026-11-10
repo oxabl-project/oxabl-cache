@@ -24,13 +24,17 @@ pub(crate) fn default_file() -> Option<PathBuf> {
     Some(config.join("oxabl-cache").join("identity"))
 }
 
-fn passphrase(provider: Option<&PassphraseProvider>) -> Result<SecretString, OpenError> {
+fn passphrase(
+    path: &std::path::Path,
+    provider: Option<&PassphraseProvider>,
+) -> Result<SecretString, OpenError> {
     let given = match provider {
         Some(provider) => provider(),
         None => std::env::var("OXABL_CACHE_IDENTITY_PASSPHRASE")
             .ok()
             .filter(|v| !v.is_empty())
-            .map(SecretString::from),
+            .map(SecretString::from)
+            .or_else(|| crate::keyring::stored_passphrase(path)),
     };
     given.ok_or(OpenError::Identity("no passphrase for the identity file"))
 }
@@ -42,7 +46,7 @@ fn from_file(
     if !path.exists() {
         return Err(OpenError::Identity("no identity file"));
     }
-    identity_file::load(path, &passphrase(provider)?).map_err(describe)
+    identity_file::load(path, &passphrase(path, provider)?).map_err(describe)
 }
 
 /// Resolves the member identity. Unlocking a protected file takes about a second, so this

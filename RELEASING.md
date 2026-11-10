@@ -16,9 +16,9 @@ release-please's `cargo-workspace` plugin reads every workspace member, so:
 - the unpublished crates are in the config with `skip-github-release` and `skip-changelog`: their versions move with their dependencies, but they get no tag, release or changelog;
 - the dependency graph has no cycle, dev-dependencies included. A suite that needs a crate and the crates built on it lives in its own test crate, as `tests/core-behaviour` does.
 
-The gate fixture (`scripts/gate-fixture`) is a separate workspace with its own lock file. Its entries for format and crypto are `extra-files` of those packages, so a release bumps them too. release-please parses TOML values as `{value: ...}`, so a filter compares `@.name.value`.
+The gate fixture (`scripts/gate-fixture`), the fuzz targets (`fuzz`) and the desktop app (`desktop`) are separate workspaces with their own lock files. Each member a lock file pins has an `extra-files` entry for that file, so a release bumps it too; otherwise the lock goes stale and a `--locked` build fails. release-please parses TOML values as `{value: ...}`, so a filter compares `@.name.value`.
 
-`scripts/check-release-graph.sh` checks all three on every PR (CI job `dependency-gate`).
+`scripts/check-release-graph.sh` checks all of this on every PR (CI job `dependency-gate`).
 
 ## Versions
 
@@ -30,6 +30,15 @@ Merging the release PR tags `<crate>-v<version>` and starts the build and publis
 2. `scripts/publish-workspace.sh` publishes every workspace crate that is not `publish = false`, in dependency order, skipping versions crates.io already has. A crates.io rate limit is waited out for up to 30 minutes; re-running the workflow is always safe.
 
 The first release, `0.1.0`, is already in the manifest: run the `Release` workflow manually (`workflow_dispatch`) to publish it.
+
+## The desktop app
+
+`desktop/` is a `simple` release-please package (tag `oxabl-cache-desktop-v<version>`): its
+version lives in `desktop/Cargo.toml` and `desktop/Cargo.lock`, both `extra-files`, and the format,
+crypto and client packages list `desktop/Cargo.lock` too, so a bump of theirs keeps the app's lock
+file in step. A desktop release runs the `desktop` job of `release.yml`, which builds the binary
+against glibc 2.34 (`desktop/scripts/package.sh`, cargo-zigbuild) and attaches the tarball and its
+SHA-256 to the GitHub release.
 
 ## Secrets
 

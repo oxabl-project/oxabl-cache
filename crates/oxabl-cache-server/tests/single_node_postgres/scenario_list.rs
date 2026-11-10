@@ -53,5 +53,5 @@ fn these_scenarios_run_on_a_postgres_database_with_the_current_schema() {
                 .map(|row| row.get(0))
                 .collect()
         });
-    assert_eq!(versions, vec![1, 2, 3, 4, 5]);
+    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
 }

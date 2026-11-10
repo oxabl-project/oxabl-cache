@@ -1,11 +1,13 @@
 //! Local state under `$XDG_STATE_HOME/oxabl-cache`: per-cache roster state, the failure log and
 //! the stored login sessions.
 
+pub(crate) mod bounded_log;
 mod high_water;
 mod session_file;
 
 use std::path::{Path, PathBuf};
 
+use crate::activity::Journal;
 use crate::error_log::ErrorLog;
 pub(crate) use high_water::HighWater;
 pub(crate) use session_file::StoredSession;
@@ -51,6 +53,15 @@ impl StateDirs {
             self.root
                 .as_ref()
                 .map(|root| root.join("errors").join(format!("{tenant}-{cache}.jsonl"))),
+        )
+    }
+
+    /// The activity journal of one cache of one tenant.
+    pub fn journal(&self, tenant: &str, cache: &str) -> Journal {
+        Journal::new(
+            self.root
+                .as_ref()
+                .map(|root| root.join("journal").join(format!("{tenant}-{cache}.jsonl"))),
         )
     }
 

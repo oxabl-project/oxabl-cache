@@ -40,6 +40,7 @@ exists.
 | Tenant, cache display name, user emails, token names | yes | operator-visible account data; customers choose cache names |
 | OIDC claims (repository, ref) | transiently, in memory, during exchange | never persisted or logged; trust policies store keyed hashes of the expected values |
 | Times, counts, access pattern | yes | when entries are written and read, how many, by whom |
+| Telemetry report (how a fetch or store went) | when it arrives, its epoch and size | sealed, a fixed 96 bytes per report |
 
 **A full leak of buckets plus database** gives: ciphertext, entry counts per cache
 (about the number of compile units), Padmé size classes of each artifact set, which
@@ -53,6 +54,16 @@ the ids of a cache and download the ciphertext behind them (tenant egress quota 
 request rate apply). That is the same ciphertext a bucket plus database leak gives and
 no plaintext. The ids are not secret from the server, never logged, and the client
 verifies every record it fetches by them, so a lying server cannot make `verify` pass.
+
+**Telemetry.** After each fetch and store, the client seals a report of how it went (keys
+asked for, hits, misses, failures, bytes, duration, round trip, mode) under the telemetry key
+of the epoch and sends it to `POST …/telemetry`. Members read the log back and compute the
+team's numbers on their own machine. The report holds no key, path, label or identity, every
+report has the same length, and it is bound to its cache and epoch, so the server learns that
+a member finished an operation at that moment, which its own request log already shows, and
+nothing about how it went. A member can forge a report, as a member can fetch and store at
+will; reports are numbers to look at, never an input to a decision. Reports sealed under an
+old epoch are not readable in the new one, so a removed member's history ends with them.
 
 **Size padding.** Each segment's plaintext is padded to its Padmé length, which
 leaks O(log log L) bits of the size. On 100,000 synthetic sizes, log-uniform between
@@ -68,7 +79,8 @@ of compile units) that is no secret.
 CRK_e  cache root key, 32 random bytes, one per epoch e (only members hold it)
  ├─ lookup_key  = BLAKE3.derive_key("oxabl-cache v1 lookup",  CRK_e)
  ├─ segment_key = BLAKE3.derive_key("oxabl-cache v1 segment", CRK_e)
- └─ record_key  = BLAKE3.derive_key("oxabl-cache v1 record",  CRK_e)
+ ├─ record_key  = BLAKE3.derive_key("oxabl-cache v1 record",  CRK_e)
+ └─ telemetry   = BLAKE3.derive_key("oxabl-cache v1 telemetry", CRK_e)
 
 per object, with salt = 32 random bytes from the OS CSPRNG:
    K_enc    = BLAKE3.derive_key("oxabl-cache v1 enc",    sub_key ‖ salt)
@@ -113,7 +125,10 @@ The server can neither read the keyring nor forge a roster.
   `~/.config/oxabl-cache/identity`. The file holds only the identity string
   encrypted with age (binary format) to a passphrase (age's scrypt recipient, work
   factor 2^18, about 1 s to unlock once per session). There is no plaintext
-  identity file and no loader for one. CI passes the identity string in
+  identity file and no loader for one. The passphrase can live in the operating
+  system's keyring (`oxabl-cache identity remember`, or the desktop app), which the
+  client reads after `OXABL_CACHE_IDENTITY_PASSPHRASE`; the identity file stays
+  encrypted at rest either way. CI passes the identity string in
   `OXABL_CACHE_IDENTITY` instead. The developer sends the public part to an owner,
   who runs `oxabl-cache member add`.
 - An OIDC-bound unwrap is rejected. It needs a service that holds key material and

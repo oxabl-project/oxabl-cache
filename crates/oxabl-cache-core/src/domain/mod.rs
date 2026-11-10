@@ -11,5 +11,6 @@ pub mod principal;
 pub mod roster;
 pub mod scope;
 pub mod segment;
+pub mod telemetry;
 pub mod tenant;
 pub mod usage;

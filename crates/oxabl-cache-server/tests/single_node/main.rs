@@ -19,6 +19,7 @@ mod health;
 mod lifecycle;
 mod limits;
 mod logs;
+mod me_and_telemetry;
 mod migrate;
 mod object_urls;
 mod operator_tokens;

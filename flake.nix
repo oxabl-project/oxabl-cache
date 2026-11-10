@@ -15,7 +15,16 @@
     {
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
+          # The desktop app (`desktop/`) links xkbcommon and wayland, and draws through the
+          # Vulkan loader; headless renders use Mesa's lavapipe, a software Vulkan driver.
+          OXABL_DESKTOP_VULKAN_LIBS = pkgs.lib.makeLibraryPath [ pkgs.vulkan-loader ];
+          OXABL_DESKTOP_LAVAPIPE_ICD = "${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.${pkgs.stdenv.hostPlatform.uname.processor}.json";
           packages = [
+            pkgs.pkg-config
+            pkgs.libxkbcommon
+            pkgs.wayland
+            pkgs.cargo-zigbuild
+            pkgs.zig
             pkgs.garage
             pkgs.versitygw
             pkgs.postgresql_18
@@ -29,6 +38,8 @@
             pkgs.kind
             pkgs.kubectl
             pkgs.systemd
+            pkgs.dbus
+            pkgs.gnome-keyring
           ];
         };
       });

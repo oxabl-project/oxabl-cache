@@ -9,12 +9,14 @@ pub(crate) mod roster;
 mod view;
 
 use std::collections::HashSet;
+use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex, RwLock};
 
 use oxabl_cache_crypto::Identity;
 use oxabl_cache_format::{Limits, Namespaces, PublicKey, SegmentId};
 use tokio::runtime::Handle;
 
+use crate::activity::{self, Activity, Journal};
 use crate::api::{Api, ApiError};
 use crate::config::{Config, Pins};
 use crate::error::{CacheError, OpenError};
@@ -54,6 +56,9 @@ pub(crate) struct Inner {
     pub counters: Arc<Counters>,
     pub errors: ErrorLog,
     pub reported: Mutex<HashSet<SegmentId>>,
+    pub journal: Journal,
+    pub rtt_ms: AtomicU32,
+    pub uploading: tokio::sync::Mutex<()>,
 }
 
 /// A handle to one cache; cheap to clone and safe to share across tasks.
@@ -147,5 +152,16 @@ impl Cache {
 
     pub fn stats(&self) -> Stats {
         self.inner.counters.snapshot()
+    }
+
+    /// The fetches and stores the cache's members shared in the current epoch, oldest first.
+    /// The server keeps them sealed: only members read them.
+    pub async fn team_activity(&self) -> Result<Vec<Activity>, CacheError> {
+        activity::team_activity(&self.inner).await
+    }
+
+    /// Sends the activities of this machine that are not yet shared, and waits until it is done.
+    pub async fn share_activity(&self) {
+        activity::upload_pending(self.inner.clone()).await;
     }
 }

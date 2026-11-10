@@ -34,6 +34,8 @@ pub const ROSTER_MEMBERS: usize = 1_000;
 pub const ROSTER_SIGNATURES: usize = 4;
 /// Characters in a Bech32 string.
 pub const BECH32_CHARS: usize = 1_024;
+/// Largest sealed telemetry report.
+pub const TELEMETRY_BYTES: usize = 1_024;
 
 /// Limits a reader applies that a deployment may configure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

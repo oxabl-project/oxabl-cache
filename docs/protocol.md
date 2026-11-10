@@ -124,6 +124,22 @@ still-valid set, and the token is refused.
 Token formats: API tokens `oxc_<id 16 base32>_<secret 52 base32>`, sessions
 `oxs_<…>`, operator tokens `oxo_<…>`. The prefixes allow secret scanning.
 
+## The caller
+
+`GET /v1/me` takes any credential and answers its tenant and every cache of it the
+credential holds a scope on (every cache of the tenant for a tenant administrator, with
+`scopes` empty where it holds none):
+
+```json
+{"tenant": "t_…", "principal": "…", "tenant_admin": false,
+ "caches": [{"id": "c_…", "display_name": "…", "scopes": ["read", "write:personal"],
+             "epoch": 3, "roster_version": 12, "quota": {"hard_bytes": …, "live_bytes": …,
+             "pending_bytes": …, "stored_bytes": …, "reclaimable_bytes": …}}]}
+```
+
+Caches are sorted by display name. A cache listed here is not yet trusted: the client opens it
+only with the pins of `.oxabl/cache.toml` or an invite.
+
 ## Cache data plane
 
 All routes are under `/v1/caches/{cache}`. Scope `read` is needed unless noted.
@@ -308,6 +324,22 @@ for refreshing expired GET URLs. Packs the caller cannot read are omitted.
 
 `{"pack_id": "…", "segment_id": "…", "kind": "hash_mismatch"}` returns 202. The server
 verifies the report itself before acting (architecture.md, "Report").
+
+### `POST|GET /v1/caches/{cache}/telemetry`
+
+Scope `read`. POST takes one sealed report, an `OXTL` frame of at most 1,024 bytes, as
+`application/vnd.oxabl-cache.v1`, and answers 201 `{"seq": 17}`. The server checks only the
+frame's outer shape (magic, version, flags, a body longer than a tag); anything else is 400.
+It keeps the newest 4,096 reports of a cache, none older than 30 days.
+
+GET `?after=<seq>&limit=<n>` (`after` defaults to 0, `limit` to and at most 1,000) answers
+the reports after `after`, oldest first, and the cursor of the next page:
+
+```json
+{"reports": [{"seq": 18, "received_at": 1793000000, "body": "<base64 OXTL>"}], "next": 18}
+```
+
+An empty page keeps `next` equal to `after`.
 
 ### `POST /v1/caches/{cache}/purge`
 
@@ -511,6 +543,18 @@ ignored. At least one valid signature by a pinned owner key is required.
 `bytes32 signer`, `bytes64` Ed25519 over `"oxabl-cache v1 dictionary" ‖ every
 preceding byte`. Only `ci` or `owner` signers are accepted. The dictionary segment's
 plaintext is the raw zstd dictionary with codec 0.
+
+### `OXTL` sealed telemetry report
+
+`OXTL`, 1, 0, `u32 epoch`, `bytes12 nonce`, then AES-256-GCM ciphertext and tag under
+`BLAKE3.derive_key("oxabl-cache v1 telemetry", CRK_epoch)`, with the associated data
+`"oxabl-cache v1 telemetry" ‖ bytes16 cache_id ‖ the 22 header bytes`. The nonce is random.
+
+The plaintext is 58 bytes: `bytes16 report_id` (random; readers drop repeats), `u64 at`
+(unix seconds, client clock), `u8 kind` (1 pull, 2 push), `u8 mode` (1 ci, 2 developer,
+3 read-only), `u32 requested`, `u32 hits`, `u32 misses`, `u32 failed` (hits, misses and
+failed together at most `requested`), `u64 bytes`, `u32 duration_ms`, `u32 rtt_ms` (0 when
+unknown).
 
 ### Identity strings
 

@@ -1,9 +1,7 @@
 .git
 .github
 .direnv
-target
-fuzz/target
-scripts/gate-fixture/target
+**/target
 deploy
 docs
 **/*.md

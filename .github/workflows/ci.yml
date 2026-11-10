@@ -104,6 +104,35 @@ jobs:
       - name: Run every fuzz target for 30 seconds
         run: fuzz/run.sh 30
 
+  desktop:
+    name: Desktop app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.rustup/toolchains
+            target
+            desktop/target
+          key: desktop-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'desktop/Cargo.lock', 'rust-toolchain.toml', 'flake.lock') }}
+          restore-keys: desktop-${{ runner.os }}-
+      - name: Install the pinned toolchain
+        run: nix develop --command rustup toolchain install
+      - name: Format
+        run: nix develop --command cargo fmt --manifest-path desktop/Cargo.toml --all --check
+      - name: Clippy
+        run: nix develop --command cargo clippy --manifest-path desktop/Cargo.toml --all-targets --locked -- -D warnings
+      - name: Allow unprivileged user namespaces for the sign-in test
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Acceptance tests
+        run: nix develop --command cargo test --manifest-path desktop/Cargo.toml --locked
+      - name: Every scene renders
+        run: nix develop --command bash -c 'cargo build --manifest-path desktop/Cargo.toml --locked && desktop/scripts/previews.sh'
+
   deploy-artifacts:
     name: Deploy artifacts
     runs-on: ubuntu-latest

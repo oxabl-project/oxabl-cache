@@ -1,4 +1,4 @@
-use oxabl_cache_crypto::{Identity, LookupKey, RecordKey, SegmentKey, VerifiedRoster};
+use oxabl_cache_crypto::{Identity, LookupKey, RecordKey, RootKey, SegmentKey, VerifiedRoster};
 use oxabl_cache_format::{Namespaces, Role};
 
 use crate::error::OpenError;
@@ -10,6 +10,7 @@ pub(crate) struct RosterView {
     pub lookup: LookupKey,
     pub segment: SegmentKey,
     pub record: RecordKey,
+    pub root: RootKey,
 }
 
 impl RosterView {
@@ -23,6 +24,7 @@ impl RosterView {
             lookup: root.lookup_key(),
             segment: root.segment_key(),
             record: root.record_key(),
+            root,
             roster,
         })
     }

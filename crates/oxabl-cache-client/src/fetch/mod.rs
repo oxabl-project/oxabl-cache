@@ -27,6 +27,7 @@ use tokio::task::JoinHandle;
 
 use oxabl_cache_format::LookupId;
 
+use crate::activity::{Activity, ActivityKind};
 use crate::artifact_path::ArtifactPath;
 use crate::cache::Inner;
 use crate::compile_key::CompileKey;
@@ -109,6 +110,7 @@ impl Fetch {
             sink: Sink::new(tx, count),
             committer: Default::default(),
             refreshed: OnceCell::new(),
+            started: std::time::Instant::now(),
         });
         let task = inner.handle.spawn(drive(session));
         Fetch {
@@ -141,4 +143,27 @@ async fn drive(session: Arc<Session>) {
         }
     }
     session.sink.log_failures(&session.inner.errors);
+    if session.ids.is_none() && !session.keys.is_empty() {
+        record_pull(&session);
+    }
+}
+
+fn record_pull(session: &Session) {
+    let settled = session.sink.settled();
+    let count = |n: u64| u32::try_from(n).unwrap_or(u32::MAX);
+    crate::activity::record(
+        &session.inner,
+        Activity {
+            at: crate::activity::now_secs(),
+            kind: ActivityKind::Pull,
+            mode: session.inner.mode,
+            requested: count(session.keys.len() as u64),
+            hits: count(settled.installed),
+            misses: count(settled.not_found),
+            failed: count(settled.failed),
+            bytes: settled.bytes,
+            duration_ms: count(session.started.elapsed().as_millis() as u64),
+            rtt_ms: 0,
+        },
+    );
 }

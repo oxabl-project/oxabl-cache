@@ -13,6 +13,16 @@
           "type": "toml",
           "path": "/scripts/gate-fixture/Cargo.lock",
           "jsonpath": "$.package[?(@.name.value=='oxabl-cache-format')].version"
+        },
+        {
+          "type": "toml",
+          "path": "/desktop/Cargo.lock",
+          "jsonpath": "$.package[?(@.name.value=='oxabl-cache-format')].version"
+        },
+        {
+          "type": "toml",
+          "path": "/fuzz/Cargo.lock",
+          "jsonpath": "$.package[?(@.name.value=='oxabl-cache-format')].version"
         }
       ]
     },
@@ -24,12 +34,29 @@
           "type": "toml",
           "path": "/scripts/gate-fixture/Cargo.lock",
           "jsonpath": "$.package[?(@.name.value=='oxabl-cache-crypto')].version"
+        },
+        {
+          "type": "toml",
+          "path": "/desktop/Cargo.lock",
+          "jsonpath": "$.package[?(@.name.value=='oxabl-cache-crypto')].version"
+        },
+        {
+          "type": "toml",
+          "path": "/fuzz/Cargo.lock",
+          "jsonpath": "$.package[?(@.name.value=='oxabl-cache-crypto')].version"
         }
       ]
     },
     "crates/oxabl-cache-client": {
       "release-type": "rust",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "/desktop/Cargo.lock",
+          "jsonpath": "$.package[?(@.name.value=='oxabl-cache-client')].version"
+        }
+      ]
     },
     "crates/oxabl-cache-admin": {
       "release-type": "rust",
@@ -84,12 +111,37 @@
     "tests/e2e": {
       "release-type": "rust",
       "skip-github-release": true,
-      "skip-changelog": true
+      "skip-changelog": true,
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "/desktop/Cargo.lock",
+          "jsonpath": "$.package[?(@.name.value=='oxabl-cache-e2e')].version"
+        }
+      ]
     },
     "tests/core-behaviour": {
       "release-type": "rust",
       "skip-github-release": true,
       "skip-changelog": true
+    },
+    "desktop": {
+      "release-type": "simple",
+      "package-name": "oxabl-cache-desktop",
+      "component": "oxabl-cache-desktop",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "/desktop/Cargo.lock",
+          "jsonpath": "$.package[?(@.name.value=='oxabl-cache-desktop')].version"
+        }
+      ]
     }
   }
 }

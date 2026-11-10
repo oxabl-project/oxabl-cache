@@ -1,6 +1,6 @@
 use oxabl_cache_client::{
-    Identity, IdentityError, create_identity_file, default_identity_path, signing_key_hex,
-    signing_key_text, write_identity_secret,
+    Identity, IdentityError, create_identity_file, default_identity_path, forget_passphrase,
+    open_identity_file, save_passphrase, signing_key_hex, signing_key_text, write_identity_secret,
 };
 use serde_json::json;
 
@@ -32,7 +32,7 @@ pub fn new(context: &Context, args: IdentityNewArgs) -> Result<(), Failure> {
     };
     let identity = match &file {
         Some(path) => {
-            let passphrase = match context.passphrase()? {
+            let passphrase = match context.passphrase(None)? {
                 Some(passphrase) => passphrase,
                 None => secrets::prompt_new("New identity passphrase").ok_or_else(|| {
                     Failure::usage("the passphrase was not entered twice the same")
@@ -71,5 +71,50 @@ pub fn new(context: &Context, args: IdentityNewArgs) -> Result<(), Failure> {
         fields.push(("signing key (hex)", key_hex));
         print_fields(&fields);
     }
+    Ok(())
+}
+
+fn print_remembered(context: &Context, path: &std::path::Path, remembered: bool) {
+    if context.json {
+        print_json(&json!({"identity_file": path, "remembered": remembered}));
+    } else {
+        print_fields(&[
+            ("identity file", path.display().to_string()),
+            (
+                "keyring",
+                if remembered {
+                    "remembered"
+                } else {
+                    "forgotten"
+                }
+                .to_owned(),
+            ),
+        ]);
+    }
+}
+
+/// Checks that the passphrase unlocks the identity file, then stores it in the keyring.
+pub async fn remember(context: &Context) -> Result<(), Failure> {
+    let path = context.identity_path()?;
+    let passphrase = match context.passphrase(None)? {
+        Some(passphrase) => passphrase,
+        None => secrets::prompt("Identity passphrase")
+            .ok_or_else(|| Failure::usage("no passphrase was entered"))?,
+    };
+    let unlocking = (path.clone(), passphrase.clone());
+    tokio::task::spawn_blocking(move || open_identity_file(&unlocking.0, &unlocking.1))
+        .await
+        .map_err(|_| Failure::refused("unlocking the identity failed"))?
+        .map_err(|e| refuse(&path, e))?;
+    save_passphrase(&path, &passphrase).map_err(Failure::refused)?;
+    print_remembered(context, &path, true);
+    Ok(())
+}
+
+/// Removes the identity file's passphrase from the keyring.
+pub fn forget(context: &Context) -> Result<(), Failure> {
+    let path = context.identity_path()?;
+    forget_passphrase(&path).map_err(Failure::refused)?;
+    print_remembered(context, &path, false);
     Ok(())
 }

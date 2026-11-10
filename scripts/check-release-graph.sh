@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Fails when release-please's cargo-workspace plugin could not read the workspace:
 # a member without a literal version, a member missing from the release config,
-# or a cycle among members, dev-dependencies included.
+# or a cycle among members, dev-dependencies included. Also fails when another
+# tracked Cargo.lock pins a member but the member's extra-files do not bump it:
+# that lock goes stale on the release and its --locked build fails.
 # Usage: check-release-graph.sh [manifest-path] [release-please-config]
 set -euo pipefail
 
@@ -19,6 +21,11 @@ if [[ "$packages" -eq 0 ]]; then
   exit 2
 fi
 
+other_locks=()
+while IFS= read -r lock; do
+  [[ "$lock" == Cargo.lock ]] || other_locks+=("$lock")
+done < <(git -C "$root" ls-files '*Cargo.lock')
+
 status=0
 while IFS=$'\t' read -r name path; do
   dir="${path%/Cargo.toml}"
@@ -31,6 +38,14 @@ while IFS=$'\t' read -r name path; do
     echo "check-release-graph: $rel is not a package in $config" >&2
     status=1
   fi
+  for lock in "${other_locks[@]}"; do
+    grep -qxF "name = \"$name\"" "$root/$lock" || continue
+    if ! jq -e --arg p "$rel" --arg l "/$lock" \
+      '.packages[$p]["extra-files"] // [] | any(.path == $l)' "$root/$config" >/dev/null; then
+      echo "check-release-graph: $lock pins $name but $rel has no extra-files entry for it" >&2
+      status=1
+    fi
+  done
 done < <(jq -r '.packages[] | [.name, .manifest_path] | @tsv' <<<"$metadata")
 
 cycle="$(jq -r '

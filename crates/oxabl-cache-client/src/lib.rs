@@ -5,6 +5,7 @@
 //! and atomic installation. Every cache failure is a miss or "not stored"; the client never
 //! fails a build.
 
+mod activity;
 mod api;
 mod artifact_path;
 mod auth;
@@ -17,7 +18,10 @@ mod error_log;
 mod fetch;
 mod identity;
 mod install;
+mod invite;
+mod keyring;
 mod login;
+mod me;
 mod mode;
 mod owner;
 mod progress;
@@ -28,6 +32,7 @@ mod stats;
 mod status;
 mod store;
 
+pub use activity::{Activity, ActivityKind, ActivitySummary};
 pub use artifact_path::{ArtifactPath, PathError};
 pub use cache::{Cache, MAX_SAMPLE, Presence};
 pub use compile_key::CompileKey;
@@ -46,7 +51,13 @@ pub use identity::{
     signing_key_hex, signing_key_text, write_identity_secret,
 };
 pub use install::Durability;
+pub use invite::Invite;
+pub use keyring::{
+    KeyringError, forget_passphrase, forget_token, save_passphrase, save_token, stored_passphrase,
+    stored_token,
+};
 pub use login::{Challenge, DeviceLogin, LoginError, LoginSession, Logout, logout};
+pub use me::{Me, VisibleCache, me, round_trip, signed_in};
 pub use mode::Mode;
 pub use owner::{InitReport, InitRequest, Owner, OwnerError, Published, Purge, init};
 pub use oxabl_cache_crypto::{ExposeSecret, SecretString};

@@ -2,6 +2,7 @@ pub mod dict;
 pub mod fetch;
 pub mod identity;
 pub mod init;
+pub mod invite;
 pub mod keys;
 pub mod login;
 pub mod member;

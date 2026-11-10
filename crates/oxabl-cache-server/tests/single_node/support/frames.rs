@@ -141,3 +141,13 @@ pub fn statuses(bytes: &[u8]) -> Vec<format::CommitStatus> {
         .expect("OXCA")
         .statuses
 }
+
+/// An `OXTL` frame of the given epoch around random bytes: the outer shape of a sealed
+/// telemetry report, which is all the server can check.
+pub fn telemetry(epoch: u32, sealed_len: usize) -> Vec<u8> {
+    let mut frame = b"OXTL\x01\x00".to_vec();
+    frame.extend_from_slice(&epoch.to_be_bytes());
+    frame.extend_from_slice(&random(12));
+    frame.extend_from_slice(&random(sealed_len));
+    frame
+}

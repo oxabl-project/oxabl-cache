@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Oxabl Cache
+GenericName=Build cache
+Comment=Your organisation's build caches: size, speed and hit rate
+Exec=oxabl-cache-desktop
+Icon=org.oxabl.Cache
+Terminal=false
+Categories=Development;Utility;
+Keywords=oxabl;cache;build;abl;progress;
+StartupNotify=true
+StartupWMClass=org.oxabl.Cache
+SingleMainWindow=true

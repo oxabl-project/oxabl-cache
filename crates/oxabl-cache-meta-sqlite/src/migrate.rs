@@ -11,6 +11,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (3, include_str!("../schema/0003_oidc.sql")),
     (4, include_str!("../schema/0004_gc_leader.sql")),
     (5, include_str!("../schema/0005_tombstones.sql")),
+    (6, include_str!("../schema/0006_telemetry.sql")),
 ];
 
 /// The schema version this release writes.

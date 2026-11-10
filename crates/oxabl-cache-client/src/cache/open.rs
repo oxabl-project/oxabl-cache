@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex, RwLock};
 
 use oxabl_cache_format::Limits;
@@ -35,6 +36,7 @@ pub(super) async fn open(config: Config) -> Result<Cache, OpenError> {
     )
     .await?;
     let errors = state.error_log(&config.pins.tenant.to_text(), &config.pins.cache.to_text());
+    let journal = state.journal(&config.pins.tenant.to_text(), &config.pins.cache.to_text());
     let counters = Arc::new(Counters::default());
     let api = Api::new(
         http,
@@ -49,25 +51,30 @@ pub(super) async fn open(config: Config) -> Result<Cache, OpenError> {
     let verified = roster::load(&api, &config.pins, &high_water).await?;
     let view = view::RosterView::build(verified, &identity)?;
     let namespaces = view::read_namespaces(config.mode, view.role(&identity));
-    Ok(Cache {
-        inner: Arc::new(Inner {
-            reader_key: identity.signing_public(),
-            api,
-            pins: config.pins,
-            identity,
-            mode: config.mode,
-            namespaces,
-            view: RwLock::new(Arc::new(view)),
-            high_water,
-            dictionaries: Dictionaries::default(),
-            limits,
-            zstd_level: config.zstd_level,
-            gates: Gates::new(config.connections),
-            handle: Handle::current(),
-            checksum_sha256: info.checksum_sha256(),
-            counters,
-            errors,
-            reported: Mutex::new(Default::default()),
-        }),
-    })
+    let inner = Arc::new(Inner {
+        reader_key: identity.signing_public(),
+        api,
+        pins: config.pins,
+        identity,
+        mode: config.mode,
+        namespaces,
+        view: RwLock::new(Arc::new(view)),
+        high_water,
+        dictionaries: Dictionaries::default(),
+        limits,
+        zstd_level: config.zstd_level,
+        gates: Gates::new(config.connections),
+        handle: Handle::current(),
+        checksum_sha256: info.checksum_sha256(),
+        counters,
+        errors,
+        reported: Mutex::new(Default::default()),
+        journal,
+        rtt_ms: AtomicU32::new(0),
+        uploading: tokio::sync::Mutex::new(()),
+    });
+    inner
+        .handle
+        .spawn(crate::activity::upload_pending(inner.clone()));
+    Ok(Cache { inner })
 }

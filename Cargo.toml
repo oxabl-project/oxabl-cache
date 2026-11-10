@@ -45,6 +45,7 @@ http-body-util = "0.1"
 hyper = "1"
 hyper-util = "0.1"
 jiff = { version = "0.2", default-features = false }
+keyring-core = "1"
 rcgen = { version = "0.14", default-features = false }
 rusqlite = "0.41"
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
@@ -63,6 +64,7 @@ tokio-rustls = { version = "0.26", default-features = false }
 toml = "0.9"
 url = "2"
 webpki-root-certs = "1"
+zbus-secret-service-keyring-store = { version = "1", default-features = false, features = ["rt-async-io-crypto-rust"] }
 cap-std = "4"
 futures-core = "0.3"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
@@ -77,4 +79,10 @@ opt-level = 3
 opt-level = 3
 
 [profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+
+[profile.dev.package.ed25519-dalek]
 opt-level = 3

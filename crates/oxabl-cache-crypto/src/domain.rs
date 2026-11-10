@@ -5,8 +5,10 @@ pub(crate) const CTX_SEGMENT: &str = "oxabl-cache v1 segment";
 pub(crate) const CTX_RECORD: &str = "oxabl-cache v1 record";
 pub(crate) const CTX_ENC: &str = "oxabl-cache v1 enc";
 pub(crate) const CTX_COMMIT: &str = "oxabl-cache v1 commit";
+pub(crate) const CTX_TELEMETRY: &str = "oxabl-cache v1 telemetry";
 
 pub(crate) const AD_RECORD: &[u8] = b"oxabl-cache v1 record";
+pub(crate) const AD_TELEMETRY: &[u8] = b"oxabl-cache v1 telemetry";
 pub(crate) const SIG_ENTRY: &[u8] = b"oxabl-cache v1 entry";
 pub(crate) const SIG_ROSTER: &[u8] = b"oxabl-cache v1 roster";
 pub(crate) const SIG_DICTIONARY: &[u8] = b"oxabl-cache v1 dictionary";

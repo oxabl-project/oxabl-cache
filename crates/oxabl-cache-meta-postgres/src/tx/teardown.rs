@@ -7,6 +7,7 @@ use oxabl_cache_core::{Error, Result};
 
 /// Tables holding rows of one cache, in foreign-key order.
 const CACHE_ROWS: &[&str] = &[
+    "telemetry",
     "entry_access",
     "entries",
     "dictionary_pointers",

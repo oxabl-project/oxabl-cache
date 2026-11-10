@@ -2,6 +2,7 @@
 
 mod support;
 
+mod activity;
 mod commit_retry;
 mod config;
 mod dictionary;

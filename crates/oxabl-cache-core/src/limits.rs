@@ -24,3 +24,9 @@ pub const URL_LIFETIME_SECS: i64 = 15 * 60;
 pub const LEASE_SECS: i64 = 60 * 60;
 /// Largest roster body.
 pub const ROSTER_BYTES: usize = 1024 * 1024;
+/// Telemetry reports kept per cache; older ones are dropped first.
+pub const TELEMETRY_KEEP: usize = 4_096;
+/// Seconds a telemetry report is kept.
+pub const TELEMETRY_SECS: i64 = 30 * 24 * 60 * 60;
+/// Telemetry reports per read.
+pub const TELEMETRY_PAGE: usize = 1_000;
