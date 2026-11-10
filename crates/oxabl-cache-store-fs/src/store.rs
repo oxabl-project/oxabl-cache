@@ -1,7 +1,6 @@
 //! The store handle: root directory and URL keys.
 
 use crate::error::io_error;
-use crate::head::EtagCache;
 use crate::layout::tmp_dir;
 use crate::url_signing::{UrlRejection, object_path, sign, verify};
 use crate::writer::ObjectWriter;
@@ -10,7 +9,6 @@ use oxabl_cache_core::ports::ObjectKey;
 use oxabl_cache_core::{Error, Result};
 use std::fs::{self, File};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 /// The parts of a request to the object route that its signature covers.
 #[derive(Debug, Clone, Copy)]
@@ -35,7 +33,6 @@ pub struct FsStore {
     pub(crate) root: PathBuf,
     pub(crate) public_url: String,
     pub(crate) url_keys: Vec<[u8; 32]>,
-    pub(crate) etags: Arc<EtagCache>,
 }
 
 impl FsStore {
@@ -58,7 +55,6 @@ impl FsStore {
             root,
             public_url: public_url.trim_end_matches('/').to_owned(),
             url_keys,
-            etags: Arc::default(),
         })
     }
 
@@ -78,7 +74,6 @@ impl FsStore {
             root,
             public_url: public_url.trim_end_matches('/').to_owned(),
             url_keys,
-            etags: Arc::default(),
         })
     }
 
@@ -106,7 +101,7 @@ impl FsStore {
 
     /// Starts a durable write of one object; used by the object PUT route.
     pub fn writer(&self, key: &ObjectKey) -> Result<ObjectWriter> {
-        ObjectWriter::create(&self.root, key, Arc::clone(&self.etags))
+        ObjectWriter::create(&self.root, key)
     }
 
     /// Checks the signature of an object URL the route received.
