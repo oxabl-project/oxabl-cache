@@ -1,7 +1,7 @@
 //! The filesystem store through its public API: durable writes, ranges, URLs.
 
 use oxabl_cache_core::ids::{CacheId, NodeId, PackId};
-use oxabl_cache_core::ports::{ObjectKey, ObjectStore};
+use oxabl_cache_core::ports::{ObjectHead, ObjectKey, ObjectStore};
 use oxabl_cache_core::{Conflict, Error};
 use oxabl_cache_store_fs::{FsStore, UrlRejection, UrlRequest};
 use std::path::{Path, PathBuf};
@@ -143,6 +143,82 @@ async fn ranges_check_bounds_and_the_etag_and_a_replaced_object_changes_its_etag
     assert_eq!(
         store.read_range(&missing, 0, 1, None).await,
         Err(Error::NotFound)
+    );
+}
+
+/// Writes `bytes` with the modification time pinned, as a clock too coarse to tell two writes apart would.
+fn put_at_a_standstill(
+    dir: &Scratch,
+    store: &FsStore,
+    key: &ObjectKey,
+    bytes: &[u8],
+) -> ObjectHead {
+    let mut writer = store.writer(key).expect("writer");
+    writer.write_all(bytes).expect("write");
+    let tmp = dir.0.join("objects/tmp");
+    let mut files = std::fs::read_dir(&tmp).expect("tmp");
+    let file = files
+        .next()
+        .expect("a temporary file")
+        .expect("entry")
+        .path();
+    assert!(files.next().is_none(), "one writer, one temporary file");
+    let pinned = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+    std::fs::File::options()
+        .write(true)
+        .open(file)
+        .expect("open")
+        .set_modified(pinned)
+        .expect("pin the time");
+    writer.finish(None).expect("finish")
+}
+
+#[tokio::test]
+async fn every_replace_of_the_same_size_gets_a_new_etag_whatever_the_clock() {
+    let dir = Scratch::new();
+    let store = open(&dir);
+    let key = key(CacheId::random());
+    let mut etags: Vec<String> = Vec::new();
+    for round in 0..200u8 {
+        let head = put_at_a_standstill(&dir, &store, &key, &[round; 4096]);
+        assert_eq!(
+            store.head(&key).await.expect("head").as_ref(),
+            Some(&head),
+            "a head agrees with what the write returned"
+        );
+        for older in &etags {
+            assert_ne!(older, &head.etag, "round {round} reused an ETag");
+            assert_eq!(
+                store.read_range(&key, 0, 1, Some(older)).await,
+                Err(Error::Conflict(Conflict::PackChanged)),
+                "round {round}: an older ETag still matches"
+            );
+        }
+        etags.push(head.etag);
+    }
+}
+
+#[tokio::test]
+async fn an_object_that_is_not_replaced_keeps_its_etag_across_reads_and_a_restart() {
+    let dir = Scratch::new();
+    let store = open(&dir);
+    let key = key(CacheId::random());
+    let head = store.put(&key, vec![7; 1000]).await.expect("put");
+    for _ in 0..3 {
+        store
+            .read_range(&key, 10, 20, Some(&head.etag))
+            .await
+            .expect("range");
+        assert_eq!(store.head(&key).await.expect("head"), Some(head.clone()));
+    }
+    let reopened = open(&dir);
+    assert_eq!(reopened.head(&key).await.expect("head"), Some(head.clone()));
+    let replaced = reopened.put(&key, vec![8; 1000]).await.expect("replace");
+    assert_ne!(replaced.etag, head.etag);
+    assert_eq!(
+        store.head(&key).await.expect("head"),
+        Some(replaced),
+        "another handle sees the replacement"
     );
 }
 

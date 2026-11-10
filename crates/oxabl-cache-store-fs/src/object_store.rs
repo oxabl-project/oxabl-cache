@@ -1,7 +1,7 @@
 //! The `ObjectStore` port on a directory.
 
 use crate::error::io_error;
-use crate::head::head_of;
+use crate::head::{head_of, open_with_head};
 use crate::layout::{cache_dir, object_path, pack_of_name};
 use crate::store::FsStore;
 use oxabl_cache_core::ids::CacheId;
@@ -9,8 +9,9 @@ use oxabl_cache_core::ports::{
     ObjectHead, ObjectInfo, ObjectKey, ObjectStore, SignedUrl, StoreCapabilities,
 };
 use oxabl_cache_core::{Conflict, Error, Result};
-use std::fs::{self, File};
+use std::fs;
 use std::io::{Read, Seek, SeekFrom};
+use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 async fn blocking<T: Send + 'static>(
@@ -56,7 +57,8 @@ impl ObjectStore for FsStore {
 
     async fn head(&self, key: &ObjectKey) -> Result<Option<ObjectHead>> {
         let path = object_path(&self.root, key);
-        blocking(move || match head_of(&path) {
+        let etags = Arc::clone(&self.etags);
+        blocking(move || match head_of(&etags, &path) {
             Ok(head) => Ok(Some(head)),
             Err(error) => match io_error(&error) {
                 Error::NotFound => Ok(None),
@@ -75,9 +77,9 @@ impl ObjectStore for FsStore {
     ) -> Result<Vec<u8>> {
         let path = object_path(&self.root, key);
         let if_match = if_match.map(str::to_owned);
+        let etags = Arc::clone(&self.etags);
         blocking(move || {
-            let mut file = File::open(&path).map_err(|e| io_error(&e))?;
-            let head = head_of(&path).map_err(|e| io_error(&e))?;
+            let (mut file, head) = open_with_head(&etags, &path).map_err(|e| io_error(&e))?;
             if if_match.is_some_and(|etag| etag != head.etag) {
                 return Err(Error::Conflict(Conflict::PackChanged));
             }
@@ -106,8 +108,12 @@ impl ObjectStore for FsStore {
 
     async fn delete(&self, key: &ObjectKey) -> Result<()> {
         let path = object_path(&self.root, key);
+        let etags = Arc::clone(&self.etags);
         blocking(move || match fs::remove_file(&path) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                etags.forget(&path);
+                Ok(())
+            }
             Err(error) => match io_error(&error) {
                 Error::NotFound => Ok(()),
                 other => Err(other),
