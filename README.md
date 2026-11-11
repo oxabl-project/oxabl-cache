@@ -8,9 +8,23 @@ against producer signatures.
 Runs as a single binary on local disk, or as stateless nodes on Postgres and any
 S3-compatible object store.
 
-Design: [architecture](docs/architecture.md), [security](docs/security.md),
-[protocol](docs/protocol.md), [client](docs/client.md),
-[operations](docs/operations.md), [testing](docs/testing.md), [decisions](docs/adr/), [releasing](RELEASING.md).
+## Getting started
+
+Pick your role. Each path ends with a working cache and a check that proves it.
+
+- [Operator](docs/start/operator.md): host the server and make the first tenant.
+- [Cache owner](docs/start/owner.md): make the owner identity, create the cache, pin it in the repository.
+- [CI maintainer](docs/start/ci.md): give a CI system a writing member for the main branch and a read-only one for pull requests.
+- [Developer](docs/start/developer.md): join, sign in, fetch.
+
+Then [data handling](docs/data-handling.md) (what the server can and cannot see) and
+[operations](docs/operations.md) (backup, rotation, renewing tokens, when something fails).
+
+## Design
+
+[architecture](docs/architecture.md), [security](docs/security.md), [protocol](docs/protocol.md),
+[client](docs/client.md), [testing](docs/testing.md), [decisions](docs/adr/), [releasing](RELEASING.md).
+[docs/README.md](docs/README.md) lists every page.
 
 ## Desktop app
 
