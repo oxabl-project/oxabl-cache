@@ -18,6 +18,8 @@ release-please's `cargo-workspace` plugin reads every workspace member, so:
 
 The gate fixture (`scripts/gate-fixture`), the fuzz targets (`fuzz`) and the desktop app (`desktop`) are separate workspaces with their own lock files. Each member a lock file pins has an `extra-files` entry for that file, so a release bumps it too; otherwise the lock goes stale and a `--locked` build fails. release-please parses TOML values as `{value: ...}`, so a filter compares `@.name.value`.
 
+A package that was never released sets `initial-version` (the desktop app: `0.1.0`). Without it, release-please makes its first release `1.0.0`.
+
 `scripts/check-release-graph.sh` checks all of this on every PR (CI job `dependency-gate`).
 
 ## Versions

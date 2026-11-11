@@ -141,7 +141,8 @@
           "path": "/desktop/Cargo.lock",
           "jsonpath": "$.package[?(@.name.value=='oxabl-cache-desktop')].version"
         }
-      ]
+      ],
+      "initial-version": "0.1.0"
     }
   }
 }

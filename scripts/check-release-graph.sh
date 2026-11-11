@@ -3,7 +3,8 @@
 # a member without a literal version, a member missing from the release config,
 # or a cycle among members, dev-dependencies included. Also fails when another
 # tracked Cargo.lock pins a member but the member's extra-files do not bump it:
-# that lock goes stale on the release and its --locked build fails.
+# that lock goes stale on the release and its --locked build fails. And fails when a
+# package that was never released has no initial-version: release-please would make it 1.0.0.
 # Usage: check-release-graph.sh [manifest-path] [release-please-config]
 set -euo pipefail
 
@@ -58,6 +59,15 @@ cycle="$(jq -r '
       else reduce ($graph[$n] // [])[] as $m ($seen + [$n]; reach($m; .)) end;
   [$members[] as $m | select([($graph[$m] // [])[] as $d | reach($d; [])] | add // [] | index($m)) | $m]
   | join(" ")' <<<"$metadata")"
+unreleased="$(jq -r --slurpfile manifest "$root/.release-please-manifest.json" '
+  .packages | to_entries[]
+  | select(($manifest[0][.key] // "0.0.0") == "0.0.0" and (.value["initial-version"] == null))
+  | .key' "$root/$config")"
+for package in $unreleased; do
+  echo "check-release-graph: $package was never released and has no initial-version; its first release would be 1.0.0" >&2
+  status=1
+done
+
 if [[ -n "$cycle" ]]; then
   echo "check-release-graph: these members are on a dependency cycle: $cycle" >&2
   status=1
