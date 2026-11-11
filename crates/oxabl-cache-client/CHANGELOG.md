@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0](https://github.com/oxabl-project/oxabl-cache/compare/oxabl-cache-client-v0.2.1...oxabl-cache-client-v0.3.0) (2026-11-11)
+
+
+### Features
+
+* **cli:** onboard a CI system in one command and manage tenant tokens ([1bdcfa4](https://github.com/oxabl-project/oxabl-cache/commit/1bdcfa4589bf7df685820e475e835e05c697d807))
+* **cli:** onboard a CI system in one command and manage tenant tokens ([7936a6b](https://github.com/oxabl-project/oxabl-cache/commit/7936a6b222ceafeedddb081f47ca033fdbd5cc83))
+* **desktop:** join with an access token when the organisation has no sign-in ([71c997d](https://github.com/oxabl-project/oxabl-cache/commit/71c997d79f9abcc92139fc88c928c76d1cfee21a))
+* **desktop:** Oxabl Cache for the desktop, with team telemetry, invites and the keyring ([3791edd](https://github.com/oxabl-project/oxabl-cache/commit/3791edd046d4a7036564ad0438a7114761f19a87))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * oxabl-cache-crypto bumped from 0.2.0 to 0.3.0
+    * oxabl-cache-format bumped from 0.2.0 to 0.3.0
+
 ## [0.2.1](https://github.com/oxabl-project/oxabl-cache/compare/oxabl-cache-client-v0.2.0...oxabl-cache-client-v0.2.1) (2026-11-10)
 
 

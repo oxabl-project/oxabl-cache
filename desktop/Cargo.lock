@@ -3447,7 +3447,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-client"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -3474,7 +3474,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-crypto"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "age",
  "aws-lc-rs",
@@ -3509,7 +3509,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-e2e"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
@@ -3528,7 +3528,7 @@ dependencies = [
 
 [[package]]
 name = "oxabl-cache-format"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "p256"
