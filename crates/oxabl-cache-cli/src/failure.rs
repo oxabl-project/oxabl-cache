@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use oxabl_cache_client::{OpenError, OwnerError};
+use oxabl_cache_client::{OpenError, OwnerError, TenantError};
 
 pub const EXIT_REFUSED: u8 = 1;
 pub const EXIT_USAGE: u8 = 2;
@@ -54,6 +54,16 @@ impl From<OwnerError> for Failure {
         match error {
             OwnerError::Open(open) => open.into(),
             OwnerError::Invalid(_) => Self::usage(error),
+            other => Self::refused(other),
+        }
+    }
+}
+
+impl From<TenantError> for Failure {
+    fn from(error: TenantError) -> Self {
+        match error {
+            TenantError::Open(open) => open.into(),
+            TenantError::Invalid(_) => Self::usage(error),
             other => Self::refused(other),
         }
     }

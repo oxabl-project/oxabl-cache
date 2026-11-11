@@ -3,11 +3,11 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
 use nix::sys::termios::{self, LocalFlags, SetArg, Termios};
-use oxabl_cache_client::SecretString;
+use oxabl_cache_client::{ExposeSecret, SecretString};
 use zeroize::Zeroizing;
 
 use crate::failure::Failure;
@@ -69,6 +69,48 @@ pub fn read_token_file(path: &Path) -> Result<SecretString, Failure> {
         )));
     }
     Ok(SecretString::from(token.to_owned()))
+}
+
+/// Writes `secret` and a newline to a new file of mode 0600, creating missing parent directories
+/// with mode 0700. An existing file is refused, never overwritten.
+pub fn write_new_secret_file(path: &Path, secret: &SecretString) -> Result<(), Failure> {
+    let unwritable = |why: String| Failure::refused(format!("{}: {why}", path.display()));
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(parent)
+            .map_err(|e| unwritable(e.to_string()))?;
+    }
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::AlreadyExists => {
+                unwritable("exists; a secret file is never overwritten".to_owned())
+            }
+            _ => unwritable(e.to_string()),
+        })?;
+    writeln!(file, "{}", secret.expose_secret())
+        .and_then(|()| file.sync_all())
+        .map_err(|e| {
+            let _ = std::fs::remove_file(path);
+            unwritable(e.to_string())
+        })
+}
+
+/// Refuses a path that exists, for a secret file that is about to be created.
+pub fn ensure_absent(path: &Path) -> Result<(), Failure> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Err(Failure::refused(format!(
+            "{} exists; a secret file is never overwritten",
+            path.display()
+        ))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(Failure::refused(format!("{}: {e}", path.display()))),
+    }
 }
 
 /// Whether a controlling terminal can be prompted.

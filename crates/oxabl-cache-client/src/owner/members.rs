@@ -25,6 +25,19 @@ pub(super) fn entry(label: &str, role: Role, descriptor: &str) -> Result<MemberE
 }
 
 impl Owner {
+    /// Checks what `add_member` checks before it signs, without publishing: the role, the label
+    /// and that no member holds the label yet.
+    pub fn check_new_member(&self, label: &str, role: Role) -> Result<(), OwnerError> {
+        if role == Role::Owner {
+            return Err(OwnerError::Invalid("owners are added with add_owner"));
+        }
+        check_label(label)?;
+        if self.roster().members.iter().any(|m| m.label == label) {
+            return Err(OwnerError::Invalid("a member with this label exists"));
+        }
+        Ok(())
+    }
+
     /// Adds a `ci`, `developer` or `reader` member in the same epoch: roster `v + 1` with the
     /// root key wrapped to the new recipient set as well.
     pub async fn add_member(

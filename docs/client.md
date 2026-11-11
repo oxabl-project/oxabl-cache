@@ -202,7 +202,11 @@ need:
 - `Owner::open(config)` opens the cache as an owner whose signing key the repository pins, and
   `add_member`, `remove_member`, `rotate`, `add_owner` and `remove_owner` publish the next roster
   (signed, checked against the pins, sent as `current + 1`), returning `Published`. `init(request)`
-  publishes the first roster.
+  publishes the first roster. `Owner::check_new_member(label, role)` runs the checks of
+  `add_member` that need no signature and publishes nothing.
+- `TenantAdmin::open(&config, token)` checks that `token` is a `tenant:admin` token of the
+  tenant the repository pins. `create_token(&NewToken)`, `list_tokens` and `revoke_token(id)`
+  then call `/v1/tenant/tokens`. The secret of a new token is in `CreatedToken` only.
 - `DeviceLogin::new(&config, issuer, client_id)` with `begin` and `finish`, and `logout(&config)`,
   for the device grant and the stored session.
 - `create_identity_file`, `open_identity_file`, `write_identity_secret`, `default_identity_path`,
@@ -566,6 +570,9 @@ establish what it needs fails; it never reports success for nothing.
 | `owner remove <label\|ed25519:key> [--purge]` | Remove an owner and start a new epoch (below). |
 | `login --issuer <url> --client-id <id>`, `logout` | Device-flow OIDC session for humans (below). |
 | `invite --name <n> [--issuer <url> --client-id <id>]` | Print a one-line invite to the repository's cache for the desktop app (above). Without `--issuer` and `--client-id`, people join with an access token. |
+| `token create --admin-token-file <f> --scopes <s,…> --name <n> --out <file> [--expires-in-days N]` | Create an API token for this repository's cache (or for the tenant, with only `tenant:admin`) and write its secret to a new mode 0600 file. Never prints the secret. |
+| `token list --admin-token-file <f>`, `token revoke <id> --admin-token-file <f>` | List the tenant's tokens without secrets, or revoke one at once. |
+| `onboard ci --name <label> [--role ci\|reader] [--expires-in-days N] --admin-token-file <f> --out <dir>` | Connect a CI system in one step (below). |
 | `identity remember`, `identity forget` | Put the identity file's passphrase in the operating system's keyring, after checking that it unlocks the file, or remove it. |
 | `status` | Mode, principal, roster, epoch, quota, or why the cache is off, and the last five failures from the failure log (`recent_errors` in `--json`, newest first, each `{at, operation, kind, message}`), whether the cache is on or off. |
 | `dict train --outputs <dir> [--publish]` | Train a 112 KiB dictionary from sampled outputs, report the ratio gain, and publish it as `ci` when the gain is at least 1.3x. |
@@ -593,6 +600,46 @@ at creation, so the owner's key exists before the cache does:
 `init` refuses a cache that has a roster, and the server refuses a roster whose signature is
 not by a registered owner key.
 
+### Connecting a CI system
+
+`onboard ci` is for a person who owns the cache and holds a `tenant:admin` token. The owner
+identity and the owner's token (with `cache:admin`) come from the global flags. The
+`--admin-token-file` flag names the `tenant:admin` token.
+
+The command does these steps in this order:
+
+1. It checks the inputs and changes nothing. The owner passphrase must unlock the owner
+   identity. The identity must be an owner of the roster. The owner's token must carry
+   `cache:admin` on the cache. The label must be new. The administrator token must carry
+   `tenant:admin` for the tenant of the repository. Neither output file may exist.
+2. It creates a token for this cache only. Role `ci` gets `read` and `write:trusted`. Role
+   `reader` gets `read`. The command asks the server for the scopes of the new token and stops
+   if they differ from these.
+3. It writes the token to `<dir>/OXABL_CACHE_TOKEN`, and a new identity (identity string, no
+   passphrase) to `<dir>/OXABL_CACHE_IDENTITY`. Both files get mode 0600 and the command
+   refuses an existing file. The command creates a missing `<dir>` with mode 0700.
+4. It adds the identity to the roster with the role, signed by the owner.
+
+The roster changes last. If a step before it fails, the command revokes the token, removes the
+files and says so. The roster is then unchanged, and no new epoch is needed. If the server
+refuses the roster change, the command does the same. If the command gets no clear answer to
+the roster change, it reads the roster again. When the roster holds the member, it keeps the
+token and the files, which are valid, and exits 1. When the roster does not hold the member, it
+undoes the steps. When the command cannot read the roster, it undoes nothing and prints what to
+check (`oxabl-cache status`) and how to undo (`token revoke <id>`, and delete the files). If the
+process stops between step 2 and step 4, a token named `<label>` stays in `token list`: revoke
+it.
+
+The command prints the two secret names for the CI system, the file for each, and one check
+line. The command never prints a secret. The CI maintainer stores each file as a secret of the
+CI system with the name `OXABL_CACHE_IDENTITY` or `OXABL_CACHE_TOKEN`, and deletes the files.
+The check runs in a checkout of the repository with both secrets in the environment:
+
+```
+oxabl-cache --mode ci status        # role ci
+oxabl-cache --mode read-only status # role reader
+```
+
 ### Secrets
 
 A secret comes from a file named by a flag, from the environment variable the library reads for
@@ -613,8 +660,9 @@ A secret file is a regular file of at most 4 KiB with no group or other permissi
 else is a usage error. No flag takes a secret as its value: the flags that name secrets end in
 `-file`, and a secret in the arguments is an unknown argument (exit 2). A command prints no
 passphrase, token, session or identity string, in text or JSON, nor in an error, and a secret
-from the environment is never logged; `identity new --secret-out` is the only way an identity
-string leaves the process, into a mode 0600 file.
+from the environment is never logged; `identity new --secret-out` and `onboard ci` are the only
+ways an identity string leaves the process, and `token create` and `onboard ci` the only ways a
+token does, each into a new mode 0600 file.
 
 ### Owners
 

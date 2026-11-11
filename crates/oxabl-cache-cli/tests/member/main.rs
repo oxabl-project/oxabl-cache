@@ -11,6 +11,7 @@ mod flow;
 mod invite;
 mod keyring;
 mod login;
+mod onboard;
 mod owners;
 mod roster_guards;
 mod secrets;
