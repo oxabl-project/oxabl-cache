@@ -229,10 +229,24 @@ and a client still fetches and verifies.
 3. **Keep the server's key files** in a secret manager: `url_key_file` and `claim_hash_key_file`. The
    claim-hash key cannot be rotated without re-entering every trust policy, so a restore without it
    loses them.
-4. **Restore on the spare host.** Put the metadata copy where `[metadata] url` points, the packs where
-   `[store] root` points, and the two key files where `[keys]` points. Use the production
-   configuration with other listen addresses. Start it with `serve`.
-5. **Check it.** Every line must match:
+4. **Restore on the spare host.** Put the metadata copy where `[metadata] url` points and the two
+   key files where `[keys]` points. Use the production configuration with other listen addresses,
+   and save it as `drill.toml`. Then restore the packs:
+
+   **Warning: never run `serve` on a restored copy against the live bucket.** `serve` starts
+   garbage collection, the orphan scan and compaction, and no setting turns them off. The copy's
+   metadata is older than the live metadata, so it can delete packs that the live server still
+   uses.
+
+   - **Local disk.** Put the copy of the objects directory where `[store] root` points. The drill
+     then touches only its own copies, and `serve` is safe.
+   - **S3.** Pick one:
+     - *A copy of the bucket.* Copy the live bucket to a drill bucket first. Point `[store]` in
+       `drill.toml` at the drill bucket, with credentials that cannot reach the live one. Then
+       `serve` is safe, and you run every check below.
+     - *No `serve`.* Leave `[store]` on the live bucket and run only `check-store` and `scrub`
+       (step 5). Do not start `serve`.
+5. **Check it.** With `serve` on a local disk or a bucket copy, every line must match:
 
    ```sh
    oxabl-cache-admin health
@@ -254,6 +268,22 @@ and a client still fetches and verifies.
    `scrub` prints one line per cache. A non-zero `corrupt_segments` means a pack is damaged or
    missing: restore that pack from its copy. `verify` signs in with a real token and fetches real
    entries, so it proves tokens, roster and packs work together.
+
+   Against the live bucket, run only these two commands. Neither starts the garbage collection or
+   the orphan scan:
+
+   ```sh
+   oxabl-cache-server --config drill.toml check-store
+   oxabl-cache-server --config drill.toml scrub
+   ```
+
+   `check-store` runs the store's startup probe and prints its capabilities (`kind`,
+   `if_none_match`, `checksum_sha256`). The probe writes a few small objects under `probe/`, outside
+   every cache, and deletes them again. `scrub` reads every pack of each cache and changes only the
+   copy's metadata. A pack that the live server wrote after the backup is not in the copy, so
+   `scrub` does not check it. A pack that the live server has since removed shows as corrupt in the
+   copy: that is not damage. This variant proves the copy opens and that its packs exist and match.
+   It does not prove tokens or fetches: use a bucket copy for those.
 6. **Stop the spare server** and delete its copy of the data.
 
 A real restore replaces `meta.db` on the live host while the server is stopped (above). After it:
@@ -264,8 +294,9 @@ A real restore replaces `meta.db` on the live host while the server is stopped (
 - A newer database than the bucket leaves entries that name missing packs. They give misses, never
   wrong hits (see "Restore semantics" above).
 
-For Postgres, restore a base backup and its WAL to a spare instance, point a spare server at it and
-the bucket, and run the same checks.
+For Postgres, restore a base backup and its WAL to a spare instance and point a spare server at it.
+The store is S3, so the warning in step 4 applies: use a copy of the bucket, or run only
+`check-store` and `scrub`.
 
 ## Members, keys and tokens
 
