@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/oxabl-project/oxabl-cache/compare/oxabl-cache-format-v0.2.0...oxabl-cache-format-v0.3.0) (2026-11-11)
+
+
+### Features
+
+* **crypto:** sealed telemetry reports under the epoch's telemetry key ([cf60350](https://github.com/oxabl-project/oxabl-cache/commit/cf60350e11856f716b62b11ca31e4800ea58deff))
+* **desktop:** Oxabl Cache for the desktop, with team telemetry, invites and the keyring ([3791edd](https://github.com/oxabl-project/oxabl-cache/commit/3791edd046d4a7036564ad0438a7114761f19a87))
+
 ## [0.2.0](https://github.com/oxabl-project/oxabl-cache/compare/oxabl-cache-format-v0.1.0...oxabl-cache-format-v0.2.0) (2026-11-04)
 
 
