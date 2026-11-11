@@ -105,8 +105,9 @@ fn the_last_numbers_show_at_once_and_a_lost_server_is_said_plainly() {
     person.joined(&[&cache.invite]);
 
     let mut first = Window::open(&person.paths);
-    first.wait_until("the size of the cache", |w| {
-        w.has(&format!("{}-size", cache.id))
+    // The snapshot is saved when the whole refresh ends, after the size shows.
+    first.wait_until("the size of the cache, and the refresh to finish", |w| {
+        w.has(&format!("{}-size", cache.id)) && w.shows("Updated ")
     });
     let size = first.text_of(&format!("{}-size", cache.id)).expect("size");
     drop(first);
