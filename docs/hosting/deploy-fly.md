@@ -61,3 +61,6 @@ Set them in the environment, or copy `deploy/fly/deploy.env.example` to `deploy/
   reaches the server; a scanner that reports another open port (for example RDP) gets no answer from it.
 - Clients download packs from R2 directly, so pack downloads do not show in `fly logs`.
 - The readiness check is `GET /readyz` on the metrics port (database and store).
+- Fly writes secret files with a mode that lets other users read them, and `fly.toml` cannot change it. So the server warns at
+  start that the S3 secret key and the claim key are `readable by other users`. The machine runs only the
+  server, as root, so no other user can read them; the warning is expected here.

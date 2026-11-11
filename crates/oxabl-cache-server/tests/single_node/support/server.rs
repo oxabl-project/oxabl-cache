@@ -26,6 +26,8 @@ pub struct Options {
     pub metadata_url: Option<String>,
     /// Freezes the server's clock at the moment it starts.
     pub frozen_clock: bool,
+    /// Configures a claim hash key file, `claim.key`, which `init` creates.
+    pub claim_key: bool,
 }
 
 impl Default for Options {
@@ -40,6 +42,7 @@ impl Default for Options {
             tls: false,
             metadata_url: None,
             frozen_clock: false,
+            claim_key: false,
         }
     }
 }
@@ -63,12 +66,17 @@ const BIN: &str = env!("CARGO_BIN_EXE_oxabl-cache-server");
 fn config_text(dir: &Path, metadata_url: &str, objects: &Objects, options: &Options) -> String {
     let store = objects.section(dir);
     let dir = dir.display();
+    let claim = if options.claim_key {
+        format!("claim_hash_key_file = \"{dir}/claim.key\"\n")
+    } else {
+        String::new()
+    };
     format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nadmin_listen = \"127.0.0.1:0\"\n\
          metrics_listen = \"127.0.0.1:0\"\nurl_lifetime = \"{}\"\nshutdown_timeout = \"{}\"\n\
          [metadata]\nurl = \"{metadata_url}\"\n\
          {store}\
-         [keys]\nurl_key_file = \"{dir}/url.key\"\n\
+         [keys]\nurl_key_file = \"{dir}/url.key\"\n{claim}\
          [gc]\ngrace = \"{}\"\nlease = \"{}\"\ninterval = \"{}\"\n{}\n",
         options.url_lifetime,
         options.shutdown_timeout,

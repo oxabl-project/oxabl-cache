@@ -143,8 +143,10 @@ still opens human sessions.
 - `allowed_private_ranges` takes CIDR blocks or single addresses.
 
 The URL key may list two keys during rotation; both are accepted and the first signs.
-The server warns at start (`readable by other users; chmod 600 it`) when the URL key file can be read by anyone
-but its owner and the process's own group: mode 0440 with the process's group, as a Kubernetes Secret volume
+The server warns at start (`<file> is readable by other users; chmod 600 it`) for each secret file it reads that
+anyone but its owner and the process's own group can read: the TLS key, the Postgres password file, the store's
+secret (the URL key of a local-disk store, the secret key of an S3 store; an S3 store does not read the URL
+key) and the claim-hash key. Mode 0440 with the process's group, as a Kubernetes Secret volume
 with `fsGroup` has, passes; any other group, world or group-write bit warns. The
 0440-with-a-foreign-group case is not covered by a test yet (testing.md).
 The claim-hash key is stable: rotating it means re-entering trust policies.

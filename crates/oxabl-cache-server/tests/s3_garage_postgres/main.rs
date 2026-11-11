@@ -33,6 +33,8 @@ mod roster_rules;
 mod round_trip;
 #[path = "../single_node/scopes.rs"]
 mod scopes;
+#[path = "../single_node/secret_modes.rs"]
+mod secret_modes;
 #[path = "../single_node/teardown.rs"]
 mod teardown;
 

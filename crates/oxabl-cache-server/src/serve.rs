@@ -20,13 +20,15 @@ async fn bind(name: &str, addr: std::net::SocketAddr) -> Result<TcpListener, Str
 /// Runs the server until SIGTERM or SIGINT, then drains and flushes.
 pub(crate) async fn run(config: Config) -> Result<(), String> {
     log::set_level(config.log_level);
-    keys::check_permissions(&config.url_key_file, |message| {
-        emit(
-            Level::Warn,
-            "config",
-            vec![("message", Value::from(message))],
-        );
-    });
+    for path in keys::secret_files(&config) {
+        keys::check_permissions(path, |message| {
+            emit(
+                Level::Warn,
+                "config",
+                vec![("message", Value::from(message))],
+            );
+        });
+    }
     let acceptor = match &config.transport {
         Transport::Tls { cert, key } => Some(tls::acceptor(cert, key)?),
         Transport::Plaintext => None,
