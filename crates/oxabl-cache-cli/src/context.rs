@@ -110,7 +110,7 @@ impl Context {
 
     /// The identity: the named file, else the identity string in `OXABL_CACHE_IDENTITY`, else
     /// the default identity file.
-    fn identity_source(&self) -> Result<IdentitySource, Failure> {
+    pub fn identity_source(&self) -> Result<IdentitySource, Failure> {
         let from_environment =
             std::env::var_os("OXABL_CACHE_IDENTITY").is_some_and(|v| !v.is_empty());
         if self.identity_file.is_none() && from_environment {

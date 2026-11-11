@@ -56,6 +56,14 @@ pub enum RoleArg {
     Reader,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+pub enum CiSystemRole {
+    /// Reads and writes trusted entries.
+    Ci,
+    /// Reads trusted entries and never writes.
+    Reader,
+}
+
 #[derive(Subcommand)]
 pub enum Command {
     /// Create and inspect member identities.
@@ -75,6 +83,12 @@ pub enum Command {
     /// Change the owners of the roster.
     #[command(subcommand)]
     Owner(OwnerCommand),
+    /// Create, list and revoke the tenant's API tokens; needs a tenant:admin token.
+    #[command(subcommand)]
+    Token(TokenCommand),
+    /// Set up a system that is not a person, as one step.
+    #[command(subcommand)]
+    Onboard(OnboardCommand),
     /// Print a one-line invite that lets a person join this cache from the desktop app.
     Invite(InviteArgs),
     /// Log in with a device code and store a session.
@@ -150,6 +164,68 @@ pub enum MemberCommand {
         #[arg(long)]
         purge: bool,
     },
+}
+
+#[derive(Subcommand)]
+pub enum TokenCommand {
+    /// Create a token and write its secret to a file; the secret is never printed.
+    Create {
+        /// A file holding a tenant:admin token of the cache's tenant.
+        #[arg(long, value_name = "PATH")]
+        admin_token_file: PathBuf,
+        /// What the token may do, separated by commas: read, write:personal, write:trusted,
+        /// cache:admin or tenant:admin. Cache scopes apply to this repository's cache only.
+        #[arg(long, value_delimiter = ',', required = true)]
+        scopes: Vec<String>,
+        /// A label for the token list.
+        #[arg(long)]
+        name: String,
+        /// Where the secret goes; the file must not exist and gets mode 0600.
+        #[arg(long, value_name = "PATH")]
+        out: PathBuf,
+        /// The lifetime; default and longest: set by the server.
+        #[arg(long, value_name = "N")]
+        expires_in_days: Option<u32>,
+    },
+    /// List the tenant's tokens, revoked ones included.
+    List {
+        /// A file holding a tenant:admin token of the cache's tenant.
+        #[arg(long, value_name = "PATH")]
+        admin_token_file: PathBuf,
+    },
+    /// Revoke a token at once.
+    Revoke {
+        /// The token id from `token create` or `token list`.
+        id: String,
+        /// A file holding a tenant:admin token of the cache's tenant.
+        #[arg(long, value_name = "PATH")]
+        admin_token_file: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum OnboardCommand {
+    /// Give a CI system its own identity, its place in the roster and a token for this cache.
+    Ci(OnboardCiArgs),
+}
+
+#[derive(Args)]
+pub struct OnboardCiArgs {
+    /// The system's label in the roster and in the token list.
+    #[arg(long)]
+    pub name: String,
+    #[arg(long, value_enum, default_value = "ci")]
+    pub role: CiSystemRole,
+    /// The token's lifetime; default and longest: set by the server.
+    #[arg(long, value_name = "N")]
+    pub expires_in_days: Option<u32>,
+    /// A file holding a tenant:admin token of the cache's tenant.
+    #[arg(long, value_name = "PATH")]
+    pub admin_token_file: PathBuf,
+    /// The directory for the two secret files, OXABL_CACHE_IDENTITY and OXABL_CACHE_TOKEN; they
+    /// must not exist and get mode 0600.
+    #[arg(long, value_name = "DIR")]
+    pub out: PathBuf,
 }
 
 #[derive(Subcommand)]

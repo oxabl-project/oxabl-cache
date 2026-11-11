@@ -31,6 +31,7 @@ mod state;
 mod stats;
 mod status;
 mod store;
+mod tenant;
 
 pub use activity::{Activity, ActivityKind, ActivitySummary};
 pub use artifact_path::{ArtifactPath, PathError};
@@ -67,3 +68,4 @@ pub use state::default_state_dir;
 pub use stats::Stats;
 pub use status::{Quota, ServerStatus, Status};
 pub use store::{ArtifactFileRef, StoreFailure, StoreOutcome, StoreReport, Uploader};
+pub use tenant::{CreatedToken, NewToken, TenantAdmin, TenantError, TokenGrant, TokenInfo};

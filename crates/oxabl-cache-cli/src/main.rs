@@ -11,7 +11,7 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-use cli::{Cli, Command, DictCommand, IdentityCommand};
+use cli::{Cli, Command, DictCommand, IdentityCommand, OnboardCommand};
 use context::Context;
 use failure::{EXIT_USAGE, Failure};
 
@@ -27,6 +27,8 @@ async fn run(cli: Cli) -> Result<(), Failure> {
         Command::Member(command) => commands::member::run(&context, command).await,
         Command::Rotate { purge } => commands::member::rotate(&context, purge).await,
         Command::Owner(command) => commands::owner::run(&context, command).await,
+        Command::Token(command) => commands::token::run(&context, command).await,
+        Command::Onboard(OnboardCommand::Ci(args)) => commands::onboard::ci(&context, args).await,
         Command::Invite(args) => commands::invite::run(&context, args),
         Command::Login(args) => commands::login::run(&context, args).await,
         Command::Logout => commands::login::run_logout(&context).await,
