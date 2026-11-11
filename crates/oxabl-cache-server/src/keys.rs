@@ -1,5 +1,6 @@
 //! Secrets read from files named in the configuration, never from its text.
 
+use crate::config::{Config, Metadata, StoreConfig, Transport};
 use nix::unistd::{Gid, getegid, getgroups};
 use oxabl_cache_core::domain::claim_key::ClaimKey;
 use std::fs;
@@ -45,6 +46,28 @@ fn exposed(mode: u32, group: u32) -> bool {
 fn runs_in(group: u32) -> bool {
     let group = Gid::from_raw(group);
     getegid() == group || getgroups().is_ok_and(|groups| groups.contains(&group))
+}
+
+/// The secret files this configuration makes the server read. The URL key is read only by a
+/// local-disk store; an S3 store's provider signs its URLs.
+pub(crate) fn secret_files(config: &Config) -> Vec<&Path> {
+    let mut files = Vec::new();
+    if let Transport::Tls { key, .. } = &config.transport {
+        files.push(key.as_path());
+    }
+    if let Metadata::Postgres {
+        password_file: Some(path),
+        ..
+    } = &config.metadata
+    {
+        files.push(path.as_path());
+    }
+    match &config.store {
+        StoreConfig::Fs { .. } => files.push(config.url_key_file.as_path()),
+        StoreConfig::S3(s3) => files.push(s3.secret_access_key_file.as_path()),
+    }
+    files.extend(config.claim_hash_key_file.as_deref());
+    files
 }
 
 /// Warns through `warn` when a secret file can be read by users other than the process's own.
