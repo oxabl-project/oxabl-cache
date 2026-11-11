@@ -49,8 +49,21 @@ Copy the identity passphrase that the app offers into your password manager.
 3. **Get a credential.** Use one of two ways:
 
    - **An access token.** The tenant administrator makes a token with the scopes `read` and
-     `write:personal` for the cache (owner.md, "Roles and scopes"; ci.md, step 3 shows the call) and
-     sends it to you. Save it in a file of mode 0600. A token lives 90 days by default.
+     `write:personal` for the cache (owner.md, "Roles and scopes"), in a checkout of the repository,
+     and sends the file to you:
+
+     ```sh
+     oxabl-cache token create --admin-token-file acme-admin.token \
+       --scopes read,write:personal --name alice --out alice.token
+     id          v61jgwx6msc2wbja
+     name        alice
+     scopes      read, write:personal
+     expires at  unix time 1802179930
+     token file  alice.token
+     ```
+
+     The file has mode 0600 and holds the secret, which the command never prints. A token lives 90
+     days by default.
    - **A sign-in.** If your administrator registered your identity provider (below), run `login`:
 
      ```sh
@@ -116,7 +129,14 @@ your token. You lose access at once, and the cache turns cold once for everyone
 ## For the administrator: sign-in setup
 
 Sign-in needs three calls, once per tenant and once per person, by a tenant administrator
-(protocol.md, "Tenant administration"). They use the header file from ci.md, step 3:
+(protocol.md, "Tenant administration"). They have no command yet, so they use `curl` with a header
+file that holds the administrator's token:
+
+```sh
+( umask 077; printf 'Authorization: Bearer %s\n' "$(cat acme-admin.token)" > acme-admin.hdr )
+```
+
+Then:
 
 ```sh
 # once: the identity provider

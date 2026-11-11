@@ -65,7 +65,8 @@ curl -sS -H @acme-admin.hdr -H 'content-type: application/json' \
 `owner_keys` takes the 64-character hex key. The display name is yours to choose, and the operator sees
 it. The same request again returns 200 with the same id.
 
-Then make the owner's token. It holds `read` and `cache:admin` for this one cache. The secret appears
+Then make the owner's token. It holds `read` and `cache:admin` for this one cache. The cache is not
+pinned in a repository yet, so `oxabl-cache token create` cannot run: use the call. The secret appears
 once, so write it to a file:
 
 ```sh
@@ -80,7 +81,8 @@ once, so write it to a file:
 ```
 
 Always name the cache in `caches`. A token lives 90 days by default and one year at most. Mint a new
-token before it expires (operations.md, "Renewing tokens").
+token before it expires (operations.md, "Renewing tokens"). Once `.oxabl/cache.toml` exists,
+every later token comes from `oxabl-cache token create`.
 
 ## 3. Publish the first roster and pin the cache
 
@@ -188,7 +190,8 @@ the operator and the storage provider cannot. data-handling.md lists what each p
 
 ## Next
 
-- Add [CI](ci.md) and [developers](developer.md). Each is `member add` plus a token.
+- Add [CI](ci.md) with one command (`oxabl-cache onboard ci`), and [developers](developer.md) with
+  `member add` plus a token.
 - Rotate and remove members: operations.md, "Rotating a member".
 - Train a compression dictionary after the first full build: `oxabl-cache dict train`
   (client.md, "Verification and dictionaries").

@@ -14,7 +14,7 @@ Pick your role. Each path ends with a working cache and a check that proves it.
 
 - [Operator](docs/start/operator.md): host the server and make the first tenant.
 - [Cache owner](docs/start/owner.md): make the owner identity, create the cache, pin it in the repository.
-- [CI maintainer](docs/start/ci.md): give a CI system a writing member for the main branch and a read-only one for pull requests.
+- [CI maintainer](docs/start/ci.md): one command gives a CI system a writing member for the main branch and a read-only one for pull requests.
 - [Developer](docs/start/developer.md): join, sign in, fetch.
 
 Then [data handling](docs/data-handling.md) (what the server can and cannot see) and

@@ -8,7 +8,7 @@ Start with the path for your role. Each one ends with a working cache and a chec
 | --- | --- |
 | [start/operator.md](start/operator.md) | Install and host the server, make the first tenant and its administrator token. |
 | [start/owner.md](start/owner.md) | Make and protect the owner identity, create the cache and its first roster, pin it in the repository, add an offline second owner key. |
-| [start/ci.md](start/ci.md) | Add a CI system: identities, tokens, which secrets go where, the writing member versus the read-only one, a first fetch. |
+| [start/ci.md](start/ci.md) | Add a CI system with one command: the writing member versus the read-only one, which secrets go where, a first fetch. Also the steps for an owner and a tenant administrator who are different people. |
 | [start/developer.md](start/developer.md) | Join a cache from the desktop app or the command line, sign in, make a first fetch. |
 
 ## Using and running a cache

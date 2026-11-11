@@ -321,19 +321,20 @@ Do this when a person leaves, or when a CI identity may have leaked.
    removed member who also steals the bucket could read old entries (data-handling.md).
 2. Commit the new `min_roster_version` in `.oxabl/cache.toml`. Until you raise the pin, a client that
    holds no local state (a CI runner) accepts an older roster.
-3. Revoke the member's tokens. The tenant administrator lists them, then deletes by id. A deleted
-   token answers 401 on its next call:
+3. Revoke the member's tokens. The tenant administrator lists them in a checkout of the repository,
+   then revokes by id. A revoked token answers 401 on its next call:
 
    ```sh
-   curl -sS -H @acme-admin.hdr https://cache.example.com/v1/tenant/tokens | jq -c '.tokens[] | {id,name,expires_at,revoked_at}'
-   curl -sS -X DELETE -H @acme-admin.hdr https://cache.example.com/v1/tenant/tokens/<id>
+   oxabl-cache token list --admin-token-file acme-admin.token
+   oxabl-cache token revoke <id> --admin-token-file acme-admin.token
+   revoked <id>
    ```
 
    A person who signed in with an identity provider also has a user. `DELETE /v1/tenant/users/<id>`
    revokes their sessions (protocol.md, "Tenant administration").
-4. For a `ci` member, also make a new identity, add it, make its token, replace both secrets in the CI
-   system and revoke the old token (ci.md). A `ci` key that leaked signs entries clients accept, until
-   the roster drops it.
+4. For a `ci` member, make a new one with `oxabl-cache onboard ci` under a new label, replace both
+   secrets in the CI system and revoke the old token (ci.md). A `ci` key that leaked signs entries
+   clients accept, until the roster drops it.
 5. Expect a cold cache. Lookup ids change with the epoch, so the next fill job rewrites everything and
    each developer fetches once more.
 
@@ -367,19 +368,31 @@ can draw one and report `miss         corrupt: 1`. That is a stale entry, not da
 ### Renewing tokens
 
 A token expires. The default life is 90 days, and the longest is one year. Renew before the date. The
-tenant administrator reads every expiry:
+tenant administrator reads every expiry in a checkout of the repository. Revoked tokens show too:
 
 ```sh
-curl -sS -H @acme-admin.hdr https://cache.example.com/v1/tenant/tokens | jq -r '.tokens[] | [.name, .expires_at] | @tsv'
+oxabl-cache token list --admin-token-file acme-admin.token
+9edjcs70bby4q8p8             ci-main                  expires at unix time 1802179891
+  c_6v2k9q3m8x1r4t7w0y5z2b8n4d: read, write:trusted
+v61jgwx6msc2wbja             alice                    revoked at unix time 1794403944
+  c_6v2k9q3m8x1r4t7w0y5z2b8n4d: read, write:personal
 ```
 
-`expires_at` is unix seconds. To renew one token:
+The time is unix seconds. To renew one token:
 
-1. Make a new token with the same name, scopes and caches (ci.md, step 3).
+1. Make a new token with the same name and scopes. The secret goes to a new file of mode 0600:
+
+   ```sh
+   oxabl-cache token create --admin-token-file acme-admin.token \
+     --scopes read,write:trusted --name ci-main --out ci-main.token
+   ```
+
+   A CI system made with `onboard ci` has an identity as well. The identity does not expire, so
+   replace only the token.
 2. Replace the secret where the old one lived: the CI secret store, the developer's token file, the
    owner's token file.
 3. Run `oxabl-cache status` with the new secret and check that the cache is `on`.
-4. Revoke the old token (`DELETE /v1/tenant/tokens/<id>`).
+4. Revoke the old token: `oxabl-cache token revoke <id> --admin-token-file acme-admin.token`.
 
 Other credentials:
 
@@ -660,7 +673,7 @@ The protocol's error table lists every status and code (protocol.md, "Error enve
 | `server.listen <addr> is not a loopback address: configure [tls] cert_file and key_file, or set tls.terminated_upstream = true` | A public bind without TLS. | Add `[tls]`, or set `terminated_upstream = true` behind a proxy. |
 | `cannot bind server.listen <addr>: Address already in use` | Another process holds the port, or a second server runs. | Stop it, or change the address. The same message names `admin_listen` and `metrics_listen`. |
 | `unknown field ... expected url_key_file` | A secret written inline in the configuration. | Use the `*_file` key, with a file of mode 0600. |
-| `<file> is readable by other users; chmod 600 it` (warning at start) | The URL key file has group or other bits. | `chmod 600` it. |
+| `<file> is readable by other users; chmod 600 it` (warning at start) | A secret file the server reads (the TLS key, the Postgres password, the store's secret, the claim-hash key) has group or other bits. | `chmod 600` it. On Fly the warning is expected (deploy-fly.md, "Notes"). |
 | `an operator token already exists; init mints the first one only` | `init` ran twice. | Use the token you stored, or mint another with `operator-token create`. |
 | `database schema version N is newer than this release knows` | An older binary meets a database that a newer release wrote. | Run the newer release, or restore a database backup from before the upgrade. |
 | `bad request: <file> already exists` (from `backup`) | The target exists. | Name the file by date. |
