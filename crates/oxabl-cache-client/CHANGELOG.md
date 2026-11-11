@@ -1,5 +1,7 @@
 # Changelog
 
+## [0.3.1](https://github.com/oxabl-project/oxabl-cache/compare/oxabl-cache-client-v0.3.0...oxabl-cache-client-v0.3.1) (2026-11-11)
+
 ## [0.3.0](https://github.com/oxabl-project/oxabl-cache/compare/oxabl-cache-client-v0.2.1...oxabl-cache-client-v0.3.0) (2026-11-11)
 
 
