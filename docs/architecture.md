@@ -64,7 +64,7 @@ ADR: [0001](adr/0001-hexagonal-core.md).
 | Entry | `(cache, namespace, lookup_id) → sealed record`, plus the ids of the segment and dictionary it names, its epoch and sizes. Immutable once committed. | ids and sizes |
 | Segment | One sealed, compressed artifact set (kind `artifact`) or a compression dictionary (kind `dictionary`), named by the BLAKE3 hash of its sealed bytes. Lives at `(pack, offset, length)`. A segment is **live** if and only if `dead_since IS NULL`. | id, kind, size, location |
 | Pack | An immutable object of 5 to 32 MiB holding segments back to back, with a plaintext footer index of segment ids and offsets. State `pending`, `live` or `deleting`. Committed exactly once. | id, size, live bytes, ETag |
-| Roster | Signed, versioned list of the cache's members and their public keys, plus the cache root key wrapped to those members. Opaque to the server except its version. | version |
+| Roster | Signed, versioned list of the cache's members and their public keys, plus the cache root key wrapped to those members. The server reads its version, the member labels, roles and public keys, and not the keyring. | version, labels, roles, public keys |
 | Epoch | Generation of the cache root key. Rotation starts a new epoch, and lookup ids change with it. A new cache starts at epoch 0 and roster version 0, meaning "no roster yet". The first roster is version 1 with epoch 1. | number |
 | Usage | Append-only ledger rows: tenant, cache, day, metric, value. | yes |
 | Quota | Per tenant and per cache: live bytes (soft and hard), a stored-bytes ceiling, monthly egress bytes, request rate. | yes |

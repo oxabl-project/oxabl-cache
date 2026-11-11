@@ -44,7 +44,9 @@ publish.
   primary plus streaming replica on Hetzner nodes. A tenant is pinned to a region by
   being created through that region's admin endpoint.
 - **Upgrades.** Rolling. A release's migrations are additive, so the previous release
-  keeps working during the rollout. Destructive schema steps ship one release later.
+  keeps working during the rollout. Destructive schema steps ship one release later. A server
+  refuses a database that a newer release wrote ("database schema version N is newer than this
+  release knows"), so roll back the binary together with a database backup, never alone.
 
 ## Configuration
 
@@ -203,7 +205,231 @@ Subcommands:
 - **Customer keys** are never backed up by the operator. Customers must keep at least
   two owner identities (for example one offline). If every owner identity is lost,
   the roster can no longer change: create a new cache, set new `owner_keys`, and
-  start cold.
+  start cold ("Losing an owner key", below).
+
+### Restore drill
+
+Run the drill every month on a spare host, and never on the live data. A backup that has never been
+opened is not a backup. The drill proves three things: the copy opens, the packs match the metadata,
+and a client still fetches and verifies.
+
+1. **Back up the metadata.** The live server keeps serving. Name each file by date: an existing
+   target is refused.
+
+   ```sh
+   oxabl-cache-server --config /etc/oxabl-cache/server.toml backup --to /backups/meta-2026-11-11.db
+   {"backup":"/backups/meta-2026-11-11.db"}
+   ```
+
+   Copy the file off the host. On Fly, daily volume snapshots add a second copy of the volume, but
+   keep the `backup` job: a snapshot you never opened has the same problem.
+2. **Back up the packs.** Local disk: `rsync -a /var/lib/oxabl-cache/objects/ /backups/objects/`,
+   without `--delete`. S3: rely on the provider's durability, and turn on versioning if you want to
+   undo a deletion.
+3. **Keep the server's key files** in a secret manager: `url_key_file` and `claim_hash_key_file`. The
+   claim-hash key cannot be rotated without re-entering every trust policy, so a restore without it
+   loses them.
+4. **Restore on the spare host.** Put the metadata copy where `[metadata] url` points and the two
+   key files where `[keys]` points. Use the production configuration with other listen addresses,
+   and save it as `drill.toml`. Then restore the packs:
+
+   **Warning: never run `serve` on a restored copy against the live bucket.** `serve` starts
+   garbage collection, the orphan scan and compaction, and no setting turns them off. The copy's
+   metadata is older than the live metadata, so it can delete packs that the live server still
+   uses.
+
+   - **Local disk.** Put the copy of the objects directory where `[store] root` points. The drill
+     then touches only its own copies, and `serve` is safe.
+   - **S3.** Pick one:
+     - *A copy of the bucket.* Copy the live bucket to a drill bucket first. Point `[store]` in
+       `drill.toml` at the drill bucket, with credentials that cannot reach the live one. Then
+       `serve` is safe, and you run every check below.
+     - *No `serve`.* Leave `[store]` on the live bucket and run only `check-store` and `scrub`
+       (step 5). Do not start `serve`.
+5. **Check it.** With `serve` on a local disk or a bucket copy, every line must match:
+
+   ```sh
+   oxabl-cache-admin health
+   metadata   ok
+   store      ok
+   gc_leader  true
+
+   oxabl-cache-admin tenant list          # the tenants you expect
+
+   oxabl-cache-server --config drill.toml scrub
+   {"cache":"c_6v2k9q3m8x1r4t7w0y5z2b8n4d","corrupt_segments":0,"entries_removed":0}
+
+   OXABL_CACHE_SERVER=https://drill.example.com oxabl-cache verify --sample 20
+   sampled      20
+   verified     20
+   not trusted  0
+   ```
+
+   `scrub` prints one line per cache. A non-zero `corrupt_segments` means a pack is damaged or
+   missing: restore that pack from its copy. `verify` signs in with a real token and fetches real
+   entries, so it proves tokens, roster and packs work together.
+
+   Against the live bucket, run only these two commands. Neither starts the garbage collection or
+   the orphan scan:
+
+   ```sh
+   oxabl-cache-server --config drill.toml check-store
+   oxabl-cache-server --config drill.toml scrub
+   ```
+
+   `check-store` runs the store's startup probe and prints its capabilities (`kind`,
+   `if_none_match`, `checksum_sha256`). The probe writes a few small objects under `probe/`, outside
+   every cache, and deletes them again. `scrub` reads every pack of each cache and changes only the
+   copy's metadata. A pack that the live server wrote after the backup is not in the copy, so
+   `scrub` does not check it. A pack that the live server has since removed shows as corrupt in the
+   copy: that is not damage. This variant proves the copy opens and that its packs exist and match.
+   It does not prove tokens or fetches: use a bucket copy for those.
+6. **Stop the spare server** and delete its copy of the data.
+
+A real restore replaces `meta.db` on the live host while the server is stopped (above). After it:
+
+- Revocations made since the backup are undone. Revoke those tokens again.
+- A roster older than the `min_roster_version` in the repository makes clients refuse the cache. The
+  owner publishes new roster versions (for example with `rotate`) until it is above the pin.
+- A newer database than the bucket leaves entries that name missing packs. They give misses, never
+  wrong hits (see "Restore semantics" above).
+
+For Postgres, restore a base backup and its WAL to a spare instance and point a spare server at it.
+The store is S3, so the warning in step 4 applies: use a copy of the bucket, or run only
+`check-store` and `scrub`.
+
+## Members, keys and tokens
+
+All of these are owner or tenant administrator actions. The server never holds a key. Owner commands
+need a token with `cache:admin`; token commands need `tenant:admin`.
+
+### Rotating a member
+
+Do this when a person leaves, or when a CI identity may have leaked.
+
+1. Remove the member. The owner signs a roster without them in a new epoch:
+
+   ```sh
+   oxabl-cache --token-file owner.token member remove alice
+   published roster v6 at epoch 2
+   set in .oxabl/cache.toml:
+   min_roster_version = 6
+   then revoke the departed member's tokens and sessions on the server
+   ```
+
+   Add `--purge` to mark every entry of an older epoch dead. That closes the window in which a
+   removed member who also steals the bucket could read old entries (data-handling.md).
+2. Commit the new `min_roster_version` in `.oxabl/cache.toml`. Until you raise the pin, a client that
+   holds no local state (a CI runner) accepts an older roster.
+3. Revoke the member's tokens. The tenant administrator lists them in a checkout of the repository,
+   then revokes by id. A revoked token answers 401 on its next call:
+
+   ```sh
+   oxabl-cache token list --admin-token-file acme-admin.token
+   oxabl-cache token revoke <id> --admin-token-file acme-admin.token
+   revoked <id>
+   ```
+
+   A person who signed in with an identity provider also has a user. `DELETE /v1/tenant/users/<id>`
+   revokes their sessions (protocol.md, "Tenant administration").
+4. For a `ci` member, make a new one with `oxabl-cache onboard ci` under a new label, replace both
+   secrets in the CI system and revoke the old token (ci.md). A `ci` key that leaked signs entries
+   clients accept, until the roster drops it.
+5. Expect a cold cache. Lookup ids change with the epoch, so the next fill job rewrites everything and
+   each developer fetches once more.
+
+**Check.** The removed member's identity can no longer open the cache, and the others can:
+
+```sh
+oxabl-cache --token-file alice.token status          # as alice, with a token that is still valid
+cache  off
+reason  the identity is not in the roster
+```
+
+### Rotating the epoch
+
+`rotate` starts a new epoch for the same members. Use it when a key may have leaked but nobody
+left, or after a restore (above):
+
+```sh
+oxabl-cache --token-file owner.token rotate --purge
+published roster v7 at epoch 3
+set in .oxabl/cache.toml:
+min_roster_version = 7
+then revoke the departed member's tokens and sessions on the server
+purged 1 entries of older epochs
+```
+
+The output repeats the hint about a departed member. A rotation removes nobody, so skip it. Commit
+the new `min_roster_version`. The cache is cold until the next fill job. Until it runs, every fetch misses.
+Without `--purge`, entries of older epochs stay until retention removes them, and `verify --sample`
+can draw one and report `miss         corrupt: 1`. That is a stale entry, not damage.
+
+### Renewing tokens
+
+A token expires. The default life is 90 days, and the longest is one year. Renew before the date. The
+tenant administrator reads every expiry in a checkout of the repository. Revoked tokens show too:
+
+```sh
+oxabl-cache token list --admin-token-file acme-admin.token
+9edjcs70bby4q8p8             ci-main                  expires at unix time 1802179891
+  c_6v2k9q3m8x1r4t7w0y5z2b8n4d: read, write:trusted
+v61jgwx6msc2wbja             alice                    revoked at unix time 1794403944
+  c_6v2k9q3m8x1r4t7w0y5z2b8n4d: read, write:personal
+```
+
+The time is unix seconds. To renew one token:
+
+1. Make a new token with the same name and scopes. The secret goes to a new file of mode 0600:
+
+   ```sh
+   oxabl-cache token create --admin-token-file acme-admin.token \
+     --scopes read,write:trusted --name ci-main --out ci-main.token
+   ```
+
+   A CI system made with `onboard ci` has an identity as well. The identity does not expire, so
+   replace only the token.
+2. Replace the secret where the old one lived: the CI secret store, the developer's token file, the
+   owner's token file.
+3. Run `oxabl-cache status` with the new secret and check that the cache is `on`.
+4. Revoke the old token: `oxabl-cache token revoke <id> --admin-token-file acme-admin.token`.
+
+Other credentials:
+
+- **Tenant administrator token:** `oxabl-cache-admin token create --tenant <t> --expires 30d`, then
+  revoke the old one as above.
+- **Operator token:** `oxabl-cache-admin operator-token create`, then `operator-token revoke <id>`.
+  The server refuses to revoke the last valid operator token, and `init` never mints another, so
+  always create the new token first.
+- **Sign-in sessions** need no renewal: `oxabl-cache login` makes a new one (12 hours).
+- **Identities** do not expire.
+
+### Losing an owner key
+
+- **You have another owner key.** The other owner removes the lost key. This starts a new epoch, so
+  the cache turns cold once:
+
+  ```sh
+  oxabl-cache --token-file owner.token --identity-file /media/offline/identity \
+    owner remove <label of the lost owner> --purge
+  published roster v8 at epoch 4
+  set in .oxabl/cache.toml:
+  owner_keys = ["ed25519:rM09A6LI2gBy8TBi+6s8EnXIISlRCXUXa0Bjpic0fuU"]
+  min_roster_version = 8
+  and register the keys on the server, as the tenant administrator:
+  PUT /v1/tenant/caches/c_6v2k9q3m8x1r4t7w0y5z2b8n4d/owner-keys {"owner_keys":["accd3d03…"]}
+  purged 0 entries of older epochs
+  ```
+
+  Then register the key list on the server with the printed call, commit the new
+  `.oxabl/cache.toml`, and add a new second owner key (owner.md, step 4). A branch whose committed
+  file pins only the removed key rejects every new roster and builds without the cache until that
+  file is updated there. `status` says why. This fails closed.
+- **A key leaked.** Do the same, and do it at once. Revoke the owner's tokens too.
+- **Every owner key is lost.** The roster can no longer change, and nobody can restore it. Make a new
+  cache: a new owner identity, `POST /v1/tenant/caches` with its key, `init`, new
+  `.oxabl/cache.toml`, and add every member again. Delete the old cache with
+  `DELETE /v1/tenant/caches/<c>` once the new one works. The new cache starts cold.
 
 ## Observability
 
@@ -386,3 +612,71 @@ retrains after a toolchain or schema change (a full rebuild).
 A dictionary stays live while the pointer or any entry names it. It dies when both
 have moved on, or after the grace if it was never referenced. Its pack is then
 swept or compacted like any other.
+
+## When something fails
+
+Find the message, read the cause, apply the fix. The client prints one line on stderr and exits 1
+(refused or failed) or 2 (usage or configuration). `oxabl-cache status` also shows why a cache is off
+and the last five failures. A build never fails because of the cache: it compiles what it could not
+fetch.
+
+### Credentials and files
+
+| You see | Cause | Fix |
+| --- | --- | --- |
+| `no identity at <path>: create one with oxabl-cache identity new or pass --identity-file` | No identity file, and `OXABL_CACHE_IDENTITY` is not set. | Run `identity new`, or set the variable (CI), or pass `--identity-file`. |
+| `no terminal to ask the passphrase on: pass --passphrase-file or set OXABL_CACHE_IDENTITY_PASSPHRASE` | An identity file needs its passphrase, and the job has no terminal. | In a job, use the identity string in `OXABL_CACHE_IDENTITY`. Elsewhere, pass `--passphrase-file`. |
+| `identity: cannot unlock the identity file` | The passphrase is wrong. Often it belongs to another identity file, such as the owner's against a CI file. | Use the passphrase of the file you pass. Passphrases cannot be recovered. |
+| `<file>: readable by group or others; chmod 600 it` | A secret file has group or other permission bits. | `chmod 600` the file. |
+| `invalid input: not a member descriptor` | The descriptor is cut off. The real one is about 130 characters. | Copy all of it. |
+| `no credentials: set OXABL_CACHE_TOKEN or log in` | No token, no ID token and no stored session. | Set `OXABL_CACHE_TOKEN`, pass `--token-file`, or run `login`. |
+| `the cache server refused the credentials` | The token is wrong, expired or revoked, or the session ended. | Renew it ("Renewing tokens"), or run `login` again. |
+| `the cache does not exist or is not granted` | The cache id in `.oxabl/cache.toml` is wrong, or the token holds no grant on that cache. | Check the id. Make a token that names the cache. |
+| `the cache server is unreachable` | The server is down, the `server` URL is wrong, or the network or TLS failed. | `curl -i <server>/v1/health` answers 204 when it is up. For a private CA, pass `--ca-file`. |
+| `the server URL must be https, or http on a loopback address` | `server` is plain `http` for a non-loopback host. | Use `https`. |
+
+### The repository's pins and the roster
+
+| You see | Cause | Fix |
+| --- | --- | --- |
+| `no .oxabl/cache.toml here or above: run in the repository or pass --repo` | The command ran outside the repository. | `cd` into it, or pass `--repo`. |
+| `OXABL_CACHE_CACHE cannot override a trust field of .oxabl/cache.toml` | `OXABL_CACHE_TENANT`, `_CACHE`, `_OWNER_KEYS` or `_MIN_ROSTER_VERSION` is set. | Unset it. Only the committed file sets these. |
+| `invalid cache configuration: owner_keys holds ed25519: and unpadded base64` | An owner key has padding, a missing prefix or the URL-safe alphabet. | Copy the key as the command printed it. |
+| `roster: no valid signature by a pinned owner key` | No key in `owner_keys` signed the roster. A key was replaced or removed, or the pin is wrong. | Fix `owner_keys` in the file on that branch (see "Losing an owner key"). |
+| `roster: version is below the pinned minimum or the high-water mark` | The server's roster is older than `min_roster_version`. The database may have been restored from an old backup, or a server withholds the newer roster. | After a restore, publish new roster versions (`rotate`). Otherwise investigate the server. Never lower the pin to silence it. |
+| `the cache has no roster yet` | The owner has not run `init`. | Run `init` (owner.md, step 3). |
+| `the identity is not in the roster` | The owner has not added you, or has removed you. | Send your descriptor to an owner. |
+| `the identity is not a ci member of the roster` | The job runs in `ci` mode with a `developer` or `reader` identity. | Use the `ci` identity, or set `OXABL_CACHE_MODE=read-only`. |
+| `the cache already has a roster` | `init` ran twice. | Use `member add`. |
+| `the identity is not an owner of the roster, or its signing key is not in owner_keys` | A member command ran with an identity that is not an owner. | Use the owner's identity. |
+| `the server refused the credential: publishing a roster needs cache:admin` | The token lacks `cache:admin`. | Make a token with `read` and `cache:admin`. |
+| `another roster was published first; repeat the change` | Two owners changed the roster at once. | Run the command again. |
+
+### Reads and writes
+
+| You see | Cause | Fix |
+| --- | --- | --- |
+| `not stored: failed: rejected` | The token lacks the scope for the namespace: `write:trusted` for `ci`, `write:personal` for a developer. | Make a token with the right scope. Role and scope must agree. |
+| Every fetch misses (`miss: notfound`) | The cache is cold: a rotation, a change of schema, toolchain or compile key, or retention removed unused entries. | Run the fill job on the protected branch. |
+| `sampled 0`, exit 1 | `verify` found no trusted entry. | Run the fill job, then verify again. |
+| `miss         corrupt: 1` in `verify` | The sample drew an entry of an older epoch, or a damaged pack. | `rotate --purge`, or wait for the fill job. If it persists, run `scrub` on the server. |
+| `403 quota_exceeded` in a server log, misses in the client | The tenant's monthly egress quota is spent. | Raise it with `tenant quota`. |
+| `429 rate_limited` | The tenant's request rate is spent. | Retry, or raise `--rate` and `--burst`. |
+| `503 unavailable` | The metadata store or the object store is down. | Check `/readyz` on the metrics listener. |
+
+The protocol's error table lists every status and code (protocol.md, "Error envelope").
+
+### The server and the admin command
+
+| You see | Cause | Fix |
+| --- | --- | --- |
+| `server.listen <addr> is not a loopback address: configure [tls] cert_file and key_file, or set tls.terminated_upstream = true` | A public bind without TLS. | Add `[tls]`, or set `terminated_upstream = true` behind a proxy. |
+| `cannot bind server.listen <addr>: Address already in use` | Another process holds the port, or a second server runs. | Stop it, or change the address. The same message names `admin_listen` and `metrics_listen`. |
+| `unknown field ... expected url_key_file` | A secret written inline in the configuration. | Use the `*_file` key, with a file of mode 0600. |
+| `<file> is readable by other users; chmod 600 it` (warning at start) | A secret file the server reads (the TLS key, the Postgres password, the store's secret, the claim-hash key) has group or other bits. | `chmod 600` it. On Fly the warning is expected (deploy-fly.md, "Notes"). |
+| `an operator token already exists; init mints the first one only` | `init` ran twice. | Use the token you stored, or mint another with `operator-token create`. |
+| `database schema version N is newer than this release knows` | An older binary meets a database that a newer release wrote. | Run the newer release, or restore a database backup from before the upgrade. |
+| `bad request: <file> already exists` (from `backup`) | The target exists. | Name the file by date. |
+| `oxabl-cache-admin: unauthenticated` (exit 1) | The operator token is wrong, expired or revoked. | Use a valid token file. |
+| `oxabl-cache-admin: server unreachable` (exit 3) | Wrong `--server`, or the admin listener (loopback by default) is out of reach. | Run it on the host, or through a tunnel. |
+| `/readyz` answers 503 | The database or the object store failed its 2 s probe. The body names which. | Fix that dependency. The server recovers on its own. |
