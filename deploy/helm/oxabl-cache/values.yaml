@@ -1,5 +1,6 @@
 # cluster: stateless replicas on Postgres and an S3-compatible bucket.
-# single-node: one replica with SQLite and the object store on a PersistentVolumeClaim.
+# single-node: one replica with the object store on a PersistentVolumeClaim, and SQLite on the
+# same claim, or Postgres when metadata.postgres.url is set.
 mode: cluster
 
 replicaCount: 2
@@ -30,6 +31,7 @@ keys:
   claimKeyKey: claim-key
 
 # The Postgres connection always uses TLS. Without caSecret the server trusts the web roots.
+# Required in cluster mode; optional in single-node mode, where it replaces SQLite.
 metadata:
   postgres:
     url: ""

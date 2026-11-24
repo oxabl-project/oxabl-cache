@@ -47,6 +47,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- eq .Values.mode "single-node" -}}
 {{- end -}}
 
+{{/* "true" when the metadata lives in Postgres: always in cluster mode, and in single-node mode when metadata.postgres.url is set. */}}
+{{- define "oxabl-cache.postgres" -}}
+{{- if or (ne .Values.mode "single-node") .Values.metadata.postgres.url -}}true{{- end -}}
+{{- end -}}
+
 {{- define "oxabl-cache.replicas" -}}
 {{- if eq .Values.mode "single-node" -}}1{{- else -}}{{- .Values.replicaCount -}}{{- end -}}
 {{- end -}}
@@ -62,6 +67,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if eq $v.mode "cluster" -}}
 {{- if not $v.metadata.postgres.url -}}{{- fail "metadata.postgres.url is required in cluster mode" -}}{{- end -}}
 {{- if not $v.metadata.postgres.passwordSecret.name -}}{{- fail "metadata.postgres.passwordSecret.name is required in cluster mode" -}}{{- end -}}
+{{- else if and $v.metadata.postgres.url (not $v.metadata.postgres.passwordSecret.name) -}}
+{{- fail "metadata.postgres.passwordSecret.name is required when metadata.postgres.url is set" -}}
+{{- end -}}
+{{- if eq $v.mode "cluster" -}}
 {{- with $v.store.s3 -}}
 {{- if not (and .endpoint .region .bucket .credentialsSecret.name) -}}{{- fail "store.s3 needs endpoint, region, bucket and credentialsSecret.name in cluster mode" -}}{{- end -}}
 {{- end -}}

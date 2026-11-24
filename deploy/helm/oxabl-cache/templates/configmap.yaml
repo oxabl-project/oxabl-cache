@@ -1,6 +1,7 @@
 {{- include "oxabl-cache.validate" . -}}
 {{- $single := eq .Values.mode "single-node" -}}
 {{- $secrets := "/run/secrets/oxabl-cache" -}}
+{{- $postgres := eq (include "oxabl-cache.postgres" .) "true" -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -30,7 +31,7 @@ data:
     {{- end }}
 
     [metadata]
-    {{- if $single }}
+    {{- if not $postgres }}
     url = "sqlite:///var/lib/oxabl-cache/meta.db"
     {{- else }}
     url = {{ .Values.metadata.postgres.url | quote }}

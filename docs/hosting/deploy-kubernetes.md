@@ -6,7 +6,7 @@ The chart renders no Secret: it names the Secrets you create, and mounts their f
 | Mode | Replicas | Metadata | Bytes | Workload |
 | --- | --- | --- | --- | --- |
 | `cluster` (default) | 2 or more, HPA on CPU | Postgres | S3-compatible bucket | Deployment, rolling update, `PodDisruptionBudget` `minAvailable: 1` |
-| `single-node` | 1 | SQLite on a PVC | local directory on the same PVC | Deployment with `Recreate`, PVC kept on uninstall |
+| `single-node` | 1 | SQLite on a PVC, or Postgres when `metadata.postgres.url` is set | local directory on the PVC | Deployment with `Recreate`, PVC kept on uninstall |
 
 Postgres connections always use TLS: set `metadata.postgres.caSecret` when the database uses a private CA
 (CloudNativePG does), otherwise the server trusts the web roots. There are no CronJobs: garbage collection and compaction run in the pods under a
@@ -59,6 +59,15 @@ Single node, SQLite and local objects on a 20 Gi PVC:
 ```sh
 helm install oxabl-cache deploy/helm/oxabl-cache -n oxabl-cache \
   -f deploy/helm/oxabl-cache/examples/single-node.yaml --set image.tag=<tag>
+```
+
+Single node with the metadata in Postgres and the packs on the PVC. The packs need no backup: a lost volume is a
+cold cache that CI refills, and entries that name a missing pack are misses, never wrong hits. Back up the database
+as usual; it holds the tenants, tokens and rosters:
+
+```sh
+helm install oxabl-cache deploy/helm/oxabl-cache -n oxabl-cache \
+  -f deploy/helm/oxabl-cache/examples/single-node-postgres.yaml --set image.tag=<tag>
 ```
 
 Cluster mode, on an in-cluster S3 store (Ceph RGW, Garage) and a CloudNativePG cluster:
@@ -125,7 +134,7 @@ to go NotReady without restarting, then Ready again once the directory is back.
 - **Metrics and alerts:** scrape `-metrics:9090`; the series and suggested alerts are in operations.md,
   "Observability".
 - **Backups:** Postgres base backups and WAL archiving (CloudNativePG does this to a bucket), as in operations.md.
-  In single-node mode, snapshot the PVC.
+  In single-node mode on SQLite, snapshot the PVC; with Postgres, back up the database and treat the PVC as cache.
 - **Uninstall:** `helm uninstall` keeps the PVC. Delete it yourself when the data is not needed.
 
 ## Checks the repository runs

@@ -1,0 +1,37 @@
+# One replica; the object store on a PersistentVolumeClaim and the metadata in Postgres.
+# For a team whose packs are disposable (a lost volume is a cold cache that CI refills) but whose
+# metadata (tenants, tokens, rosters) is backed up with the rest of its Postgres databases.
+# For a CloudNativePG cluster named oxabl-cache-pg, the operator creates the Secrets
+# oxabl-cache-pg-app (username, password) and oxabl-cache-pg-ca (ca.crt).
+mode: single-node
+
+image:
+  tag: main
+
+publicUrl: https://cache.example.com
+
+keys:
+  existingSecret: oxabl-cache-keys
+
+metadata:
+  postgres:
+    url: postgres://app@oxabl-cache-pg-rw.oxabl-cache.svc:5432/app
+    passwordSecret:
+      name: oxabl-cache-pg-app
+      key: password
+    caSecret:
+      name: oxabl-cache-pg-ca
+      key: ca.crt
+
+persistence:
+  size: 100Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - cache.example.com
+  tls:
+    - secretName: cache-example-com-tls
+      hosts:
+        - cache.example.com
