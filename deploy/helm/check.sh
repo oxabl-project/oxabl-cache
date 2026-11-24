@@ -39,4 +39,20 @@ fi
 if helm template check "$chart" -f "$chart/examples/single-node.yaml" --set publicUrl= >/dev/null 2>&1; then
   fail "a chart without publicUrl rendered"
 fi
+sn_pg="$(helm template check "$chart" -f "$chart/examples/single-node-postgres.yaml")"
+printf '%s\n' "$sn_pg" | grep -q 'url = "postgres://' || fail "single-node-postgres: metadata is not Postgres"
+printf '%s\n' "$sn_pg" | grep -q 'kind = "fs"' || fail "single-node-postgres: store is not the PVC"
+printf '%s\n' "$sn_pg" | grep -q 'path: db-password' || fail "single-node-postgres: the database password is not mounted"
+if printf '%s\n' "$sn_pg" | grep -q 's3-access-key-id'; then
+  fail "single-node-postgres mounts S3 credentials"
+fi
+sn="$(helm template check "$chart" -f "$chart/examples/single-node.yaml")"
+printf '%s\n' "$sn" | grep -q 'url = "sqlite://' || fail "single-node: metadata is not SQLite"
+if printf '%s\n' "$sn" | grep -q 'db-password'; then
+  fail "single-node mounts a database password"
+fi
+if helm template check "$chart" -f "$chart/examples/single-node-postgres.yaml" \
+    --set metadata.postgres.passwordSecret.name= >/dev/null 2>&1; then
+  fail "single-node with a Postgres URL and no password Secret rendered"
+fi
 echo "helm checks: ok"

@@ -1,5 +1,6 @@
 {{- $single := eq .Values.mode "single-node" -}}
 {{- $secrets := "/run/secrets/oxabl-cache" -}}
+{{- $postgres := eq (include "oxabl-cache.postgres" .) "true" -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -141,7 +142,7 @@ spec:
                     - key: tls.key
                       path: tls.key
               {{- end }}
-              {{- if not $single }}
+              {{- if $postgres }}
               - secret:
                   name: {{ .Values.metadata.postgres.passwordSecret.name }}
                   items:
@@ -156,6 +157,8 @@ spec:
                       path: db-ca.pem
               {{- end }}
               {{- end }}
+              {{- end }}
+              {{- if not $single }}
               - secret:
                   name: {{ .Values.store.s3.credentialsSecret.name }}
                   items:
